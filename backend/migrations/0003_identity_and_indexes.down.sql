@@ -1,0 +1,17 @@
+DROP INDEX IF EXISTS sync_conflict_open_idx;
+DROP INDEX IF EXISTS sync_conflict_run_idx;
+DROP INDEX IF EXISTS sync_run_latest_commit_idx;
+DROP INDEX IF EXISTS list_option_category_idx;
+DROP INDEX IF EXISTS debrief_sale_signed_date_idx;
+DROP INDEX IF EXISTS debrief_created_by_idx;
+DROP INDEX IF EXISTS debrief_appointment_id_idx;
+DROP INDEX IF EXISTS debrief_crm_lead_id_idx;
+DROP INDEX IF EXISTS debrief_appointment_setter_idx;
+DROP INDEX IF EXISTS debrief_sales_rep_idx;
+DROP INDEX IF EXISTS debrief_appointment_date_idx;
+DROP INDEX IF EXISTS appointment_record_id_idx;
+DROP INDEX IF EXISTS appointment_debrief_status_idx;
+DROP INDEX IF EXISTS appointment_crm_lead_id_idx;
+DROP INDEX IF EXISTS appointment_appointment_date_idx;
+ALTER TABLE appointment DROP CONSTRAINT IF EXISTS appointment_identity_uniq;
+ALTER TABLE appointment DROP COLUMN IF EXISTS identity_key;

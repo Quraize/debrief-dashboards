@@ -1,0 +1,265 @@
+{
+  "name": "Appointment",
+  "type": "object",
+  "properties": {
+    "crm_lead_id": {
+      "type": "string",
+      "title": "CRM Lead ID / JobProgress ID"
+    },
+    "crm_job_id": {
+      "type": "string",
+      "title": "CRM Job ID"
+    },
+    "appointment_record_id": {
+      "type": "string",
+      "title": "Appointment Record ID"
+    },
+    "customer_name": {
+      "type": "string",
+      "title": "Customer / Job Name"
+    },
+    "contact_name": {
+      "type": "string",
+      "title": "Contact Name"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+    },
+    "address": {
+      "type": "string",
+      "title": "Address"
+    },
+    "city": {
+      "type": "string",
+      "title": "City"
+    },
+    "county": {
+      "type": "string",
+      "title": "County"
+    },
+    "lead_created_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Lead Created Date"
+    },
+    "appointment_set_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Appointment Set Date"
+    },
+    "appointment_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Appointment Date"
+    },
+    "appointment_time": {
+      "type": "string",
+      "title": "Appointment Time"
+    },
+    "demo_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Demo Date"
+    },
+    "reset_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Reset Date"
+    },
+    "sale_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Sale Date"
+    },
+    "owner_status_update_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Owner Status Update Date"
+    },
+    "owner_follow_up_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Owner Follow-Up Date"
+    },
+    "original_appointment_setter": {
+      "type": "string",
+      "title": "Original Appointment Setter"
+    },
+    "rehash_appointment_setter": {
+      "type": "string",
+      "title": "Rehash / Follow-Up Appointment Setter"
+    },
+    "original_sales_rep": {
+      "type": "string",
+      "title": "Original Sales Rep"
+    },
+    "rehash_sales_rep": {
+      "type": "string",
+      "title": "Rehash Sales Rep"
+    },
+    "marketing_source": {
+      "type": "string",
+      "title": "Marketing Source"
+    },
+    "referral_source": {
+      "type": "string",
+      "title": "Referral Source"
+    },
+    "source_category": {
+      "type": "string",
+      "title": "Source Category"
+    },
+    "campaign": {
+      "type": "string",
+      "title": "Campaign"
+    },
+    "product": {
+      "type": "string",
+      "title": "Division"
+    },
+    "business_division": {
+      "type": "string",
+      "title": "Business Division",
+      "description": "Insurance for insurance records; blank for retail/commercial"
+    },
+    "trade": {
+      "type": "string",
+      "title": "Trade",
+      "description": "Insurance trade: Roofing, Siding, Gutters, Windows, Doors, Chimney, Masonry, Other"
+    },
+    "title": {
+      "type": "string",
+      "title": "Appointment Title"
+    },
+    "appointment_status": {
+      "type": "string",
+      "title": "Appointment Status",
+      "default": "Set"
+    },
+    "debrief_status": {
+      "type": "string",
+      "title": "Debrief Status",
+      "default": "Missing"
+    },
+    "is_sales_appointment": {
+      "type": "boolean",
+      "title": "Sales Appointment?",
+      "default": true
+    },
+    "exclusion_reason": {
+      "type": "string",
+      "title": "Exclusion Reason"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "customer_name"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "appointment_setter"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "outside_sales_rep"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "view_only"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "user"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "appointment_setter"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "outside_sales_rep"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "view_only"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "user"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "name": "ListOption",
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "title": "Category"
+    },
+    "value": {
+      "type": "string",
+      "title": "Value"
+    },
+    "active": {
+      "type": "boolean",
+      "title": "Active",
+      "default": true
+    }
+  },
+  "required": [
+    "category",
+    "value"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "appointment_setter"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "outside_sales_rep"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "view_only"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "user"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    }
+  }
+}

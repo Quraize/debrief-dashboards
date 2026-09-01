@@ -1,4 +1,4 @@
-# Base44 Project
+# Debrief and Dashboards
 
 > **Note:** this app is migrating off Base44 onto a self-hosted stack — see
 > `MIGRATION_PLAN.md` for the architecture and status, and **`DEPLOYMENT.md`

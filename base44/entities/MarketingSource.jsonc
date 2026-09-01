@@ -1,0 +1,56 @@
+{
+  "name": "MarketingSource",
+  "type": "object",
+  "properties": {
+    "raw_source": {
+      "type": "string",
+      "title": "Raw Source"
+    },
+    "standard_source": {
+      "type": "string",
+      "title": "Standard Source"
+    },
+    "source_category": {
+      "type": "string",
+      "title": "Source Category"
+    },
+    "campaign": {
+      "type": "string",
+      "title": "Campaign"
+    },
+    "active": {
+      "type": "boolean",
+      "title": "Active?",
+      "default": true
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "standard_source"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

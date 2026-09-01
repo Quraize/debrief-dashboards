@@ -1,0 +1,171 @@
+# Production stack — one VPS, three services (MIGRATION_PLAN.md §10.2):
+#
+#           :443/:80
+#              │
+#          ┌───▼───┐        ┌─────────┐        ┌──────────┐
+#          │  web  │──/api──▶ backend │────────▶ postgres │
+#          │ Caddy │        │ Node 22 │        │ pg16+vec │
+#          └───────┘        └─────────┘        └──────────┘
+#            web net          web+db nets         db net (internal)
+#
+# Run from the repo root:
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production <cmd>
+# or use deploy/deploy.sh, which passes those flags for you.
+#
+# Migrations NEVER run on container boot (§10.5). They are the explicit step:
+#   deploy.sh migrate
+#
+# Postgres is never reachable from outside the host: the `db` network is
+# internal, and the lone published port binds to 127.0.0.1 solely so the host
+# cron can run scripts/backup.sh with a matching pg_dump.
+
+name: allied
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  postgres:
+    # pgvector baked in (§2.2). Pinned by minor version — never :latest on a DB.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-allied}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD}
+      # Deterministic collation: a locale change between image versions can
+      # silently corrupt text index ordering.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+      ALLIED_OWNER_PASSWORD: ${ALLIED_OWNER_PASSWORD:?set ALLIED_OWNER_PASSWORD}
+      ALLIED_APP_PASSWORD: ${ALLIED_APP_PASSWORD:?set ALLIED_APP_PASSWORD}
+      ALLIED_JOBS_PASSWORD: ${ALLIED_JOBS_PASSWORD:?set ALLIED_JOBS_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../backend/scripts/bootstrap-roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./init/15-bootstrap-prod.sh:/docker-entrypoint-initdb.d/15-bootstrap-prod.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-allied}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=1GB          # ~25% of a 4GB box (§10.2 sizing)
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - wal_level=replica           # required for WAL archiving / PITR
+      - -c
+      - log_min_duration_statement=1000
+    networks: [db]
+    <<: *logging
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: allied-backend:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0            # inside the container; never published to a host port
+      PORT: "3000"
+      DATABASE_URL_APP: postgres://allied_app:${ALLIED_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+      DATABASE_URL_JOBS: postgres://allied_jobs:${ALLIED_JOBS_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+      # Deliberately NO owner-role DATABASE_URL here: the request path holds
+      # the least privilege it can. Only the migrate/tools services get it.
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      UPLOAD_DIR: /data/uploads
+      LEAP_API_TOKEN: ${LEAP_API_TOKEN:-}
+      LEAP_RATE_LIMIT: ${LEAP_RATE_LIMIT:-55}
+      SYNC_SCHEDULE_ENABLED: ${SYNC_SCHEDULE_ENABLED:-false}
+      SYNC_SCHEDULE_CRON: ${SYNC_SCHEDULE_CRON:-0 11,16,20,23 * * *}
+      SYNC_TIMEOUT_MS: ${SYNC_TIMEOUT_MS:-600000}
+      SYNC_SHUTDOWN_TIMEOUT_MS: ${SYNC_SHUTDOWN_TIMEOUT_MS:-20000}
+      GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [web, db]
+    <<: *logging
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    image: allied-web:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS, e.g. sales.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - caddy_data:/data      # certificates — losing this re-issues them
+      - caddy_config:/config
+    depends_on: [backend]
+    networks: [web]
+    <<: *logging
+
+  # ── Operational one-offs (never started by `up`) ─────────────────────────
+  # The gated migration step (§10.5: never on boot, never automatic):
+  #   deploy.sh migrate
+  migrate:
+    profiles: [tools]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: allied-backend:${TAG:-latest}
+    command: ["node", "dist/db/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://allied_owner:${ALLIED_OWNER_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [db]
+    restart: "no"
+
+  # Dev-dependency image (tsx) for scripts that are not compiled, e.g.:
+  #   docker compose ... run --rm -it tools npx tsx scripts/seed-user.ts
+  tools:
+    profiles: [tools]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+      target: build
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://allied_owner:${ALLIED_OWNER_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+      DATABASE_URL_APP: postgres://allied_app:${ALLIED_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+      DATABASE_URL_JOBS: postgres://allied_jobs:${ALLIED_JOBS_PASSWORD}@postgres:5432/${POSTGRES_DB:-allied}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [db]
+    restart: "no"
+
+networks:
+  web: {}
+  db:
+    internal: true   # no outbound internet from postgres; unreachable from outside
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:

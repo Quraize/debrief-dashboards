@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS jp_appointment;
+DROP TABLE IF EXISTS jp_job;

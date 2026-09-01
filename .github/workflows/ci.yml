@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The database tests run against a real PostgreSQL, never a mock: RLS
+    # policies and generated columns ARE the behaviour under test, so mocking
+    # them would assert nothing. pgvector image for parity with production.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_PG_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` installs every workspace from the committed lockfile.
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # NON-BLOCKING, deliberately. `checkJs: true` over untyped JSX reports ~336
+      # pre-existing errors (369 before the restructure) that predate this pipeline.
+      # Flip continue-on-error to false once that debt is paid — tracked as Sprint 0
+      # follow-up in MIGRATION_PLAN.md. Backend typecheck IS strict and blocking below.
+      - name: Typecheck (frontend — advisory)
+        continue-on-error: true
+        run: npm run typecheck --workspace frontend
+
+      - name: Typecheck (backend — blocking)
+        run: npm run typecheck --workspace backend
+
+      # Cluster-level roles the RLS tests depend on. Idempotent.
+      - name: Bootstrap database roles
+        run: psql "$TEST_PG_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/scripts/bootstrap-roles.sql
+
+      # CI=true makes tests/helpers/db.ts fail rather than skip when PostgreSQL
+      # is unreachable - a silently skipped security test is worse than none.
+      - name: Test
+        run: npm run test:coverage
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the scan sees secrets introduced in earlier commits,
+          # not just the tip.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

@@ -1,0 +1,45 @@
+{
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "The role of the user in the app",
+      "enum": [
+        "admin",
+        "sales_manager",
+        "appointment_setter",
+        "outside_sales_rep",
+        "view_only",
+        "user"
+      ],
+      "rls": {
+        "write": {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      }
+    },
+    "active": {
+      "type": "boolean",
+      "title": "Active?",
+      "default": true
+    },
+    "department": {
+      "type": "string",
+      "title": "Department"
+    },
+    "manager": {
+      "type": "string",
+      "title": "Manager"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone"
+    }
+  },
+  "required": [
+    "role"
+  ],
+  "name": "User",
+  "type": "object"
+}

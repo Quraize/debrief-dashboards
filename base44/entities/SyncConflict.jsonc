@@ -1,0 +1,81 @@
+{
+  "name": "SyncConflict",
+  "type": "object",
+  "properties": {
+    "sync_run_id": {
+      "type": "string",
+      "title": "Sync Run ID"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "classification_conflict",
+        "duplicate_candidate",
+        "match_fallback",
+        "missing_data",
+        "missing_result",
+        "missing_signed_date",
+        "overlapping_run",
+        "api_error"
+      ],
+      "title": "Category"
+    },
+    "reason": {
+      "type": "string",
+      "title": "Reason"
+    },
+    "appointment_record_id": {
+      "type": "string",
+      "title": "Appointment Record ID"
+    },
+    "crm_lead_id": {
+      "type": "string",
+      "title": "CRM Lead ID"
+    },
+    "crm_job_id": {
+      "type": "string",
+      "title": "CRM Job ID"
+    },
+    "resolution_status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "resolved",
+        "ignored"
+      ],
+      "title": "Resolution Status",
+      "default": "open"
+    },
+    "details": {
+      "type": "string",
+      "title": "Safe Details",
+      "description": "Non-PII description of the conflict context"
+    }
+  },
+  "required": [
+    "category",
+    "reason"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

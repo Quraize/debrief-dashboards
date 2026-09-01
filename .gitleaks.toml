@@ -1,0 +1,35 @@
+# Secret scanning config — see MIGRATION_PLAN.md §5.4.
+# The rule that matters most here: nothing prefixed VITE_ may hold a secret,
+# because every VITE_* value is compiled into the browser bundle.
+title = "allied-sales-sync"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "leap-api-token"
+description = "JobProgress/Leap API token committed to source"
+regex = '''(?i)leap[_-]?api[_-]?token\s*[:=]\s*['"][A-Za-z0-9_\-\.]{16,}['"]'''
+tags = ["credential", "jobprogress"]
+
+[[rules]]
+id = "vite-prefixed-secret"
+description = "A VITE_* variable holding something secret — these ship to the browser"
+regex = '''(?i)VITE_[A-Z0-9_]*(SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*\s*=\s*\S+'''
+tags = ["credential", "frontend-exposure"]
+
+[[rules]]
+id = "google-service-account-key"
+description = "Google service account private key (Sheets integration, §4.5)"
+regex = '''"type"\s*:\s*"service_account"'''
+tags = ["credential", "google"]
+
+[allowlist]
+description = "Paths with no secrets by construction"
+paths = [
+  '''package-lock\.json''',
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)coverage/''',
+  '''\.agents/''',
+]

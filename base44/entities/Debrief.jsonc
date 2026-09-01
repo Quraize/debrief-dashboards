@@ -1,0 +1,520 @@
+{
+  "name": "Debrief",
+  "type": "object",
+  "properties": {
+    "appointment_id": {
+      "type": "string",
+      "title": "Appointment ID"
+    },
+    "appointment_record_id": {
+      "type": "string",
+      "title": "Appointment Record ID"
+    },
+    "crm_lead_id": {
+      "type": "string",
+      "title": "Lead ID / JobProgress ID"
+    },
+    "crm_job_id": {
+      "type": "string",
+      "title": "CRM Job ID"
+    },
+    "result_source": {
+      "type": "string",
+      "title": "Result Source"
+    },
+    "submitted_by": {
+      "type": "string",
+      "title": "Submitted By"
+    },
+    "customer_name": {
+      "type": "string",
+      "title": "Customer Name"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone Number"
+    },
+    "address": {
+      "type": "string",
+      "title": "Street Address"
+    },
+    "city": {
+      "type": "string",
+      "title": "City"
+    },
+    "appointment_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Appointment Date"
+    },
+    "sales_rep": {
+      "type": "string",
+      "title": "Sales Rep"
+    },
+    "secondary_sales_rep": {
+      "type": "string",
+      "title": "Secondary Sales Rep",
+      "description": "Optional second rep sharing the sale. Blank for single-rep sales."
+    },
+    "primary_rep_split_pct": {
+      "type": "number",
+      "title": "Primary Rep Split %",
+      "description": "Primary rep's revenue credit share (0\u2013100). Defaults to 100 when no secondary rep.",
+      "default": 100
+    },
+    "secondary_rep_split_pct": {
+      "type": "number",
+      "title": "Secondary Rep Split %",
+      "description": "Secondary rep's revenue credit share (0\u2013100). Must total 100 with primary. Defaults to 0.",
+      "default": 0
+    },
+    "appointment_setter": {
+      "type": "string",
+      "title": "Appointment Setter"
+    },
+    "product": {
+      "type": "string",
+      "title": "Division"
+    },
+    "business_division": {
+      "type": "string",
+      "title": "Business Division",
+      "description": "Insurance for insurance records; blank for retail/commercial"
+    },
+    "trade": {
+      "type": "string",
+      "title": "Trade",
+      "description": "Insurance trade: Roofing, Siding, Gutters, Windows, Doors, Chimney, Masonry, Other"
+    },
+    "appointment_type": {
+      "type": "string",
+      "title": "Appointment Type"
+    },
+    "appointment_outcome": {
+      "type": "string",
+      "title": "Appointment Outcome"
+    },
+    "decision_maker_status": {
+      "type": "string",
+      "title": "Decision Maker Status"
+    },
+    "one_leg_reason": {
+      "type": "string",
+      "title": "One-Leg Reason"
+    },
+    "products_discussed": {
+      "type": "string",
+      "title": "Products Discussed"
+    },
+    "products_presented_other": {
+      "type": "string",
+      "title": "Products Presented \u2014 Other Details"
+    },
+    "first_price_given": {
+      "type": "number",
+      "title": "Price 1 Given"
+    },
+    "price_2_given": {
+      "type": "number",
+      "title": "Price 2 Given"
+    },
+    "price_3_given": {
+      "type": "number",
+      "title": "Price 3 Given"
+    },
+    "additional_prices_given": {
+      "type": "string",
+      "title": "Additional Prices Given"
+    },
+    "prices_given": {
+      "type": "number",
+      "title": "Prices Given Count"
+    },
+    "financing_offered": {
+      "type": "boolean",
+      "title": "Financing Offered?"
+    },
+    "financing_not_offered_reason": {
+      "type": "string",
+      "title": "Financing Not Offered Reason"
+    },
+    "financing_option_presented": {
+      "type": "string",
+      "title": "Financing Option / Monthly Payment Presented"
+    },
+    "financing_result": {
+      "type": "string",
+      "title": "Financing Result"
+    },
+    "sale_amount": {
+      "type": "number",
+      "title": "Sale Amount"
+    },
+    "sale_close_type": {
+      "type": "string",
+      "title": "Sale / Close Type"
+    },
+    "sale_price_number": {
+      "type": "string",
+      "title": "Sale Price #"
+    },
+    "credit_decline": {
+      "type": "boolean",
+      "title": "Credit Decline"
+    },
+    "cancellation": {
+      "type": "boolean",
+      "title": "Cancellation"
+    },
+    "main_objection": {
+      "type": "string",
+      "title": "Main Objection / Reason They Did Not Buy"
+    },
+    "objection_customer_wording": {
+      "type": "string",
+      "title": "Objection \u2014 Exact Customer Wording"
+    },
+    "pre_close_answer": {
+      "type": "string",
+      "title": "Pre-Close Answer"
+    },
+    "closing_question_answer": {
+      "type": "string",
+      "title": "Closing Question Answer"
+    },
+    "step7_result": {
+      "type": "string",
+      "title": "Step 7 Result"
+    },
+    "walk_of_life_issues": {
+      "type": "string",
+      "title": "Walk-of-Life Issues to Review"
+    },
+    "step7_coaching_notes": {
+      "type": "string",
+      "title": "Step 7 Coaching Notes"
+    },
+    "step7_coaching_followup": {
+      "type": "string",
+      "title": "Step 7 Coaching Follow-Up"
+    },
+    "step7_things_to_review": {
+      "type": "string",
+      "title": "Step 7 Things to Review"
+    },
+    "rep_response": {
+      "type": "string",
+      "title": "Rep Response 1"
+    },
+    "client_response_1": {
+      "type": "string",
+      "title": "Client Response 1"
+    },
+    "rep_response_2": {
+      "type": "string",
+      "title": "Rep Response 2"
+    },
+    "client_response_2": {
+      "type": "string",
+      "title": "Client Response 2"
+    },
+    "rep_response_3": {
+      "type": "string",
+      "title": "Rep Response 3"
+    },
+    "cancellation_reason": {
+      "type": "string",
+      "title": "Cancellation Reason"
+    },
+    "reset_needed": {
+      "type": "boolean",
+      "title": "Reset Needed?"
+    },
+    "reset_status": {
+      "type": "string",
+      "title": "Reset Status"
+    },
+    "reset_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Reset Date"
+    },
+    "reset_reason": {
+      "type": "string",
+      "title": "Reset Reason"
+    },
+    "reset_appointment_scheduled": {
+      "type": "boolean",
+      "title": "Reset Appointment Scheduled?"
+    },
+    "reset_follow_up_notes": {
+      "type": "string",
+      "title": "Reset Follow-Up Needed (Notes)"
+    },
+    "follow_up_needed": {
+      "type": "boolean",
+      "title": "Follow-Up Needed?"
+    },
+    "follow_up_bucket": {
+      "type": "string",
+      "title": "Follow-Up Bucket"
+    },
+    "follow_up_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Follow-Up Date"
+    },
+    "estimate_sent_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Estimate Sent Date"
+    },
+    "sale_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Sale Date"
+    },
+    "sale_signed_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Sale Signed Date",
+      "description": "Date the contract was signed. Used as the effective sale date for signed-month sales attribution; falls back to appointment_date when blank."
+    },
+    "lead_referral_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Lead / Referral Received Date"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notes"
+    },
+    "marketing_source": {
+      "type": "string",
+      "title": "Marketing Source (from master lead)"
+    },
+    "referral_source": {
+      "type": "string",
+      "title": "Referral Source"
+    },
+    "self_gen_source": {
+      "type": "string",
+      "title": "Self-Gen Source"
+    },
+    "sales_appointment": {
+      "type": "string",
+      "title": "Sales Appointment?"
+    },
+    "non_sales_reason": {
+      "type": "string",
+      "title": "Non-Sales Reason"
+    },
+    "historical_review": {
+      "type": "string",
+      "title": "Historical Import Review"
+    },
+    "matched": {
+      "type": "boolean",
+      "title": "Matched to Lead",
+      "default": false
+    },
+    "data_quality_flag": {
+      "type": "string",
+      "title": "Data Quality Flag"
+    },
+    "manager_review_needed": {
+      "type": "boolean",
+      "title": "Manager Review Needed",
+      "default": false
+    },
+    "contingency_signed": {
+      "type": "boolean",
+      "title": "Contingency Signed?"
+    },
+    "contingency_signed_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Contingency Signed Date"
+    },
+    "demo_completed": {
+      "type": "boolean",
+      "title": "Demo Completed?"
+    },
+    "insurance_outcome": {
+      "type": "string",
+      "title": "Insurance Outcome / Status",
+      "description": "Demo Completed, No Damage, Reset Needed, No See/Cancelled, DQ, Pending"
+    },
+    "upgrade_price_1": {
+      "type": "number",
+      "title": "Upgrade Price 1"
+    },
+    "upgrade_price_2": {
+      "type": "number",
+      "title": "Upgrade Price 2"
+    },
+    "upgrade_price_3": {
+      "type": "number",
+      "title": "Upgrade Price 3"
+    },
+    "other_prices_given": {
+      "type": "boolean",
+      "title": "Other Prices Given?"
+    },
+    "other_prices_details": {
+      "type": "string",
+      "title": "Other Prices Details"
+    },
+    "other_prices_amount": {
+      "type": "number",
+      "title": "Other Prices Amount"
+    },
+    "total_job_price_provided": {
+      "type": "boolean",
+      "title": "Total Job Price Provided?"
+    },
+    "total_job_price": {
+      "type": "number",
+      "title": "Total Job Price"
+    },
+    "upgrade_sold_accepted": {
+      "type": "boolean",
+      "title": "Upgrade Sold / Accepted?"
+    },
+    "accepted_upgrade_amount": {
+      "type": "number",
+      "title": "Accepted Upgrade Amount"
+    },
+    "final_contract_signed": {
+      "type": "boolean",
+      "title": "Final Contract Signed?"
+    },
+    "final_contract_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Final Contract Date"
+    },
+    "last_edited_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Edited At"
+    },
+    "last_edited_by": {
+      "type": "string",
+      "title": "Last Edited By"
+    },
+    "edit_reason": {
+      "type": "string",
+      "title": "Edit Reason"
+    }
+  },
+  "required": [
+    "customer_name",
+    "appointment_date",
+    "sales_rep",
+    "appointment_setter",
+    "appointment_outcome",
+    "submitted_by"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "appointment_setter"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "outside_sales_rep"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "view_only"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "user"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "appointment_setter"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "outside_sales_rep"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "view_only"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "user"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sales_manager"
+          }
+        }
+      ]
+    }
+  }
+}

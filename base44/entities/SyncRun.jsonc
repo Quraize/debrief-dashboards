@@ -1,0 +1,210 @@
+{
+  "name": "SyncRun",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "dry_run",
+        "commit"
+      ],
+      "title": "Mode"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "timeout"
+      ],
+      "title": "Status",
+      "default": "running"
+    },
+    "date_from": {
+      "type": "string",
+      "format": "date",
+      "title": "Date From"
+    },
+    "date_to": {
+      "type": "string",
+      "format": "date",
+      "title": "Date To"
+    },
+    "incremental_since": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Incremental Since"
+    },
+    "full_backfill": {
+      "type": "boolean",
+      "title": "Full Backfill",
+      "default": false
+    },
+    "checkpoint": {
+      "type": "string",
+      "title": "Checkpoint / Cursor"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Started At"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Finished At"
+    },
+    "started_by": {
+      "type": "string",
+      "title": "Started By"
+    },
+    "counts": {
+      "type": "object",
+      "title": "Safe Counts",
+      "properties": {
+        "api_appointments_examined": {
+          "type": "number"
+        },
+        "api_appointments_unique": {
+          "type": "number"
+        },
+        "appointment_results_available": {
+          "type": "number"
+        },
+        "appointment_results_missing": {
+          "type": "number"
+        },
+        "jobs_matched": {
+          "type": "number"
+        },
+        "matches_by_appt_id": {
+          "type": "number"
+        },
+        "matches_by_job_id": {
+          "type": "number"
+        },
+        "matches_by_job_number_date": {
+          "type": "number"
+        },
+        "matches_by_fallback": {
+          "type": "number"
+        },
+        "existing_appointment_matches": {
+          "type": "number"
+        },
+        "proposed_new_appointments": {
+          "type": "number"
+        },
+        "proposed_updates": {
+          "type": "number"
+        },
+        "unchanged": {
+          "type": "number"
+        },
+        "debriefs_matched": {
+          "type": "number"
+        },
+        "debriefs_preserved": {
+          "type": "number"
+        },
+        "duplicate_candidates": {
+          "type": "number"
+        },
+        "non_sales_exclusions": {
+          "type": "number"
+        },
+        "classification_residential": {
+          "type": "number"
+        },
+        "classification_other_misc": {
+          "type": "number"
+        },
+        "classification_insurance": {
+          "type": "number"
+        },
+        "classification_unclassified": {
+          "type": "number"
+        },
+        "classification_non_sales": {
+          "type": "number"
+        },
+        "classification_changes": {
+          "type": "number"
+        },
+        "conflicts": {
+          "type": "number"
+        },
+        "signed_sales_found": {
+          "type": "number"
+        },
+        "signed_dates_available": {
+          "type": "number"
+        },
+        "signed_dates_missing": {
+          "type": "number"
+        },
+        "revenue_total": {
+          "type": "number"
+        },
+        "sales_matched_debriefs": {
+          "type": "number"
+        },
+        "sales_unmatched": {
+          "type": "number"
+        },
+        "two_leg_denominator": {
+          "type": "number"
+        },
+        "errors": {
+          "type": "number"
+        },
+        "rate_limit_hits": {
+          "type": "number"
+        },
+        "retries": {
+          "type": "number"
+        }
+      }
+    },
+    "error_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "Error Codes"
+    },
+    "error_message": {
+      "type": "string",
+      "title": "Error Message"
+    }
+  },
+  "required": [
+    "mode",
+    "status",
+    "date_from",
+    "date_to"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

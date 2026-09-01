@@ -1,0 +1,49 @@
+# Dedicated PostgreSQL (D12). Nothing here is exposed beyond the host:
+# the published port binds to 127.0.0.1 only, so the database is reachable
+# from the backend container and an SSH tunnel, never from the internet.
+services:
+  postgres:
+    # pgvector is baked in so the RAG work in MIGRATION_PLAN.md §2.2 needs no
+    # later image change. Pinned by minor version - never :latest on a database.
+    image: pgvector/pgvector:pg16
+    container_name: allied_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-allied}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD}
+      # Deterministic collation: a locale change between image versions can
+      # silently corrupt text index ordering.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/bootstrap-roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-allied}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=1GB          # ~25% of a 4GB box
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - wal_level=replica           # required for WAL archiving / PITR
+      - -c
+      - log_min_duration_statement=1000   # log anything slower than 1s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  pgdata:
+    driver: local

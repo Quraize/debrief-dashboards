@@ -1,0 +1,38 @@
+# Caddy — TLS termination, static frontend, /api reverse proxy (§10.1, §10.2).
+#
+# SITE_ADDRESS is the ONLY thing that changes between environments:
+#   sales.example.com   production — Caddy obtains and renews the certificate
+#                       automatically once the DNS A record points here
+#   :8080               local smoke test — plain HTTP, no certificates
+#
+# One origin for the app and the API is deliberate: no CORS, no cross-site
+# cookie rules, no preflight. Do not split them onto separate subdomains.
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The API. The backend sets its own security headers and cache policy;
+	# X-Forwarded-* is added by Caddy and trusted by Fastify (trustProxy).
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# The SPA. Unknown paths fall through to index.html so client-side routes
+	# survive a refresh.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+
+		header {
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy same-origin
+			-Server
+		}
+		# Vite emits content-hashed filenames under /assets — cache forever.
+		# index.html must revalidate, or a deploy would not reach browsers.
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+	}
+}

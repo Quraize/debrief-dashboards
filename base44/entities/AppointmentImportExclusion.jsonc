@@ -1,0 +1,74 @@
+{
+  "name": "AppointmentImportExclusion",
+  "type": "object",
+  "properties": {
+    "import_batch_id": {
+      "type": "string",
+      "title": "Import Batch ID"
+    },
+    "imported_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Imported At"
+    },
+    "imported_by": {
+      "type": "string",
+      "title": "Imported By"
+    },
+    "title": {
+      "type": "string",
+      "title": "Appointment Title"
+    },
+    "customer_name": {
+      "type": "string",
+      "title": "Customer Name"
+    },
+    "crm_lead_id": {
+      "type": "string",
+      "title": "Job ID / CRM Lead ID"
+    },
+    "appointment_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Appointment Date"
+    },
+    "appointment_time": {
+      "type": "string",
+      "title": "Appointment Time"
+    },
+    "exclusion_reason": {
+      "type": "string",
+      "title": "Exclusion Reason"
+    },
+    "row_type": {
+      "type": "string",
+      "title": "Row Type",
+      "description": "excluded_non_sales, deduplicated, invalid_header, or error"
+    }
+  },
+  "required": [
+    "row_type"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

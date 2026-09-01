@@ -1,0 +1,17 @@
+{
+  "name": "@allied/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Business rules shared by the frontend and backend. No framework, no browser, no I/O.",
+  "exports": {
+    ".": "./src/index.js",
+    "./*": "./src/*.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "vitest run --project shared"
+  }
+}

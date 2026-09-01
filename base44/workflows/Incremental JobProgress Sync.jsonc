@@ -1,0 +1,49 @@
+{
+  "description": "Incremental sync with JobProgress/Leap every 30 minutes with a 1-day overlap window. Inactive by default \u2014 activate manually after review.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "*/30 * * * *",
+      "one_time_date": null,
+      "timezone": "America/New_York",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "incremental_jobprogress_sync",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "sync": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncLeapJobProgress",
+            "args": {
+              "mode": "commit",
+              "date_from": "${ (now - 86400) | strftime(\"%Y-%m-%d\") }",
+              "date_to": "${ now | strftime(\"%Y-%m-%d\") }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Incremental sync",
+            "description": "30-min cadence, 1-day overlap"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Incremental JobProgress Sync"
+}

@@ -1,0 +1,40 @@
+{
+  "name": "Push Debrief to Sheet",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "entity",
+      "events": [
+        "create"
+      ],
+      "entity_name": "Debrief"
+    }
+  },
+  "description": "Automatically pushes new debriefs to the master Google Sheet when they are submitted.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "push_debrief_to_sheet",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "push_to_sheet": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "pushDebriefToSheet",
+            "args": {
+              "debrief_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Push to Google Sheets",
+            "description": "Appends debrief row to master sheet"
+          }
+        }
+      }
+    ]
+  }
+}
