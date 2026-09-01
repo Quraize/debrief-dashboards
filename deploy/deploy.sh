@@ -6,7 +6,7 @@
 #   deploy/deploy.sh migrate-status   show applied/pending migrations
 #   deploy/deploy.sh up               start/refresh the stack (does NOT migrate)
 #   deploy/deploy.sh deploy           build + up + health check (still no migrate)
-#   deploy/deploy.sh seed-user        provision the login account (interactive)
+#   deploy/deploy.sh seed-user <email> [role]   provision the login account (password prompted)
 #   deploy/deploy.sh health           check the running stack
 #   deploy/deploy.sh logs [service]   follow logs
 #
@@ -61,7 +61,8 @@ case "${1:-}" in
     echo "schema changes, run:  deploy/deploy.sh migrate   (then re-run health)."
     ;;
   seed-user)
-    "${COMPOSE[@]}" run --rm -it tools npx tsx scripts/seed-user.ts
+    [[ -n "${2:-}" ]] || { echo "usage: deploy.sh seed-user <email> [role]   (password is prompted)" >&2; exit 1; }
+    "${COMPOSE[@]}" run --rm -it tools npx tsx scripts/seed-user.ts "$2" "${3:-admin}"
     ;;
   health)
     health
