@@ -22,6 +22,10 @@ ALTER ROLE allied_owner PASSWORD '$(sql_escape "$ALLIED_OWNER_PASSWORD")';
 ALTER ROLE allied_app   PASSWORD '$(sql_escape "$ALLIED_APP_PASSWORD")';
 ALTER ROLE allied_jobs  PASSWORD '$(sql_escape "$ALLIED_JOBS_PASSWORD")';
 ALTER DATABASE "$POSTGRES_DB" OWNER TO allied_owner;
+-- pgvector is an UNTRUSTED extension: only the superuser may install it, and
+-- migrations run as allied_owner. Installed here so migration 0001 finds it
+-- already present (its CREATE IF NOT EXISTS then no-ops).
+CREATE EXTENSION IF NOT EXISTS vector;
 SQL
 
 echo "bootstrap: role passwords set, ${POSTGRES_DB} owned by allied_owner"
