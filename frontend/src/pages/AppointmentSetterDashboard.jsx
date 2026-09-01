@@ -9,7 +9,7 @@ import { setterStats, filterByDate, safeNum, DEMO_RATE_DEFINITION, NO_DEMO_RATE_
 import { nonInsuranceDebriefs } from "@allied/shared/insurance";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie, Legend } from "recharts";
 import { Loader2 } from "lucide-react";
-import { JpSetterSection } from "@/components/JpCrmSection";
+import { JpSetterSection, DebriefSectionHeader } from "@/components/JpCrmSection";
 
 const COLORS = { Excellent: "#16a34a", Good: "#f59e0b", Poor: "#dc2626", "No Data": "#94a3b8" };
 
@@ -98,6 +98,7 @@ export default function AppointmentSetterDashboard() {
         <div className="text-center text-muted-foreground py-8 text-sm">No debriefs in this period.</div>
       ) : (
         <>
+          <DebriefSectionHeader />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KpiCard label="Team Two-Leg %" value={teamTwoLegPct + "%"} accent />
             <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
@@ -214,7 +215,7 @@ export default function AppointmentSetterDashboard() {
             </div>
           </div>
 
-          <JpSetterSection filter={filter} cs={cs} ce={ce} />
+          <JpSetterSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
         </>
       )}
     </div>

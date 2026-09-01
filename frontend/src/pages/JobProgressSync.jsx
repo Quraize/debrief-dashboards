@@ -329,6 +329,7 @@ export default function JobProgressSync() {
                   <th className="px-4 py-2">Window</th>
                   <th className="px-4 py-2">Type</th>
                   <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2">Examined</th>
                   <th className="px-4 py-2">Created</th>
                   <th className="px-4 py-2">Updated</th>
                   <th className="px-4 py-2">By</th>
@@ -342,6 +343,7 @@ export default function JobProgressSync() {
                     <td className="px-4 py-2 whitespace-nowrap">{r.date_from} → {r.date_to}</td>
                     <td className="px-4 py-2">{r.full_backfill ? "backfill" : "incremental"}</td>
                     <td className={`px-4 py-2 font-semibold ${r.status === "completed" ? "text-green-700" : r.status === "running" ? "text-sky-700" : "text-red-600"}`}>{r.status}</td>
+                    <td className="px-4 py-2">{r.counts?.api_appointments_examined ?? 0}</td>
                     <td className="px-4 py-2">{r.counts?.created ?? 0}</td>
                     <td className="px-4 py-2">{r.counts?.updated ?? 0}</td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">{r.started_by || "—"}</td>

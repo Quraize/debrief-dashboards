@@ -19,7 +19,7 @@ import {
   JP_COVERAGE_DEFINITION,
 } from "@allied/shared/jpStats";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Database } from "lucide-react";
+import { Database, ClipboardList } from "lucide-react";
 
 // The mirror only changes when the sync runs (4x/day), so there is no reason
 // to refetch it on every mount the way the debrief queries do.
@@ -61,6 +61,22 @@ export function JpSectionShell({ children, subtitle }) {
   );
 }
 
+/**
+ * The debrief counterpart of JpSectionShell's header — placed above the
+ * existing debrief-derived cards so every dashboard reads as two explicitly
+ * labeled sections: what the reps reported, and what the CRM recorded.
+ */
+export function DebriefSectionHeader() {
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <ClipboardList className="w-4 h-4 text-amber-700" />
+      <h2 className="text-lg font-heading font-bold text-primary">From Debriefs</h2>
+      <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Rep-submitted</span>
+      <span className="text-xs text-muted-foreground">outcomes, amounts and attribution as reps reported them</span>
+    </div>
+  );
+}
+
 function JpEmptyState() {
   return (
     <div className="bg-white rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
@@ -70,13 +86,14 @@ function JpEmptyState() {
   );
 }
 
-/** The KPI dashboard's JP section: headline cards + volume + signed revenue. */
-export function JpKpiSection({ filter, cs, ce, debriefs }) {
+/**
+ * The CRM headline card grid — the JP counterpart of each dashboard's debrief
+ * cards. Shared by every dashboard so the two sections always compare the
+ * same figures, computed the same way.
+ */
+export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
   const { jpAppointments, jpJobs, isLoading } = useJpMirror();
   if (isLoading) return null;
-  if (jpAppointments.length === 0 && jpJobs.length === 0) {
-    return <JpSectionShell><JpEmptyState /></JpSectionShell>;
-  }
 
   const stats = jpAppointmentStats(jpAppointments, filter, cs, ce);
   const twoLeg = jpTwoLegStats(jpAppointments, filter, cs, ce);
@@ -106,7 +123,7 @@ export function JpKpiSection({ filter, cs, ce, debriefs }) {
   ];
 
   return (
-    <JpSectionShell>
+    <>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {cards.map((c) => <KpiCard key={c.label} label={c.label} value={c.value} title={c.title} />)}
       </div>
@@ -115,6 +132,24 @@ export function JpKpiSection({ filter, cs, ce, debriefs }) {
         JobProgress, attributed to the signed month — the debrief section above uses the
         amount the rep typed in.
       </p>
+    </>
+  );
+}
+
+/** The KPI dashboard's JP section: headline cards + volume + signed revenue. */
+export function JpKpiSection({ filter, cs, ce, debriefs }) {
+  const { jpAppointments, jpJobs, isLoading } = useJpMirror();
+  if (isLoading) return null;
+  if (jpAppointments.length === 0 && jpJobs.length === 0) {
+    return <JpSectionShell><JpEmptyState /></JpSectionShell>;
+  }
+
+  const stats = jpAppointmentStats(jpAppointments, filter, cs, ce);
+  const revenue = jpRevenueStats(jpJobs, filter, cs, ce);
+
+  return (
+    <JpSectionShell>
+      <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
@@ -151,8 +186,8 @@ export function JpKpiSection({ filter, cs, ce, debriefs }) {
   );
 }
 
-/** Setter dashboard: booked volume per CRM `created_by`, with form coverage. */
-export function JpSetterSection({ filter, cs, ce }) {
+/** Setter dashboard: CRM headline cards + booked volume per CRM `created_by`. */
+export function JpSetterSection({ filter, cs, ce, debriefs }) {
   const { jpAppointments, isLoading } = useJpMirror();
   if (isLoading) return null;
   if (jpAppointments.length === 0) {
@@ -165,6 +200,7 @@ export function JpSetterSection({ filter, cs, ce }) {
       "Booked volume as JobProgress recorded it — attributed to whoever created the appointment in the CRM, "
       + "which may differ from the setter chosen on a debrief. Names come from the CRM and are not normalized."
     }>
+      <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -195,8 +231,8 @@ export function JpSetterSection({ filter, cs, ce }) {
   );
 }
 
-/** Sales-rep dashboard: assigned volume per CRM user, with CRM two-leg answers. */
-export function JpRepSection({ filter, cs, ce }) {
+/** Sales-rep dashboard: CRM headline cards + assigned volume per CRM user. */
+export function JpRepSection({ filter, cs, ce, debriefs }) {
   const { jpAppointments, isLoading } = useJpMirror();
   if (isLoading) return null;
   if (jpAppointments.length === 0) {
@@ -209,6 +245,7 @@ export function JpRepSection({ filter, cs, ce }) {
       "Appointment volume as assigned in JobProgress, with the Two-Leg answers reps recorded on the CRM's "
       + "result forms. Coverage is partial — an unanswered form says nothing either way."
     }>
+      <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead>

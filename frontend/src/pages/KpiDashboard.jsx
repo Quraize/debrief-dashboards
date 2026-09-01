@@ -9,7 +9,7 @@ import { nonInsuranceDebriefs, nonInsuranceAppointments } from "@allied/shared/i
 import { DEMO_OUTCOMES, SALE_CANCELLATION_OUTCOME, SALE_CREDIT_DECLINE_OUTCOME } from "@allied/shared/constants";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ComposedChart, LabelList } from "recharts";
 import { Loader2 } from "lucide-react";
-import { JpKpiSection } from "@/components/JpCrmSection";
+import { JpKpiSection, DebriefSectionHeader } from "@/components/JpCrmSection";
 
 const DM_COLORS = { "Two-Leg": "#16a34a", "One-Leg": "#f59e0b", "N/A": "#94a3b8", "Unassigned": "#94a3b8" };
 const PERIODS = ["Week", "Month", "Year"];
@@ -46,6 +46,7 @@ export default function KpiDashboard() {
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : (
         <>
+          <DebriefSectionHeader />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {kpis.map((k, i) => <KpiCard key={k.label} label={k.label} value={k.value} accent={i < 4} rating={k.rating} />)}
           </div>

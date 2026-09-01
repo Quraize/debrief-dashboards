@@ -16,7 +16,7 @@ import { classifyAppointment, classificationCounts, enrichDebriefsWithTitles } f
 import ClassificationCounts from "@/components/ClassificationCounts";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from "recharts";
 import { Loader2 } from "lucide-react";
-import { JpRepSection } from "@/components/JpCrmSection";
+import { JpRepSection, DebriefSectionHeader } from "@/components/JpCrmSection";
 
 const NAVY = "#1e293b";
 const GOLD = "#b45309";
@@ -115,6 +115,8 @@ export default function SalesRepDashboard() {
 
       <ClassificationCounts counts={classCounts} />
 
+      <DebriefSectionHeader />
+
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : periodStats.length === 0 && teamSales === 0 ? (
@@ -202,7 +204,7 @@ export default function SalesRepDashboard() {
             </div>
           </div>
 
-          <JpRepSection filter={filter} cs={cs} ce={ce} />
+          <JpRepSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
         </>
       )}
     </div>
