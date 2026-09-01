@@ -17,7 +17,9 @@ COPY package.json package-lock.json ./
 COPY backend/package.json backend/
 COPY shared/package.json shared/
 COPY frontend/package.json frontend/
-RUN npm ci --workspace backend
+# --include-workspace-root matters: tsc comes from the ROOT devDependencies,
+# and a bare `npm ci --workspace backend` skips those.
+RUN npm ci --workspace backend --include-workspace-root
 
 FROM deps AS build
 COPY shared ./shared

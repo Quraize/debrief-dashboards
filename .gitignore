@@ -1,6 +1,9 @@
 #env
 .env
 .env.*
+# …but the templates must ship with the repo (they hold no secrets)
+!.env.example
+!.env.production.example
 
 # Logs
 /logs
