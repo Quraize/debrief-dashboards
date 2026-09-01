@@ -273,6 +273,36 @@ export const jpJob = pgTable("jp_job", {
 export type JpJob = typeof jpJob.$inferSelect;
 export type NewJpJob = typeof jpJob.$inferInsert;
 
+export const jpPriceCandidate = pgTable("jp_price_candidate", {
+  id: text("id").primaryKey(),
+  jpJobId: text("jp_job_id").notNull(),
+  jobNumber: text("job_number"),
+  jobName: text("job_name"),
+  customerId: text("customer_id"),
+  contractSignedDate: date("contract_signed_date"),
+  proposalId: text("proposal_id").notNull(),
+  proposalTitle: text("proposal_title"),
+  proposalFileName: text("proposal_file_name"),
+  proposalStatus: text("proposal_status"),
+  classification: text("classification"),
+  extractedAmount: numeric("extracted_amount", { precision: 12, scale: 2 }),
+  extractedJobNumber: text("extracted_job_number"),
+  confidence: text("confidence"),
+  extractionNotes: text("extraction_notes"),
+  model: text("model"),
+  status: text("status").notNull(),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  applyError: text("apply_error"),
+  raw: jsonb("raw").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+});
+
+export type JpPriceCandidate = typeof jpPriceCandidate.$inferSelect;
+export type NewJpPriceCandidate = typeof jpPriceCandidate.$inferInsert;
+
 export const listOption = pgTable("list_option", {
   id: text("id").primaryKey(),
   category: text("category").notNull(),

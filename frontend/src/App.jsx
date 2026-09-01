@@ -23,6 +23,7 @@ import ImportAppointments from '@/pages/ImportAppointments';
 import ResultsReview from '@/pages/ResultsReview';
 import ManagerReport from '@/pages/ManagerReport';
 import JobProgressSync from '@/pages/JobProgressSync';
+import PriceReview from '@/pages/PriceReview';
 import MarketingDashboard from '@/pages/MarketingDashboard';
 import InsuranceDashboard from '@/pages/InsuranceDashboard';
 // Add page imports here
@@ -86,6 +87,7 @@ const AuthenticatedApp = () => {
           <Route path="/results" element={<ResultsReview />} />
           <Route path="/manager-report" element={<ManagerReport />} />
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
+          <Route path="/price-review" element={<PriceReview />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

@@ -103,6 +103,13 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     create: null, update: null, remove: null,
     defaultSort: "-contract_signed_date",
   },
+  // Money workflow: reads are admin-only, and writes happen exclusively
+  // through the scan/approve function endpoints (jobs pool), never this API.
+  JPPriceCandidate: {
+    table: "jp_price_candidate", read: ADMIN_ONLY,
+    create: null, update: null, remove: null,
+    defaultSort: "-created_at",
+  },
   User: {
     table: "app_user",
     read: AUTHENTICATED,   // RLS narrows this to "own row, or everything if admin"

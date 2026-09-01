@@ -119,7 +119,10 @@ export class JobProgressClient {
     return `${this.baseUrl}${path}?${qs.toString()}`;
   }
 
-  private async request<T>(url: string, endpoint: string): Promise<T> {
+  private async request<T>(
+    url: string, endpoint: string,
+    init: { method?: string; body?: URLSearchParams } = {},
+  ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       await this.limiter.acquire();
       this.onStat?.("request", endpoint);
@@ -127,6 +130,8 @@ export class JobProgressClient {
       let res: Response;
       try {
         res = await this.fetchImpl(url, {
+          method: init.method ?? "GET",
+          body: init.body,
           headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
         });
       } catch (err) {
@@ -294,6 +299,44 @@ export class JobProgressClient {
       if (err instanceof JobProgressError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  /**
+   * A job's proposal documents. In Leap's UI this is the job's Proposals tab —
+   * where Allied's signed contracts live. `job_id` is the supported filter
+   * (`job_ids[]` is silently ignored by this endpoint — verified live).
+   */
+  async listProposals(jobId: string | number): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/proposals", { job_id: String(jobId) }, "proposals");
+  }
+
+  /**
+   * Downloads a proposal file. The `url` on a proposal is a pre-signed S3 link
+   * (valid ~20 minutes), so this goes straight to storage: no auth header, and
+   * deliberately NOT through the API rate limiter — S3 is not the CRM API.
+   */
+  async downloadFile(url: string): Promise<{ data: Buffer; contentType: string }> {
+    const res = await this.fetchImpl(url);
+    if (!res.ok) {
+      throw new JobProgressError(`File download failed: HTTP ${res.status}`, res.status, "file_download");
+    }
+    return {
+      data: Buffer.from(await res.arrayBuffer()),
+      contentType: res.headers.get("content-type") ?? "application/octet-stream",
+    };
+  }
+
+  /**
+   * Sets the Job Price on a job's financials — the field an approver fills in
+   * manually today. The ONLY write this client performs; callers are expected
+   * to have verified the job has no price yet.
+   */
+  async updateJobPrice(jobId: string | number, amount: number): Promise<void> {
+    await this.request(
+      `${this.baseUrl}/jobs/${jobId}/financials/price`,
+      "update_price",
+      { method: "PUT", body: new URLSearchParams({ amount: String(amount) }) },
+    );
   }
 
   /** Cheap authenticated call, for the connection check in the admin UI. */

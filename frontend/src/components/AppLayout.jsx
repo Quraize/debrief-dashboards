@@ -4,7 +4,7 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign
 } from "lucide-react";
 
 const DASHBOARDS = [
@@ -30,6 +30,7 @@ const OPERATIONS = [
 
 const ADMIN_OPERATIONS = [
   { to: "/jobprogress-sync", label: "JobProgress Sync", icon: RefreshCw },
+  { to: "/price-review", label: "Price Review", icon: BadgeDollarSign },
 ];
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];

@@ -14,6 +14,7 @@ import { requireAuth, requireCsrf, requireRole, clientIp, userAgent } from "../m
 import { runJobProgressSync, type SyncMode } from "../jobs/syncJobProgress.js";
 import { JobProgressClient } from "../integrations/jobprogress/client.js";
 import { runSyncExclusive, enqueueBackfill, syncStatus } from "../jobs/scheduler.js";
+import { scanContractPrices, approveCandidate, rejectCandidate } from "../jobs/contractPrices.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -98,6 +99,46 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
 
         case "getSyncStatus":
           return reply.send(await syncStatus());
+
+        case "scanContractPrices": {
+          if (!process.env.ANTHROPIC_API_KEY) {
+            return reply.code(501).send({
+              error: "Contract scanning is not yet enabled.",
+              detail: "Needs ANTHROPIC_API_KEY in the backend environment for the document-reading step.",
+            });
+          }
+          if (!process.env.LEAP_API_TOKEN) {
+            return reply.code(501).send({
+              error: "Contract scanning is not yet enabled.",
+              detail: "Needs LEAP_API_TOKEN to read job proposals.",
+            });
+          }
+          const days = Number(body["days"] ?? 5);
+          if (!Number.isInteger(days) || days < 1 || days > 60) {
+            return reply.code(400).send({ error: "days must be an integer between 1 and 60" });
+          }
+          console.info(`[functions] scanContractPrices days=${days} by=${actor} ip=${ctx.ip}`);
+          return reply.send(await scanContractPrices({ days, startedBy: actor }));
+        }
+
+        case "approveContractPrice": {
+          const id = body["candidate_id"];
+          if (typeof id !== "string" || !id) {
+            return reply.code(400).send({ error: "candidate_id is required" });
+          }
+          console.info(`[functions] approveContractPrice ${id} by=${actor} ip=${ctx.ip}`);
+          return reply.send(await approveCandidate(id, actor));
+        }
+
+        case "rejectContractPrice": {
+          const id = body["candidate_id"];
+          if (typeof id !== "string" || !id) {
+            return reply.code(400).send({ error: "candidate_id is required" });
+          }
+          console.info(`[functions] rejectContractPrice ${id} by=${actor} ip=${ctx.ip}`);
+          await rejectCandidate(id, actor, body["reason"] as string | undefined);
+          return reply.send({ rejected: true });
+        }
 
         // Both of these are built but cannot be verified without credentials,
         // so they report exactly what is missing rather than failing obscurely.
