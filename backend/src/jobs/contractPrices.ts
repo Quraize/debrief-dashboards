@@ -15,7 +15,7 @@
  * constraint), and an approve on an already-applied row is a no-op error.
  */
 import { withServiceRole } from "../db/client.js";
-import { JobProgressClient, unwrap } from "../integrations/jobprogress/client.js";
+import { JobProgressClient, JobProgressError, unwrap } from "../integrations/jobprogress/client.js";
 import { extractContractPrice, type ContractExtraction } from "../integrations/anthropic/contractExtractor.js";
 
 export interface ScanOptions {
@@ -57,6 +57,23 @@ async function insertCandidate(row: Record<string, unknown>): Promise<void> {
        ON CONFLICT (jp_job_id, proposal_id) DO NOTHING`,
       columns.map((col) => row[col]));
   }, "price-scan:insert", { quiet: true });
+}
+
+/** Field names a job's `financial_details` include may use for the price. The
+ *  vendor spec documents the include's existence but not its shape. */
+const PRICE_KEYS = ["total_job_price", "job_price", "total_job_amount", "total_amount", "job_amount", "price"];
+
+/** The existing price from the job listing's own financial_details, when present. */
+export function priceFromFinancialDetails(meta: Record<string, unknown> | undefined): number | null {
+  const details = unwrap<Record<string, unknown>>(meta?.["financial_details"]);
+  if (!details) return null;
+  for (const key of PRICE_KEYS) {
+    const value = details[key];
+    if (value == null || value === "") continue;
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 /** pending only when everything lines up; otherwise an audit row explaining why. */
@@ -151,13 +168,21 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
     }
 
     // The LIVE financials decide whether a price is needed — never the mirror.
-    let existingPrice = 0;
-    try {
-      const summary = await client.financialSummary(jobId);
-      existingPrice = Number(summary?.["total_job_price"] ?? 0) || 0;
-    } catch {
-      // A refused summary (the API 412s on some jobs) must not hide a missing
-      // price — proceed to extraction; the approve step re-checks anyway.
+    // First the job listing's financial_details (already fetched, no extra
+    // call), then the financial summary endpoint, which JobProgress refuses
+    // with 412 on some jobs. When neither can answer, the document is still
+    // proposed but flagged: JobProgress itself refuses a second price write,
+    // so an approval on a flagged card can never overwrite anything.
+    let existingPrice = priceFromFinancialDetails(meta);
+    let priceUnverified = false;
+    if (existingPrice === null) {
+      try {
+        const summary = await client.financialSummary(jobId);
+        existingPrice = Number(summary?.["total_job_price"] ?? 0) || 0;
+      } catch {
+        existingPrice = 0;
+        priceUnverified = true;
+      }
     }
     if (existingPrice > 0) {
       for (const proposal of proposals) {
@@ -184,6 +209,9 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
         const file = await client.downloadFile(String(proposal["url"]));
         const extraction = await extract(file.data);
         const { status, notes } = candidateStatus(extraction, jobNumber);
+        if (priceUnverified && status === "pending") {
+          notes.push("existing price could not be verified (JobProgress refused the financial lookup) — the job may already be priced");
+        }
         await insertCandidate(auditRow(proposal, {
           classification: extraction.classification,
           extracted_amount: extraction.amount,
@@ -268,6 +296,13 @@ export async function approveCandidate(
     await jp.updateJobPrice(row.jp_job_id, amount);
   } catch (err) {
     const message = (err as Error).message.slice(0, 400);
+    // JobProgress's own no-overwrite rule: "Job Price Already Updated." (412).
+    // That is a clean, expected outcome — the job needs nothing from us.
+    if (err instanceof JobProgressError && err.status === 412) {
+      await closeCandidate(candidateId, "skipped", actor,
+        `JobProgress reports the price is already set — nothing written (${message.slice(0, 120)})`);
+      return { applied: false, amount, reason: "JobProgress reports this job's price is already set — nothing written." };
+    }
     await withServiceRole(async (c) => {
       await c.query(
         `UPDATE jp_price_candidate SET apply_error = $2 WHERE id = $1`,

@@ -369,6 +369,63 @@ describe.skipIf(!reachable)("scanContractPrices / approveCandidate", () => {
     expect((await candidate("912", "121"))!.apply_error).toContain("amount is invalid");
   });
 
+  it("reads the existing price from the job listing's financial_details without a summary call", async () => {
+    const result = await scanContractPrices({
+      days: 5,
+      client: stubClient({
+        proposals: [proposal(131, "913")],
+        jobs: [jobMeta("913", { financial_details: { data: { total_job_amount: "9000.00" } } })],
+        financials: { "913": { __status: 412 } }, // would have been refused anyway
+      }),
+      extract: async () => { throw new Error("must not be called"); },
+    });
+    expect(result.details[0]).toMatchObject({ proposal_id: "131", outcome: "already_priced" });
+  });
+
+  it("flags a candidate whose existing price could not be verified", async () => {
+    await scanContractPrices({
+      days: 5,
+      client: stubClient({
+        proposals: [proposal(141, "914")],
+        jobs: [jobMeta("914")],
+        financials: { "914": { __status: 412 } },
+      }),
+      extract: async () => extraction({ amount: 7000, jobNumber: "L-914" }),
+    });
+    const row = await candidate("914", "141");
+    expect(row!.status).toBe("pending");
+    expect(row!.confidence).toBe("low");
+    expect(row!.extraction_notes).toContain("could not be verified");
+  });
+
+  it("treats JobProgress's 'Job Price Already Updated' as a clean skip, not a failure", async () => {
+    const row = await candidate("914", "141");
+    const impl = (async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.includes("/financials/price") && init?.method === "PUT") {
+        return { ok: false, status: 412, headers: { get: () => null },
+          text: async () => '{"error":{"status_code":412,"message":"Job Price Already Updated."}}',
+          json: async () => ({}) } as unknown as Response;
+      }
+      if (u.includes("/financial_summary")) {
+        return { ok: false, status: 412, headers: { get: () => null },
+          text: async () => "Precondition Failed", json: async () => ({}) } as unknown as Response;
+      }
+      return { ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ data: [], meta: { pagination: { total_pages: 1 } } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const jp = new JobProgressClient({
+      token: "test", baseUrl: "https://api.test/v3", fetchImpl: impl,
+      limiter: new RateLimiter({ limit: 1e9, windowMs: 1, sleep: async () => {} }), sleep: async () => {},
+    });
+    const out = await approveCandidate(row!.id, "admin@test", jp);
+    expect(out.applied).toBe(false);
+    expect(out.reason).toContain("already set");
+    const after = await candidate("914", "141");
+    expect(after!.status).toBe("skipped");
+    expect(after!.extraction_notes).toContain("Job Price Already Updated");
+  });
+
   it("reject closes a pending row and refuses non-pending ones", async () => {
     await scanContractPrices({
       days: 5,
