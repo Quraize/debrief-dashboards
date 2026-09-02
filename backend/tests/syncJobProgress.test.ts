@@ -348,6 +348,21 @@ describe.skipIf(!reachable)("runJobProgressSync", () => {
     expect(rows[0]!.contract_signed_date).toBe("2026-08-05");
   });
 
+  it("reads financials from the job listing's financial_details without a summary call", async () => {
+    // The shape observed on production payloads — a plain object, not .data-wrapped.
+    const result = await runJobProgressSync({
+      mode: "commit", dateFrom: "2026-08-01", dateTo: "2026-08-31", fullBackfill: true,
+      client: stubApi([], [signedJob(503, {
+        financial_details: { total_job_price: 21000, total_job_revenue: 21000, total_change_order_amount: 0 },
+      })], { financials: { "503": { __status: 412 } } }), // would have failed if consulted
+    });
+    expect(result.counts.financial_summaries_fetched, "no per-job call needed").toBe(0);
+    expect(result.counts.financial_summary_errors).toBe(0);
+    expect(result.counts.revenue_total).toBe(21000);
+    const { rows } = await db.owner.query(`SELECT total_job_price FROM jp_job WHERE jp_job_id = '503'`);
+    expect(rows[0]!.total_job_price).toBe("21000.00");
+  });
+
   it("counts a refused financial summary instead of failing the run", async () => {
     // The API 412s on some jobs' financial summaries — observed live in August.
     const result = await runJobProgressSync({

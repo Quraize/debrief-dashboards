@@ -541,15 +541,21 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
         .filter((r) => r["jp_job_id"]);
       counts.jp_jobs_upserted = await upsertJpRows("jp_job", "jp_job_id", jobRows);
 
-      // The signed-jobs listing carries financial_details, but the numbers the
-      // business reconciles against live in the financial *summary* — fetched
-      // per job, signed jobs only, so the call count stays proportional to
-      // sales rather than appointments.
-      for (const row of jobRows) {
-        const id = String(row["jp_job_id"]);
-        counts.financial_summaries_fetched++;
+      // Financials: the signed-jobs listing's `financial_details` include
+      // carries total_job_price / total_job_revenue / total_change_order_amount
+      // directly (verified on production payloads), so it is the primary
+      // source — no extra call, and immune to the 412 the per-job
+      // financial_summary endpoint returns on some jobs. The summary is only
+      // consulted when the include is absent.
+      for (const apiJob of signed) {
+        const id = String(apiJob["id"] ?? "");
+        if (!id) continue;
         try {
-          const record = await client.financialSummary(id);
+          let record = unwrap<Record<string, unknown>>(apiJob["financial_details"]);
+          if (!record || record["total_job_price"] == null) {
+            counts.financial_summaries_fetched++;
+            record = await client.financialSummary(id);
+          }
           const revenue = money(record?.["total_job_revenue"])
             ?? ((money(record?.["total_job_price"]) ?? 0) + (money(record?.["total_change_order_amount"]) ?? 0) || null);
           await updateJpJobFinancials(id, {
