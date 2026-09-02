@@ -222,6 +222,39 @@ describe.skipIf(!reachable)("scanContractPrices / approveCandidate", () => {
     expect((await candidate("907", "71"))!.status).toBe("skipped");
   });
 
+  it("leaves an audit row for a scanned job with nothing readable, without blocking later documents", async () => {
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, job_number, contract_signed_date, is_insurance) VALUES
+       ('909', 'L-9', current_date - 1, false)`);
+
+    // First scan: only a draft proposal — nothing examinable.
+    let result = await scanContractPrices({
+      days: 5, client: stubClient({ "909": [proposal(91, { status: "draft" })] }),
+      extract: async () => { throw new Error("must not be called"); },
+    });
+    expect(result.details.find((d) => d.proposal_id === "none")?.outcome).toBe("no_documents");
+    const auditRow = await candidate("909", "none");
+    expect(auditRow!.status).toBe("skipped");
+    expect(auditRow!.extraction_notes).toContain("not accepted");
+
+    // Second scan, same state: no duplicate audit row (unique constraint).
+    await scanContractPrices({
+      days: 5, client: stubClient({ "909": [proposal(91, { status: "draft" })] }),
+      extract: async () => { throw new Error("must not be called"); },
+    });
+    const { rows } = await db.owner.query(
+      `SELECT count(*)::int AS n FROM jp_price_candidate WHERE jp_job_id = '909'`);
+    expect(rows[0]!.n).toBe(1);
+
+    // The document later becomes accepted: examined normally despite the audit row.
+    result = await scanContractPrices({
+      days: 5, client: stubClient({ "909": [proposal(91)] }),
+      extract: async () => extraction({ amount: 12000 }),
+    });
+    expect(result.candidates_created).toBe(1);
+    expect((await candidate("909", "91"))!.status).toBe("pending");
+  });
+
   it("reject closes a pending row and refuses non-pending ones", async () => {
     await db.owner.query(
       `INSERT INTO jp_job (jp_job_id, job_number, contract_signed_date, is_insurance) VALUES

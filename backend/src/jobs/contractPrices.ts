@@ -117,13 +117,17 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
   for (const job of jobs) {
     result.jobs_scanned++;
     const proposals = await client.listProposals(job.jp_job_id);
+    let examinable = 0;
+    let notAccepted = 0;
+    let notPdf = 0;
 
     for (const proposal of proposals) {
       const proposalId = String(proposal["id"] ?? "");
       if (!proposalId) continue;
       // The user's rule, verified on real data: only accepted documents count.
-      if (String(proposal["status"] ?? "") !== "accepted") continue;
-      if (String(proposal["file_mime_type"] ?? "") !== "application/pdf") continue;
+      if (String(proposal["status"] ?? "") !== "accepted") { notAccepted++; continue; }
+      if (String(proposal["file_mime_type"] ?? "") !== "application/pdf") { notPdf++; continue; }
+      examinable++;
 
       if (await proposalAlreadyExamined(job.jp_job_id, proposalId)) {
         result.already_examined++;
@@ -171,6 +175,28 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
         });
         result.details.push({ job_number: job.job_number, proposal_id: proposalId, outcome: "failed" });
       }
+    }
+
+    // Audit visibility: a scanned job with nothing readable still leaves a row,
+    // so the review tab shows everything the automation looked at — not just
+    // what it could act on. The 'none' sentinel never collides with a real
+    // proposal id, so a document added later is still examined normally.
+    if (examinable === 0) {
+      const parts = [`scanned: no accepted PDF documents on this job`];
+      if (notAccepted > 0) parts.push(`${notAccepted} proposal(s) not accepted`);
+      if (notPdf > 0) parts.push(`${notPdf} accepted non-PDF file(s)`);
+      if (proposals.length === 0) parts.push("no proposals at all");
+      await insertCandidate({
+        jp_job_id: job.jp_job_id,
+        job_number: job.job_number,
+        job_name: job.job_name,
+        contract_signed_date: job.contract_signed_date,
+        proposal_id: "none",
+        status: "skipped",
+        extraction_notes: parts.join("; "),
+        raw: "{}",
+      });
+      result.details.push({ job_number: job.job_number, proposal_id: "none", outcome: "no_documents" });
     }
   }
   console.info(

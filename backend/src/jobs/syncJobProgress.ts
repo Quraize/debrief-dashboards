@@ -437,9 +437,28 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
     }
 
     // Incremental when we have a watermark, occurrence-date otherwise.
-    const appointments = watermark
-      ? await client.listAppointmentsUpdatedSince(apiTimestamp(watermark), apiTimestamp(now))
-      : await client.listAppointmentsByDate(dateFrom, dateTo);
+    //
+    // An incremental run ALSO sweeps the forward calendar. The updated-since
+    // filter only sees records touched after the watermark, and a backfill only
+    // sweeps the past — so an appointment booked two weeks ago FOR tomorrow,
+    // untouched since, was invisible to both. The forward window closes that
+    // gap; the upserts make the overlap free.
+    let appointments: Record<string, unknown>[];
+    if (watermark) {
+      const forwardDays = Number(process.env.SYNC_FORWARD_DAYS ?? 14);
+      const forwardTo = apiTimestamp(new Date(now.getTime() + forwardDays * 86_400_000)).slice(0, 10);
+      const [updated, upcoming] = [
+        await client.listAppointmentsUpdatedSince(apiTimestamp(watermark), apiTimestamp(now)),
+        await client.listAppointmentsByDate(apiTimestamp(now).slice(0, 10), forwardTo),
+      ];
+      const byId = new Map<string, Record<string, unknown>>();
+      for (const a of [...updated, ...upcoming]) {
+        if (a["id"] != null) byId.set(String(a["id"]), a);
+      }
+      appointments = [...byId.values()];
+    } else {
+      appointments = await client.listAppointmentsByDate(dateFrom, dateTo);
+    }
 
     counts.api_appointments_examined = appointments.length;
 

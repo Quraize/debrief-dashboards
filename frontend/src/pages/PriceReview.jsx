@@ -34,6 +34,9 @@ export default function PriceReview() {
   const [days, setDays] = useState(5);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 15;
 
   const { data: candidates = [], isLoading } = useQuery({
     queryKey: ["price-candidates"],
@@ -48,7 +51,14 @@ export default function PriceReview() {
   }
 
   const pending = candidates.filter((c) => c.status === "pending");
-  const history = candidates.filter((c) => c.status !== "pending").slice(0, 25);
+  // The audit trail: every job scanned and every document read, not only the
+  // actionable ones. Filterable by outcome, paginated.
+  const auditAll = candidates.filter((c) => c.status !== "pending");
+  const audit = statusFilter === "all" ? auditAll : auditAll.filter((c) => c.status === statusFilter);
+  const pageCount = Math.max(1, Math.ceil(audit.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const history = audit.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const statusCounts = auditAll.reduce((m, c) => ({ ...m, [c.status]: (m[c.status] ?? 0) + 1 }), {});
 
   async function runScan() {
     setScanning(true);
@@ -204,10 +214,18 @@ export default function PriceReview() {
         </div>
       ))}
 
-      {/* History */}
-      {history.length > 0 && (
+      {/* Audit trail — everything the automation has looked at */}
+      {auditAll.length > 0 && (
         <div className="bg-white rounded-xl border border-border shadow-sm">
-          <h2 className="font-heading font-bold text-sm text-primary p-4 pb-2">History</h2>
+          <div className="flex flex-wrap items-center gap-2 p-4 pb-2">
+            <h2 className="font-heading font-bold text-sm text-primary mr-2">Everything Reviewed</h2>
+            {["all", "applied", "skipped", "rejected", "failed"].map((s) => (
+              <button key={s} onClick={() => { setStatusFilter(s); setPage(0); }}
+                className={`text-xs px-2.5 py-1 rounded-full font-semibold ${statusFilter === s ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}>
+                {s === "all" ? `All (${auditAll.length})` : `${s} (${statusCounts[s] ?? 0})`}
+              </button>
+            ))}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -225,7 +243,7 @@ export default function PriceReview() {
                 {history.map((r) => (
                   <tr key={r.id} className="border-b border-border/50 align-top">
                     <td className="px-4 py-2 whitespace-nowrap">{r.job_number || r.jp_job_id}</td>
-                    <td className="px-4 py-2">{r.proposal_title || r.proposal_file_name}</td>
+                    <td className="px-4 py-2">{r.proposal_id === "none" ? <span className="text-muted-foreground italic">no documents</span> : (r.proposal_title || r.proposal_file_name)}</td>
                     <td className="px-4 py-2">{r.classification || "—"}</td>
                     <td className="px-4 py-2 whitespace-nowrap">{r.extracted_amount ? money(r.extracted_amount) : "—"}</td>
                     <td className={`px-4 py-2 font-semibold ${r.status === "applied" ? "text-green-700" : r.status === "failed" ? "text-red-600" : "text-muted-foreground"}`}>{r.status}</td>
@@ -236,6 +254,17 @@ export default function PriceReview() {
               </tbody>
             </table>
           </div>
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between p-3 border-t border-border text-sm">
+              <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage === 0}
+                className="px-3 py-1.5 rounded-lg border border-border font-semibold disabled:opacity-40">← Prev</button>
+              <span className="text-muted-foreground text-xs">
+                Page {safePage + 1} of {pageCount} · {audit.length} record(s)
+              </span>
+              <button onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))} disabled={safePage >= pageCount - 1}
+                className="px-3 py-1.5 rounded-lg border border-border font-semibold disabled:opacity-40">Next →</button>
+            </div>
+          )}
         </div>
       )}
     </div>

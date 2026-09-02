@@ -23,11 +23,14 @@ interface StubExtras {
   results?: Record<string, unknown>;
   /** job id -> financial summary record, or { __status } to refuse the call */
   financials?: Record<string, unknown>;
+  /** served for the forward-calendar (duration=date) query on incremental runs */
+  upcoming?: unknown[];
 }
 
 /** Stubbed API in the documented response shapes. URL sniffing goes from the
  *  most specific path to the least, because `/appointments/{id}/result` also
- *  contains `/appointments`. */
+ *  contains `/appointments`. `extra.upcoming` serves the forward-calendar
+ *  occurrence query (duration=date) separately from the updated-since query. */
 function stubApi(appointments: unknown[], signedJobs: unknown[] = [], extra: StubExtras = {}) {
   const impl = (async (url: string) => {
     const u = String(url);
@@ -47,6 +50,8 @@ function stubApi(appointments: unknown[], signedJobs: unknown[] = [], extra: Stu
       data = record ? [record] : [];
     } else if (u.includes("/divisions")) {
       data = [{ id: 7, name: "ACR Roofing Division" }];
+    } else if (u.includes("/appointments") && u.includes("duration=date") && extra.upcoming) {
+      data = extra.upcoming;
     } else if (u.includes("/appointments")) {
       data = appointments;
     } else if (u.includes("contract_signed_date")) {
@@ -389,6 +394,22 @@ describe.skipIf(!reachable)("runJobProgressSync", () => {
     const { rows } = await db.owner.query<{ incremental_since: Date | null }>(
       `SELECT incremental_since FROM sync_run WHERE id = $1`, [result.syncRunId]);
     expect(rows[0]!.incremental_since, "the field the schema has always had and nothing wrote").not.toBeNull();
+  });
+
+  it("sweeps the forward calendar on incremental runs", async () => {
+    // The gap this closes: an appointment booked weeks ago FOR next week was
+    // neither updated since the watermark nor inside any past occurrence sweep.
+    const result = await runJobProgressSync({
+      mode: "commit",
+      client: stubApi([appointment(40)], [], {
+        upcoming: [appointment(40), appointment(41, { start_date_time: "2026-07-22T10:00:00" })],
+      }),
+    });
+    expect(result.incrementalSince, "must be an incremental run for this test to mean anything").not.toBeNull();
+    expect(result.counts.api_appointments_examined, "union of updated + upcoming, deduplicated").toBe(2);
+    const { rows } = await db.owner.query(
+      `SELECT jp_appointment_id FROM jp_appointment WHERE jp_appointment_id = '41'`);
+    expect(rows, "the never-updated future appointment is mirrored").toHaveLength(1);
   });
 
   it("counts signed sales from the direct query", async () => {
