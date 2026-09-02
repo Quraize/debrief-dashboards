@@ -131,11 +131,12 @@ export default function KpiDashboard() {
             </ResponsiveContainer>
           </ChartCard>
 
-          {/* Coverage matching uses ALL debriefs (insurance included) — a JP
-              insurance appointment with an insurance debrief is covered. */}
-          <JpKpiSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
         </>
       )}
+
+      {/* Independent of the debrief section by design — never gated on it.
+          Coverage matching uses ALL debriefs (insurance included). */}
+      <JpKpiSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
     </div>
   );
 }

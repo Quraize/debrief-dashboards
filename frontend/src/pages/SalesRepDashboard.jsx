@@ -204,9 +204,11 @@ export default function SalesRepDashboard() {
             </div>
           </div>
 
-          <JpRepSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
         </>
       )}
+
+      {/* Independent of the debrief section by design — never gated on it. */}
+      <JpRepSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
     </div>
   );
 }

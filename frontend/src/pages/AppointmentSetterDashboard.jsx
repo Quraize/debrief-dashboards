@@ -215,9 +215,12 @@ export default function AppointmentSetterDashboard() {
             </div>
           </div>
 
-          <JpSetterSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
         </>
       )}
+
+      {/* Independent of the debrief section by design: renders even when the
+          period has no debriefs at all — that gap is exactly what it shows. */}
+      <JpSetterSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
     </div>
   );
 }
