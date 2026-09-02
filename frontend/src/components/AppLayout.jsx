@@ -4,7 +4,7 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle
 } from "lucide-react";
 
 const DASHBOARDS = [
@@ -31,6 +31,7 @@ const OPERATIONS = [
 const ADMIN_OPERATIONS = [
   { to: "/jobprogress-sync", label: "JobProgress Sync", icon: RefreshCw },
   { to: "/price-review", label: "Price Review", icon: BadgeDollarSign },
+  { to: "/users", label: "Users", icon: UsersIcon },
 ];
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];
@@ -60,9 +61,11 @@ export default function AppLayout() {
           </div>
           <div className="flex items-center gap-2">
             {me && (
-              <span className="hidden sm:inline text-xs bg-white/10 px-2 py-1 rounded-full">
-                {me.full_name || me.email}
-              </span>
+              <NavLink to="/account" title="My Account — password, two-factor, sessions"
+                className="flex items-center gap-1.5 text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded-full">
+                <UserCircle className="w-4 h-4" />
+                <span className="hidden sm:inline">{me.fullName || me.full_name || me.email}</span>
+              </NavLink>
             )}
             <button className="lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">
               <Menu className="w-6 h-6" />

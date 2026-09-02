@@ -24,7 +24,7 @@ export default function AdminSettings() {
       <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
         <h2 className="font-heading font-bold text-sm text-primary mb-3">Users / Reps ({users.length})</h2>
         {users.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No users. Invite team members from the platform Users panel.</p>
+          <p className="text-sm text-muted-foreground">No users yet. Create accounts on the <a href="/users" className="underline">Users</a> page.</p>
         ) : (
           <div className="space-y-1">
             {users.map((u) => (

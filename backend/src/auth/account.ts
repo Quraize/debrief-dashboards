@@ -18,7 +18,8 @@ const TOTP_WINDOW = 1;
 
 export type AuthEvent =
   | "login" | "logout" | "login_failed" | "locked_out" | "totp_enrolled"
-  | "totp_failed" | "session_expired" | "session_revoked" | "password_changed";
+  | "totp_failed" | "session_expired" | "session_revoked" | "password_changed"
+  | "user_created" | "user_updated" | "user_unlocked" | "password_reset";
 
 export interface AuthContext {
   ip?: string | undefined;

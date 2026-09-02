@@ -135,6 +135,29 @@ const auth = {
     begin: () => post("/api/auth/totp/begin"),
     confirm: (secret, code) => post("/api/auth/totp/confirm", { secret, code }),
   },
+
+  // ── Self-service account management ──
+  account: async () => (await get("/api/auth/account")).account,
+  changePassword: (currentPassword, newPassword) =>
+    post("/api/auth/password", { current_password: currentPassword, new_password: newPassword }),
+  sessions: {
+    list: async () => (await get("/api/auth/sessions")).sessions,
+    revoke: (id) => del(`/api/auth/sessions/${encodeURIComponent(id)}`),
+    revokeOthers: () => post("/api/auth/sessions/revoke-others"),
+  },
+};
+
+/** Admin-only account administration. Every call is role-checked server-side. */
+const admin = {
+  users: {
+    list: async () => (await get("/api/admin/users")).users,
+    create: (data) => post("/api/admin/users", data),
+    update: (id, changes) => patch(`/api/admin/users/${encodeURIComponent(id)}`, changes),
+    unlock: (id) => post(`/api/admin/users/${encodeURIComponent(id)}/unlock`),
+    resetPassword: (id, password) =>
+      post(`/api/admin/users/${encodeURIComponent(id)}/reset-password`, { password }),
+    revokeSessions: (id) => post(`/api/admin/users/${encodeURIComponent(id)}/revoke-sessions`),
+  },
 };
 
 const functions = {
@@ -165,7 +188,7 @@ const integrations = {
   },
 };
 
-export const api = { entities, auth, functions, integrations };
+export const api = { entities, auth, functions, integrations, admin };
 
 /**
  * Legacy alias.

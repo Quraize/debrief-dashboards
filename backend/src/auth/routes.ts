@@ -19,8 +19,12 @@ import {
 } from "./account.js";
 import {
   SESSION_COOKIE, CSRF_COOKIE, sessionCookieOptions, csrfCookieOptions, clearCookieOptions,
-  requireAuth, requireCsrf, clientIp, userAgent,
+  requireAuth, requireCsrf, requireRole, clientIp, userAgent,
 } from "../middleware/auth.js";
+import {
+  getAccount, listSessions, revokeSessionById, changeOwnPassword,
+  listUsers, createUser, updateUser, unlockUser, resetUserPassword, userEmail,
+} from "./manage.js";
 
 interface LoginBody { email?: string; password?: string; totp?: string }
 
@@ -182,4 +186,147 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const revoked = await revokeAllSessionsFor(req.user!.id, req.sessionToken);
     return reply.send({ ok: true, otherSessionsRevoked: revoked });
   });
+
+  // ── Self-service account management ──
+
+  app.get("/api/auth/account", { preHandler: requireAuth },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const account = await getAccount(req.user!.id);
+      if (!account) return reply.code(404).send({ error: "Account not found" });
+      return reply.send({ account });
+    });
+
+  app.post<{ Body: { current_password: string; new_password: string } }>("/api/auth/password", {
+    preHandler: [requireAuth, requireCsrf],
+    schema: {
+      body: {
+        type: "object",
+        required: ["current_password", "new_password"],
+        properties: {
+          current_password: { type: "string", minLength: 1, maxLength: 1024 },
+          new_password: { type: "string", minLength: 1, maxLength: 1024 },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const ctx = { ip: clientIp(req), userAgent: userAgent(req) };
+    const result = await changeOwnPassword(
+      req.user!.id, req.body.current_password, req.body.new_password, req.sessionToken);
+    await recordAuthEvent("password_changed", true, req.user!.email, ctx,
+      `self-service; ${result.otherSessionsRevoked} other session(s) revoked`);
+    return reply.send({ ok: true, ...result });
+  });
+
+  app.get("/api/auth/sessions", { preHandler: requireAuth },
+    async (req: FastifyRequest, reply: FastifyReply) =>
+      reply.send({ sessions: await listSessions(req.user!.id, req.sessionToken) }));
+
+  app.delete<{ Params: { id: string } }>("/api/auth/sessions/:id",
+    { preHandler: [requireAuth, requireCsrf] },
+    async (req, reply) => {
+      const ok = await revokeSessionById(req.user!.id, req.params.id);
+      if (!ok) return reply.code(404).send({ error: "No such active session" });
+      await recordAuthEvent("session_revoked", true, req.user!.email,
+        { ip: clientIp(req), userAgent: userAgent(req) }, "one session, self-service");
+      return reply.send({ ok: true });
+    });
+
+  app.post("/api/auth/sessions/revoke-others", { preHandler: [requireAuth, requireCsrf] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const revoked = await revokeAllSessionsFor(req.user!.id, req.sessionToken);
+      await recordAuthEvent("session_revoked", true, req.user!.email,
+        { ip: clientIp(req), userAgent: userAgent(req) }, `sign out everywhere else: ${revoked} session(s)`);
+      return reply.send({ ok: true, revoked });
+    });
+
+  // ── Administration (admin role only) ──
+  // Account provisioning by an authenticated admin is deliberately NOT a
+  // registration route: nobody can create their own account (D11 still holds).
+
+  const adminRead = { preHandler: [requireAuth, requireRole("admin")] };
+  const adminWrite = { preHandler: [requireAuth, requireCsrf, requireRole("admin")] };
+  const actorCtx = (req: FastifyRequest) => ({ ip: clientIp(req), userAgent: userAgent(req) });
+
+  app.get("/api/admin/users", adminRead,
+    async (_req: FastifyRequest, reply: FastifyReply) => reply.send({ users: await listUsers() }));
+
+  app.post<{ Body: { email: string; full_name?: string; role: string; password: string } }>(
+    "/api/admin/users", {
+      ...adminWrite,
+      schema: {
+        body: {
+          type: "object",
+          required: ["email", "role", "password"],
+          properties: {
+            email: { type: "string", minLength: 3, maxLength: 320 },
+            full_name: { type: "string", maxLength: 200 },
+            role: { type: "string", maxLength: 40 },
+            password: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        },
+      },
+    }, async (req, reply) => {
+      const { id } = await createUser({
+        email: req.body.email, fullName: req.body.full_name, role: req.body.role, password: req.body.password,
+      });
+      await recordAuthEvent("user_created", true, req.body.email.trim().toLowerCase(), actorCtx(req),
+        `role ${req.body.role}; by ${req.user!.email}`);
+      return reply.code(201).send({ id });
+    });
+
+  app.patch<{ Params: { id: string }; Body: { role?: string; full_name?: string; active?: boolean } }>(
+    "/api/admin/users/:id", {
+      ...adminWrite,
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            role: { type: "string", maxLength: 40 },
+            full_name: { type: "string", maxLength: 200 },
+            active: { type: "boolean" },
+          },
+        },
+      },
+    }, async (req, reply) => {
+      const result = await updateUser(req.params.id, req.user!.id, {
+        role: req.body.role, fullName: req.body.full_name, active: req.body.active,
+      });
+      await recordAuthEvent("user_updated", true, await userEmail(req.params.id), actorCtx(req),
+        `${JSON.stringify(req.body)}; by ${req.user!.email}`);
+      return reply.send({ ok: true, ...result });
+    });
+
+  app.post<{ Params: { id: string } }>("/api/admin/users/:id/unlock", adminWrite,
+    async (req, reply) => {
+      await unlockUser(req.params.id);
+      await recordAuthEvent("user_unlocked", true, await userEmail(req.params.id), actorCtx(req),
+        `by ${req.user!.email}`);
+      return reply.send({ ok: true });
+    });
+
+  app.post<{ Params: { id: string }; Body: { password: string } }>(
+    "/api/admin/users/:id/reset-password", {
+      ...adminWrite,
+      schema: {
+        body: {
+          type: "object", required: ["password"],
+          properties: { password: { type: "string", minLength: 1, maxLength: 1024 } },
+        },
+      },
+    }, async (req, reply) => {
+      const result = await resetUserPassword(req.params.id, req.body.password);
+      await recordAuthEvent("password_reset", true, await userEmail(req.params.id), actorCtx(req),
+        `by ${req.user!.email}; ${result.sessionsRevoked} session(s) revoked`);
+      return reply.send({ ok: true, ...result });
+    });
+
+  app.post<{ Params: { id: string } }>("/api/admin/users/:id/revoke-sessions", adminWrite,
+    async (req, reply) => {
+      const email = await userEmail(req.params.id);
+      if (!email) return reply.code(404).send({ error: "User not found" });
+      const revoked = await revokeAllSessionsFor(req.params.id);
+      await recordAuthEvent("session_revoked", true, email, actorCtx(req),
+        `all sessions, by admin ${req.user!.email}: ${revoked}`);
+      return reply.send({ ok: true, revoked });
+    });
 }
