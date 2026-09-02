@@ -21,8 +21,19 @@ import PgBoss from "pg-boss";
 import { dbJobs, withServiceRole } from "../db/client.js";
 import { runJobProgressSync, type SyncMode } from "./syncJobProgress.js";
 import { runBackfill, monthChunks, type BackfillResult } from "./backfill.js";
+import { scanContractPrices, type ScanResult } from "./contractPrices.js";
 
 export const SYNC_QUEUE = "leap-sync";
+/** Separate queue: the contract scan neither conflicts with the sync nor
+ *  should ever wait behind a long backfill. */
+export const PRICE_SCAN_QUEUE = "price-scan";
+const PRICE_SCAN_DEFAULT_CRON = "30 12,20 * * *"; // 8:30a / 4:30p New York (EDT)
+
+const PRICE_SCAN_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 1,
+  retryDelay: 300,
+  expireInSeconds: 1800,
+};
 /** Session advisory lock guarding every sync path. 40172026 is the migration
  *  runner's lock; this is deliberately adjacent but distinct. */
 export const SYNC_LOCK_KEY = 40172027;
@@ -139,6 +150,34 @@ export async function handleSyncJob(
 }
 
 /**
+ * Whether the automatic contract scan should run. It rides the same master
+ * switch as the sync, but additionally needs both credentials — scheduling it
+ * without them would just produce a failed job twice a day.
+ */
+export function priceScanSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const cron = process.env.PRICE_SCAN_CRON ?? PRICE_SCAN_DEFAULT_CRON;
+  if (process.env.SYNC_SCHEDULE_ENABLED !== "true") {
+    return { enabled: false, cron, reason: "SYNC_SCHEDULE_ENABLED is not true" };
+  }
+  if (!process.env.ANTHROPIC_API_KEY) return { enabled: false, cron, reason: "ANTHROPIC_API_KEY not set" };
+  if (!process.env.LEAP_API_TOKEN) return { enabled: false, cron, reason: "LEAP_API_TOKEN not set" };
+  return { enabled: true, cron, reason: "" };
+}
+
+/** The price-scan worker. No sync lock: it only reads JobProgress and writes
+ *  the review queue, so it may run alongside a sync. */
+export async function handlePriceScanJob(
+  deps: { scan?: typeof scanContractPrices } = {},
+): Promise<ScanResult> {
+  const scan = deps.scan ?? scanContractPrices;
+  const result = await scan({ startedBy: "scheduler" });
+  console.info(
+    `[scheduler] contract scan: ${result.jobs_scanned} job(s), ${result.proposals_examined} read, `
+    + `${result.candidates_created} result(s)`);
+  return result;
+}
+
+/**
  * Marks abandoned runs. A crash mid-sync leaves a `running` row forever, and a
  * stale one both lies on the admin page and (worse) would make an overlap guard
  * based on rows unusable — which is exactly why the guard uses a lock instead.
@@ -216,6 +255,28 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       SYNC_QUEUE,
       { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
       async ([job]) => handleSyncJob(job!),
+    );
+  }
+
+  // ── Contract price scan: its own queue and cron ──
+  const scanQueue = await instance.getQueue(PRICE_SCAN_QUEUE);
+  if (!scanQueue) {
+    await instance.createQueue(PRICE_SCAN_QUEUE, { name: PRICE_SCAN_QUEUE, policy: "singleton" });
+  }
+  const scan = priceScanSchedule();
+  if (scan.enabled) {
+    await instance.schedule(PRICE_SCAN_QUEUE, scan.cron, { startedBy: "scheduler" },
+      { ...PRICE_SCAN_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${PRICE_SCAN_QUEUE} scheduled: "${scan.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(PRICE_SCAN_QUEUE);
+    console.info(`[scheduler] scheduled contract scan disabled (${scan.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      PRICE_SCAN_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handlePriceScanJob(),
     );
   }
 
@@ -331,6 +392,10 @@ export async function enqueueBackfill(data: {
 export interface SyncStatus {
   schedule: { enabled: boolean; cron: string; timezone: "UTC" };
   lastScheduledRun: { started_at: string; finished_at: string | null; status: string } | null;
+  priceScan: {
+    enabled: boolean; cron: string; reason: string;
+    lastRun: { completed_on: string; state: string } | null;
+  };
   backfill: {
     active: boolean;
     jobId?: string;
@@ -381,6 +446,20 @@ export async function syncStatus(): Promise<SyncStatus> {
     }
   }
 
+  // The scan writes no run table of its own; pg-boss's job history (live +
+  // archive) is the record of when it last ran.
+  let lastScanRun: SyncStatus["priceScan"]["lastRun"] = null;
+  if (boss) {
+    const { rows } = await dbJobs().query<{ completed_on: Date; state: string }>(
+      `SELECT completed_on, state FROM (
+         SELECT completed_on, state FROM pgboss.job WHERE name = $1 AND completed_on IS NOT NULL
+         UNION ALL
+         SELECT completed_on, state FROM pgboss.archive WHERE name = $1 AND completed_on IS NOT NULL
+       ) runs ORDER BY completed_on DESC LIMIT 1`, [PRICE_SCAN_QUEUE]);
+    const run = rows[0];
+    if (run) lastScanRun = { completed_on: run.completed_on.toISOString(), state: run.state };
+  }
+
   return {
     schedule: {
       enabled: process.env.SYNC_SCHEDULE_ENABLED === "true",
@@ -388,6 +467,7 @@ export async function syncStatus(): Promise<SyncStatus> {
       timezone: "UTC",
     },
     lastScheduledRun,
+    priceScan: { ...priceScanSchedule(), lastRun: lastScanRun },
     backfill,
   };
 }

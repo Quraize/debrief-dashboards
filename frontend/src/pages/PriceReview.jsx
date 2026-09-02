@@ -44,6 +44,13 @@ export default function PriceReview() {
     enabled: isAdmin,
     refetchInterval: 60_000,
   });
+  const { data: syncStatus } = useQuery({
+    queryKey: ["sync-status"],
+    queryFn: () => base44.functions.invoke("getSyncStatus", {}).then((r) => r.data).catch(() => null),
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+  });
+  const auto = syncStatus?.priceScan;
 
   if (user && user.role !== "admin") return <AccessDenied />;
   if (!user) {
@@ -136,6 +143,19 @@ export default function PriceReview() {
           Finds documents accepted in the last N days across all jobs (insurance excluded), straight from
           JobProgress. Reads documents only — never writes a price. Documents already examined are skipped.
         </p>
+        {auto && (
+          <p className="text-xs basis-full">
+            <span className="font-semibold">Automatic scan:</span>{" "}
+            {auto.enabled ? (
+              <span className="text-green-700">Active — twice daily (UTC cron <code>{auto.cron}</code>)</span>
+            ) : (
+              <span className="text-muted-foreground">Disabled ({auto.reason})</span>
+            )}
+            {auto.lastRun && (
+              <span className="text-muted-foreground"> · last ran {new Date(auto.lastRun.completed_on).toLocaleString()} ({auto.lastRun.state})</span>
+            )}
+          </p>
+        )}
       </div>
 
       {/* Pending review */}

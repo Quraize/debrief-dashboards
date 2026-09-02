@@ -165,6 +165,15 @@ export default function JobProgressSync() {
             <span className="text-sm text-muted-foreground">—</span>
           )}
         </div>
+        {syncStatus?.priceScan && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">Contract Scan:</span>
+            <span className={`text-sm ${syncStatus.priceScan.enabled ? "text-green-700 font-medium" : "text-muted-foreground"}`}
+              title={syncStatus.priceScan.enabled ? `cron "${syncStatus.priceScan.cron}" (UTC)` : syncStatus.priceScan.reason}>
+              {syncStatus.priceScan.enabled ? "Active — 2×/day (UTC)" : "Disabled"}
+            </span>
+          </div>
+        )}
         {syncStatus?.lastScheduledRun && (
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">Last Scheduled Run:</span>

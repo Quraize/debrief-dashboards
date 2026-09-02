@@ -70,6 +70,46 @@ describe.skipIf(!reachable)("scheduler", () => {
     expect(await scheduler.getBoss()!.getSchedules()).toEqual([]);
   });
 
+  it("creates the price-scan queue but schedules it only when both credentials exist", async () => {
+    let boss = scheduler.getBoss()!;
+    expect((await boss.getQueue(scheduler.PRICE_SCAN_QUEUE))?.policy).toBe("singleton");
+    // Master switch on, credentials missing → sync scheduled, scan not.
+    await scheduler.stopScheduler({ graceful: false });
+    process.env.SYNC_SCHEDULE_ENABLED = "true";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.LEAP_API_TOKEN;
+    await scheduler.startScheduler();
+    boss = scheduler.getBoss()!;
+    expect((await boss.getSchedules()).map((s) => s.name)).toEqual([scheduler.SYNC_QUEUE]);
+    expect(scheduler.priceScanSchedule().reason).toMatch(/ANTHROPIC_API_KEY/);
+
+    // Both credentials present → both schedules.
+    await scheduler.stopScheduler({ graceful: false });
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.LEAP_API_TOKEN = "leap-test";
+    await scheduler.startScheduler();
+    boss = scheduler.getBoss()!;
+    const names = (await boss.getSchedules()).map((s) => s.name).sort();
+    expect(names).toEqual([scheduler.SYNC_QUEUE, scheduler.PRICE_SCAN_QUEUE].sort());
+
+    // Cleanup for the tests that follow (they expect the sync schedule off).
+    await scheduler.stopScheduler({ graceful: false });
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.LEAP_API_TOKEN;
+    process.env.SYNC_SCHEDULE_ENABLED = "false";
+    await scheduler.startScheduler();
+  });
+
+  it("runs the contract scan through its worker handler", async () => {
+    const out = await scheduler.handlePriceScanJob({
+      scan: async () => ({
+        jobs_scanned: 3, proposals_examined: 2, candidates_created: 1,
+        already_examined: 0, extraction_errors: 0, details: [],
+      }),
+    });
+    expect(out.candidates_created).toBe(1);
+  });
+
   it("returns counts from a successful scheduled run", async () => {
     const out = await scheduler.handleSyncJob(
       { id: "j1", data: { kind: "incremental" } },
