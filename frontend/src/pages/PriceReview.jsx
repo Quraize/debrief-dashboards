@@ -114,7 +114,8 @@ export default function PriceReview() {
         <div>
           <h1 className="text-2xl font-heading font-bold text-primary">Contract Price Review</h1>
           <p className="text-sm text-muted-foreground">
-            AI reads accepted contracts on recently signed jobs missing a Job Price. You approve; only then is JobProgress updated.
+            AI finds documents accepted in JobProgress recently, checks whether their job has a Job Price,
+            and reads the contract when it doesn't. You approve; only then is JobProgress updated.
           </p>
         </div>
       </div>
@@ -129,10 +130,11 @@ export default function PriceReview() {
         <button onClick={runScan} disabled={scanning}
           className="bg-primary text-primary-foreground rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
           {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
-          Scan Signed Jobs
+          Scan Recent Contracts
         </button>
         <p className="text-xs text-muted-foreground basis-full">
-          Reads documents only — never writes a price. Documents already examined are skipped automatically.
+          Finds documents accepted in the last N days across all jobs (insurance excluded), straight from
+          JobProgress. Reads documents only — never writes a price. Documents already examined are skipped.
         </p>
       </div>
 

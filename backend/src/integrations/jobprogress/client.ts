@@ -187,12 +187,13 @@ export class JobProgressClient {
    */
   private async *paginate<T>(
     path: string, params: Record<string, string | number | string[] | undefined>, endpoint: string,
+    opts: { sortOrder?: "asc" | "desc" } = {},
   ): AsyncGenerator<T[], void, unknown> {
     let page = 1;
     let totalPages = 1;
     do {
       const body = await this.request<{ data: T[]; meta?: { pagination?: Pagination } }>(
-        this.url(path, { ...params, limit: MAX_PAGE, page, sort_by: "id", sort_order: "asc" }),
+        this.url(path, { ...params, limit: MAX_PAGE, page, sort_by: "id", sort_order: opts.sortOrder ?? "asc" }),
         endpoint,
       );
       const rows = body.data ?? [];
@@ -308,6 +309,27 @@ export class JobProgressClient {
    */
   async listProposals(jobId: string | number): Promise<Record<string, unknown>[]> {
     return this.collect<Record<string, unknown>>("/proposals", { job_id: String(jobId) }, "proposals");
+  }
+
+  /**
+   * Proposals across ALL jobs, newest first, down to `sinceIso`
+   * (YYYY-MM-DD HH:MM:SS). The endpoint documents no date filter, so this pages
+   * descending by id — which tracks creation time — and stops at the first page
+   * that has fallen entirely outside the window.
+   */
+  async listRecentProposals(sinceIso: string): Promise<Record<string, unknown>[]> {
+    const out: Record<string, unknown>[] = [];
+    for await (const page of this.paginate<Record<string, unknown>>(
+      "/proposals", {}, "proposals:recent", { sortOrder: "desc" })) {
+      let pastWindow = false;
+      for (const p of page) {
+        const stamp = String(p["updated_at"] ?? p["created_at"] ?? "");
+        if (stamp && stamp >= sinceIso) out.push(p);
+        else pastWindow = true;
+      }
+      if (pastWindow) break;
+    }
+    return out;
   }
 
   /**

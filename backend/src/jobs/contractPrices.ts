@@ -39,26 +39,6 @@ export interface ScanResult {
 const MIN_PLAUSIBLE = 100;
 const MAX_PLAUSIBLE = 500_000;
 
-interface CandidateJob {
-  jp_job_id: string;
-  job_number: string | null;
-  job_name: string | null;
-  contract_signed_date: string | null;
-}
-
-async function findCandidateJobs(days: number): Promise<CandidateJob[]> {
-  return withServiceRole(async (c) => {
-    const { rows } = await c.query<CandidateJob>(
-      `SELECT jp_job_id, job_number, job_name, contract_signed_date::text
-         FROM jp_job
-        WHERE contract_signed_date >= current_date - $1::int
-          AND is_insurance = false
-          AND coalesce(total_job_price, 0) = 0`,
-      [days]);
-    return rows;
-  }, "price-scan:candidates", { quiet: true });
-}
-
 async function proposalAlreadyExamined(jpJobId: string, proposalId: string): Promise<boolean> {
   return withServiceRole(async (c) => {
     const { rows } = await c.query(
@@ -113,46 +93,98 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
     already_examined: 0, extraction_errors: 0, details: [],
   };
 
-  const jobs = await findCandidateJobs(days);
-  for (const job of jobs) {
+  // Discovery starts from the actual trigger event — a document ACCEPTED in the
+  // window — not from the job's contract_signed_date. Leap only sets that date
+  // for digitally signed worksheets (and auto-fills their price with it); the
+  // jobs that genuinely need manual price entry are scanned-upload contracts,
+  // which carry no signed date and were invisible to a signed-date scan.
+  const sinceIso = new Date(Date.now() - days * 86_400_000)
+    .toISOString().slice(0, 19).replace("T", " ");
+  const recent = (await client.listRecentProposals(sinceIso)).filter((p) =>
+    p["id"] != null && p["job_id"] != null
+    && String(p["status"] ?? "") === "accepted"
+    && String(p["file_mime_type"] ?? "") === "application/pdf");
+
+  const byJob = new Map<string, Record<string, unknown>[]>();
+  for (const p of recent) {
+    const jobId = String(p["job_id"]);
+    (byJob.get(jobId) ?? byJob.set(jobId, []).get(jobId)!).push(p);
+  }
+
+  // One batched call for job metadata: insurance flag, number, name, signed date.
+  const metaById = new Map<string, Record<string, unknown>>();
+  for (const j of await client.listJobsByIds([...byJob.keys()])) {
+    if (j["id"] != null) metaById.set(String(j["id"]), j);
+  }
+
+  for (const [jobId, proposals] of byJob) {
     result.jobs_scanned++;
-    const proposals = await client.listProposals(job.jp_job_id);
-    let examinable = 0;
-    let notAccepted = 0;
-    let notPdf = 0;
+    const meta = metaById.get(jobId);
+    const jobNumber = meta?.["number"] != null ? String(meta["number"]) : null;
+    const baseJob = {
+      jp_job_id: jobId,
+      job_number: jobNumber,
+      job_name: (meta?.["name"] as string) ?? null,
+      contract_signed_date: meta?.["contract_signed_date"]
+        ? String(meta["contract_signed_date"]).slice(0, 10) : null,
+    };
+    const auditRow = (proposal: Record<string, unknown>, extra: Record<string, unknown>) => ({
+      ...baseJob,
+      customer_id: proposal["customer_id"] != null ? String(proposal["customer_id"]) : null,
+      proposal_id: String(proposal["id"]),
+      proposal_title: (proposal["title"] as string) ?? null,
+      proposal_file_name: (proposal["file_name"] as string) ?? null,
+      proposal_status: (proposal["status"] as string) ?? null,
+      ...extra,
+    });
+
+    // Insurance jobs are out of scope by the business rule — audited, not read.
+    if (meta?.["insurance"]) {
+      for (const proposal of proposals) {
+        if (await proposalAlreadyExamined(jobId, String(proposal["id"]))) continue;
+        await insertCandidate(auditRow(proposal, {
+          status: "skipped", extraction_notes: "insurance job — out of scope for price automation", raw: "{}",
+        }));
+        result.details.push({ job_number: jobNumber, proposal_id: String(proposal["id"]), outcome: "insurance" });
+      }
+      continue;
+    }
+
+    // The LIVE financials decide whether a price is needed — never the mirror.
+    let existingPrice = 0;
+    try {
+      const summary = await client.financialSummary(jobId);
+      existingPrice = Number(summary?.["total_job_price"] ?? 0) || 0;
+    } catch {
+      // A refused summary (the API 412s on some jobs) must not hide a missing
+      // price — proceed to extraction; the approve step re-checks anyway.
+    }
+    if (existingPrice > 0) {
+      for (const proposal of proposals) {
+        if (await proposalAlreadyExamined(jobId, String(proposal["id"]))) continue;
+        await insertCandidate(auditRow(proposal, {
+          status: "skipped",
+          extraction_notes: `price already set in JobProgress ($${existingPrice}) — no action needed`,
+          raw: "{}",
+        }));
+        result.details.push({ job_number: jobNumber, proposal_id: String(proposal["id"]), outcome: "already_priced" });
+      }
+      continue;
+    }
 
     for (const proposal of proposals) {
-      const proposalId = String(proposal["id"] ?? "");
-      if (!proposalId) continue;
-      // The user's rule, verified on real data: only accepted documents count.
-      if (String(proposal["status"] ?? "") !== "accepted") { notAccepted++; continue; }
-      if (String(proposal["file_mime_type"] ?? "") !== "application/pdf") { notPdf++; continue; }
-      examinable++;
-
-      if (await proposalAlreadyExamined(job.jp_job_id, proposalId)) {
+      const proposalId = String(proposal["id"]);
+      if (await proposalAlreadyExamined(jobId, proposalId)) {
         result.already_examined++;
         continue;
       }
       result.proposals_examined++;
 
-      const base: Record<string, unknown> = {
-        jp_job_id: job.jp_job_id,
-        job_number: job.job_number,
-        job_name: job.job_name,
-        customer_id: proposal["customer_id"] != null ? String(proposal["customer_id"]) : null,
-        contract_signed_date: job.contract_signed_date,
-        proposal_id: proposalId,
-        proposal_title: (proposal["title"] as string) ?? null,
-        proposal_file_name: (proposal["file_name"] as string) ?? null,
-        proposal_status: (proposal["status"] as string) ?? null,
-      };
-
       try {
         const file = await client.downloadFile(String(proposal["url"]));
         const extraction = await extract(file.data);
-        const { status, notes } = candidateStatus(extraction, job.job_number);
-        await insertCandidate({
-          ...base,
+        const { status, notes } = candidateStatus(extraction, jobNumber);
+        await insertCandidate(auditRow(proposal, {
           classification: extraction.classification,
           extracted_amount: extraction.amount,
           extracted_job_number: extraction.jobNumber,
@@ -161,42 +193,19 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
           model: extraction.model,
           status,
           raw: JSON.stringify({ proposal: { ...proposal, url: undefined, thumb: undefined } }),
-        });
+        }));
         result.candidates_created++;
-        result.details.push({ job_number: job.job_number, proposal_id: proposalId, outcome: status });
+        result.details.push({ job_number: jobNumber, proposal_id: proposalId, outcome: status });
       } catch (err) {
         result.extraction_errors++;
-        await insertCandidate({
-          ...base,
+        await insertCandidate(auditRow(proposal, {
           classification: "unreadable",
           extraction_notes: `extraction failed: ${(err as Error).message}`.slice(0, 400),
           status: "failed",
           raw: "{}",
-        });
-        result.details.push({ job_number: job.job_number, proposal_id: proposalId, outcome: "failed" });
+        }));
+        result.details.push({ job_number: jobNumber, proposal_id: proposalId, outcome: "failed" });
       }
-    }
-
-    // Audit visibility: a scanned job with nothing readable still leaves a row,
-    // so the review tab shows everything the automation looked at — not just
-    // what it could act on. The 'none' sentinel never collides with a real
-    // proposal id, so a document added later is still examined normally.
-    if (examinable === 0) {
-      const parts = [`scanned: no accepted PDF documents on this job`];
-      if (notAccepted > 0) parts.push(`${notAccepted} proposal(s) not accepted`);
-      if (notPdf > 0) parts.push(`${notPdf} accepted non-PDF file(s)`);
-      if (proposals.length === 0) parts.push("no proposals at all");
-      await insertCandidate({
-        jp_job_id: job.jp_job_id,
-        job_number: job.job_number,
-        job_name: job.job_name,
-        contract_signed_date: job.contract_signed_date,
-        proposal_id: "none",
-        status: "skipped",
-        extraction_notes: parts.join("; "),
-        raw: "{}",
-      });
-      result.details.push({ job_number: job.job_number, proposal_id: "none", outcome: "no_documents" });
     }
   }
   console.info(
