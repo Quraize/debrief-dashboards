@@ -214,9 +214,12 @@ export async function scanContractPrices(options: ScanOptions = {}): Promise<Sca
   return result;
 }
 
+/** expose: the message is safe and useful for the admin UI even on 5xx (e.g. a
+ *  502 carrying JobProgress's own rejection reason). */
 function httpError(message: string, statusCode: number): Error {
-  const err = new Error(message) as Error & { statusCode: number };
+  const err = new Error(message) as Error & { statusCode: number; expose: boolean };
   err.statusCode = statusCode;
+  err.expose = true;
   return err;
 }
 
@@ -239,10 +242,24 @@ export async function approveCandidate(
   const jp = client ?? new JobProgressClient();
 
   // The overwrite guard: someone may have set the price since the scan. The
-  // LIVE summary decides, not our mirror.
-  const summary = await jp.financialSummary(row.jp_job_id);
-  const existing = Number(unwrap<Record<string, unknown>>(summary)?.["total_job_price"] ?? summary?.["total_job_price"] ?? 0);
-  if (Number.isFinite(existing) && existing > 0) {
+  // LIVE summary decides when it can — JobProgress refuses this endpoint with
+  // HTTP 412 on some jobs, so a refusal falls back to our mirror rather than
+  // making the job un-approvable forever. The fallback is recorded on the row.
+  let existing = 0;
+  let liveCheckNote = "";
+  try {
+    const summary = await jp.financialSummary(row.jp_job_id);
+    existing = Number(unwrap<Record<string, unknown>>(summary)?.["total_job_price"] ?? summary?.["total_job_price"] ?? 0) || 0;
+  } catch (err) {
+    const mirror = await withServiceRole(async (c) => {
+      const { rows } = await c.query<{ total_job_price: string | null }>(
+        `SELECT total_job_price FROM jp_job WHERE jp_job_id = $1`, [row.jp_job_id]);
+      return Number(rows[0]?.total_job_price ?? 0) || 0;
+    }, "price-approve:mirror-fallback", { quiet: true });
+    existing = mirror;
+    liveCheckNote = `live financial check unavailable (${(err as Error).message.slice(0, 80)}); mirror consulted instead`;
+  }
+  if (existing > 0) {
     await closeCandidate(candidateId, "skipped", actor, `price already set in JobProgress ($${existing})`);
     return { applied: false, amount, reason: `Job already has a price ($${existing}) — nothing written.` };
   }
@@ -262,9 +279,10 @@ export async function approveCandidate(
   await withServiceRole(async (c) => {
     await c.query(
       `UPDATE jp_price_candidate
-          SET status = 'applied', reviewed_by = $2, reviewed_at = now(), applied_at = now(), apply_error = NULL
+          SET status = 'applied', reviewed_by = $2, reviewed_at = now(), applied_at = now(), apply_error = NULL,
+              extraction_notes = CASE WHEN $3 <> '' THEN coalesce(extraction_notes || '; ', '') || $3 ELSE extraction_notes END
         WHERE id = $1`,
-      [candidateId, actor]);
+      [candidateId, actor, liveCheckNote]);
     // Keep the mirror honest immediately rather than waiting for the next sync.
     await c.query(
       `UPDATE jp_job SET total_job_price = $2, financials_fetched_at = now()

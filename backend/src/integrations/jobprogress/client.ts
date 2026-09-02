@@ -171,7 +171,11 @@ export class JobProgressClient {
           res.status === 401 ? " (token missing, invalid or expired)"
           : res.status === 403 ? " (token lacks permission; Leap requires an admin-generated token)"
           : "";
-        throw new JobProgressError(`HTTP ${res.status}${hint}`, res.status, endpoint);
+        // The API's own message is the only thing that explains a 4xx on a
+        // write (validation rules, business-state refusals). Keep it short.
+        const body = await res.text().then((t) => t.replace(/\s+/g, " ").slice(0, 300)).catch(() => "");
+        throw new JobProgressError(
+          `HTTP ${res.status}${hint}${body ? `: ${body}` : ""}`, res.status, endpoint);
       }
 
       return (await res.json()) as T;

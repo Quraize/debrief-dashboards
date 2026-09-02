@@ -66,7 +66,14 @@ function stubClient(cfg: StubConfig = {}) {
       cfg.priceWrites?.push({ jobId: priceMatch[1]!, amount: Number(init.body?.get("amount")) });
       data = {};
     } else if (finMatch) {
-      data = [cfg.financials?.[finMatch[1]!] ?? {}];
+      const record = cfg.financials?.[finMatch[1]!];
+      if (record?.["__status"]) {
+        return {
+          ok: false, status: record["__status"], headers: { get: () => null },
+          text: async () => "Precondition Failed", json: async () => ({}),
+        } as unknown as Response;
+      }
+      data = [record ?? {}];
     } else if (u.includes("job_ids")) {
       data = cfg.jobs ?? [];
     } else if (u.includes("/proposals")) {
@@ -301,6 +308,65 @@ describe.skipIf(!reachable)("scanContractPrices / approveCandidate", () => {
     expect(out.applied).toBe(false);
     expect(writes, "nothing may be written when a live price exists").toEqual([]);
     expect((await candidate("909", "91"))!.status).toBe("skipped");
+  });
+
+  it("falls back to the mirror when JobProgress refuses the live financial check", async () => {
+    // JobProgress returns HTTP 412 from financial_summary on some jobs. That
+    // must not make the job un-approvable; the mirror decides, and the row says so.
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, job_number, is_insurance, total_job_price) VALUES ('911', 'L-911', false, NULL)`);
+    await scanContractPrices({
+      days: 5,
+      client: stubClient({
+        proposals: [proposal(111, "911")],
+        jobs: [jobMeta("911")],
+        financials: { "911": { __status: 412 } }, // scan tolerates it too
+      }),
+      extract: async () => extraction({ amount: 8800, jobNumber: "L-911" }),
+    });
+    const row = await candidate("911", "111");
+    expect(row!.status).toBe("pending");
+
+    const writes: { jobId: string; amount: number }[] = [];
+    const out = await approveCandidate(row!.id, "admin@test",
+      stubClient({ financials: { "911": { __status: 412 } }, priceWrites: writes }));
+    expect(out.applied).toBe(true);
+    expect(writes).toEqual([{ jobId: "911", amount: 8800 }]);
+    const after = await candidate("911", "111");
+    expect(after!.status).toBe("applied");
+    expect(after!.extraction_notes).toContain("live financial check unavailable");
+  });
+
+  it("surfaces JobProgress's rejection reason on a failed price write", async () => {
+    await scanContractPrices({
+      days: 5,
+      client: stubClient({
+        proposals: [proposal(121, "912")],
+        jobs: [jobMeta("912")],
+        financials: { "912": { total_job_price: "0.00" } },
+      }),
+      extract: async () => extraction({ amount: 5000, jobNumber: "L-912" }),
+    });
+    const row = await candidate("912", "121");
+
+    // A client whose PUT is refused with a 422 and a body.
+    const impl = (async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.includes("/financials/price") && init?.method === "PUT") {
+        return { ok: false, status: 422, headers: { get: () => null },
+          text: async () => '{"message":"amount is invalid"}', json: async () => ({}) } as unknown as Response;
+      }
+      return { ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ data: [{ total_job_price: "0.00" }], meta: { pagination: { total_pages: 1 } } }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const refusing = new JobProgressClient({
+      token: "test", baseUrl: "https://api.test/v3", fetchImpl: impl,
+      limiter: new RateLimiter({ limit: 1e9, windowMs: 1, sleep: async () => {} }), sleep: async () => {},
+    });
+
+    await expect(approveCandidate(row!.id, "admin@test", refusing))
+      .rejects.toMatchObject({ statusCode: 502, expose: true, message: expect.stringContaining("amount is invalid") });
+    expect((await candidate("912", "121"))!.apply_error).toContain("amount is invalid");
   });
 
   it("reject closes a pending row and refuses non-pending ones", async () => {

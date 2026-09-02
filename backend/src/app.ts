@@ -77,11 +77,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerFunctionRoutes(app);
 
   // Never leak internals to the client; the detail goes to the log instead.
-  app.setErrorHandler((err: FastifyError, req, reply) => {
+  // Errors we construct deliberately for the UI (e.g. a 502 carrying
+  // JobProgress's own rejection reason) opt in with `expose`.
+  app.setErrorHandler((err: FastifyError & { expose?: boolean }, req, reply) => {
     const status = err.statusCode ?? 500;
     if (status >= 500) console.error(`[${req.id}] ${req.method} ${req.url}`, err);
     reply.code(status).send({
-      error: status >= 500 ? "Internal server error" : err.message,
+      error: status >= 500 && !err.expose ? "Internal server error" : err.message,
       requestId: req.id,
     });
   });
