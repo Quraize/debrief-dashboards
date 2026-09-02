@@ -11,23 +11,27 @@ import {
 export function Toaster() {
   const { toasts } = useToast();
 
+  // Toasts render INSIDE the viewport — the fixed top-right stack. (The
+  // template rendered them as siblings of an empty viewport, and only worked
+  // because its ToastProvider happened to be a positioned box.)
   return (
     <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
-        return (
-          <Toast key={id} {...props}>
-            <div className="grid gap-1">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && (
-                <ToastDescription>{description}</ToastDescription>
-              )}
-            </div>
-            {action}
-            <ToastClose />
-          </Toast>
-        );
-      })}
-      <ToastViewport />
+      <ToastViewport>
+        {toasts.map(function ({ id, title, description, action, ...props }) {
+          return (
+            <Toast key={id} {...props}>
+              <div className="grid gap-1">
+                {title && <ToastTitle>{title}</ToastTitle>}
+                {description && (
+                  <ToastDescription>{description}</ToastDescription>
+                )}
+              </div>
+              {action}
+              <ToastClose />
+            </Toast>
+          );
+        })}
+      </ToastViewport>
     </ToastProvider>
   );
 } 

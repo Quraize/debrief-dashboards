@@ -19,12 +19,14 @@ const ToastContext = React.createContext({ close: () => {} });
 const ToastProvider = ({ children }) => <>{children}</>;
 ToastProvider.displayName = "ToastProvider";
 
-/** Top-right on desktop, top-center stack on small screens. */
+/** Top-right on desktop, full-width stack on small screens. The container is
+ *  click-through (pointer-events-none) so an empty viewport never blocks the
+ *  page beneath it; each toast re-enables pointer events for itself. */
 const ToastViewport = React.forwardRef(({ className, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      "fixed top-0 right-0 z-[100] flex max-h-screen w-full flex-col gap-2 p-4 md:max-w-[420px]",
+      "pointer-events-none fixed top-0 right-0 z-[100] flex max-h-screen w-full flex-col gap-2 p-4 md:max-w-[420px]",
       className,
     )}
     {...props}
