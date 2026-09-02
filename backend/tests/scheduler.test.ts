@@ -172,4 +172,25 @@ describe.skipIf(!reachable)("scheduler", () => {
       `SELECT output FROM pgboss.job WHERE id = $1`, [jobId]);
     expect(JSON.stringify(rows[0]!.output)).toMatch(/LEAP_API_TOKEN/);
   }, 30_000);
+
+  it("watchdog restarts pg-boss when the cron heartbeat goes stale", async () => {
+    // Observed in production: pg-boss's cron/maintenance loops latch off
+    // permanently when one DB promise never settles, with no error emitted.
+    const before = scheduler.getBoss();
+    expect(before).not.toBeNull();
+
+    await db.jobs.query(`UPDATE pgboss.version SET cron_on = now()`);
+    expect(await scheduler.checkSchedulerLiveness(), "fresh heartbeat is left alone").toBe("ok");
+
+    await db.jobs.query(`UPDATE pgboss.version SET cron_on = now() - interval '1 hour'`);
+    expect(await scheduler.checkSchedulerLiveness()).toBe("restarted");
+    expect(scheduler.getBoss(), "a NEW instance replaced the wedged one").not.toBe(before);
+    expect(scheduler.getBoss()).not.toBeNull();
+    const queue = await scheduler.getBoss()!.getQueue(scheduler.SYNC_QUEUE);
+    expect(queue?.policy, "the restarted instance re-registered everything").toBe("singleton");
+
+    // Immediately after a restart the heartbeat may still be stale (first tick
+    // lands within ~30s) — the cooldown stops a restart storm.
+    expect(await scheduler.checkSchedulerLiveness()).toBe("skipped");
+  }, 30_000);
 });

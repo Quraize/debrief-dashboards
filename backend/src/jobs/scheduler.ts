@@ -52,6 +52,15 @@ export interface SyncJobData {
 }
 
 let boss: PgBoss | null = null;
+let lastOptions: SchedulerOptions = {};
+let watchdog: NodeJS.Timeout | null = null;
+let restarting = false;
+let lastWatchdogRestart = 0;
+
+const WATCHDOG_INTERVAL_MS = 2 * 60_000;
+/** cron_on updates every ~30s on a healthy timekeeper; 10 min is decisively dead. */
+const CRON_STALE_MS = 10 * 60_000;
+const RESTART_COOLDOWN_MS = 5 * 60_000;
 
 export function getBoss(): PgBoss | null {
   return boss;
@@ -150,6 +159,7 @@ export interface SchedulerOptions {
 
 export async function startScheduler(options: SchedulerOptions = {}): Promise<void> {
   if (boss) throw new Error("scheduler already started");
+  lastOptions = options;
   const connectionString = process.env.DATABASE_URL_JOBS ?? process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL_JOBS (or DATABASE_URL) must be set before the scheduler starts");
@@ -160,7 +170,15 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
     schema: "pgboss",
     max: 3,
     application_name: "allied-pgboss",
-  });
+    // pg-boss guards its cron and maintenance loops with a re-entrancy flag
+    // that is only cleared when the in-flight DB promise settles. A query or
+    // pool checkout that hangs forever therefore latches BOTH loops off,
+    // silently — observed in production. These flow through to pg.Pool /
+    // pg.Client and guarantee every promise settles.
+    connectionTimeoutMillis: 15_000,
+    query_timeout: 60_000,
+    statement_timeout: 60_000,
+  } as PgBoss.ConstructorOptions);
   // Without a handler pg-boss's EventEmitter turns a transient maintenance
   // error into a process crash.
   instance.on("error", (err) => console.error("[pgboss]", err));
@@ -200,9 +218,72 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       async ([job]) => handleSyncJob(job!),
     );
   }
+
+  // Liveness watchdog: checked through OUR pool, not pg-boss's, so it works
+  // precisely when pg-boss's own plumbing is what died. unref() keeps it from
+  // holding the process open.
+  if (!watchdog) {
+    watchdog = setInterval(() => {
+      void checkSchedulerLiveness().catch((err) => console.error("[scheduler] watchdog check failed", err));
+    }, WATCHDOG_INTERVAL_MS);
+    watchdog.unref();
+  }
+}
+
+/**
+ * Restarts pg-boss when its cron heartbeat (pgboss.version.cron_on, written
+ * every ~30s by a healthy timekeeper) goes stale. Belt to the timeout
+ * suspenders above: whatever silently kills the internal loops, the scheduler
+ * heals itself instead of skipping ticks until someone notices.
+ */
+export async function checkSchedulerLiveness(): Promise<"ok" | "restarted" | "skipped"> {
+  if (restarting) return "skipped";
+  if (Date.now() - lastWatchdogRestart < RESTART_COOLDOWN_MS) return "skipped";
+
+  // No instance at all with a live watchdog means a previous restart failed
+  // partway (e.g. the DB was briefly unreachable) — keep trying to come back.
+  if (!boss) {
+    restarting = true;
+    lastWatchdogRestart = Date.now();
+    try {
+      await startScheduler(lastOptions);
+      console.info("[scheduler] watchdog: scheduler recovered after a failed restart");
+      return "restarted";
+    } finally {
+      restarting = false;
+    }
+  }
+
+  const stale = await withServiceRole(async (c) => {
+    const { rows } = await c.query<{ stale: boolean }>(
+      `SELECT cron_on IS NULL OR cron_on < now() - $1::interval AS stale FROM pgboss.version`,
+      [`${CRON_STALE_MS} milliseconds`]);
+    return rows[0]?.stale ?? false;
+  }, "scheduler:watchdog", { quiet: true });
+  if (!stale) return "ok";
+
+  restarting = true;
+  lastWatchdogRestart = Date.now();
+  console.error("[scheduler] watchdog: pg-boss cron heartbeat is stale — restarting the scheduler");
+  try {
+    const instance = boss;
+    boss = null;
+    // Not graceful: a wedged instance is exactly what we're replacing.
+    await instance.stop({ graceful: false, wait: true, timeout: 5_000, close: true })
+      .catch((err) => console.error("[scheduler] watchdog: stop of wedged instance failed", err));
+    await startScheduler(lastOptions);
+    console.info("[scheduler] watchdog: scheduler restarted");
+    return "restarted";
+  } finally {
+    restarting = false;
+  }
 }
 
 export async function stopScheduler(options: { graceful?: boolean } = {}): Promise<void> {
+  if (watchdog) {
+    clearInterval(watchdog);
+    watchdog = null;
+  }
   if (!boss) return;
   const instance = boss;
   boss = null;
