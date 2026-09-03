@@ -29,10 +29,12 @@ const job = (over = {}) => ({
   ...over,
 });
 
+const ran = (over = {}) => appt({ has_result: true, result_option_name: "Demo No Sale", ...over });
+
 describe("jpAppointmentStats", () => {
   it("counts totals, sales-type split, and result coverage within the period", () => {
     const rows = [
-      appt({ jp_appointment_id: "1", has_result: true }),
+      ran({ jp_appointment_id: "1" }),
       appt({ jp_appointment_id: "2" }),
       appt({ jp_appointment_id: "3", is_sales_type: false, title: "WARRANTY CB" }),
       appt({ jp_appointment_id: "4", appointment_date: "2026-07-01" }), // outside period
@@ -45,16 +47,30 @@ describe("jpAppointmentStats", () => {
     expect(s.resultCoverageRate).toBe(50); // 1 of 2 sales-type
   });
 
+  it("headline Appointments = run: calendar − non-sales − no-shows − no result (the July 2026 formula)", () => {
+    const rows = [
+      ran({ jp_appointment_id: "1", result_option_name: "$ale!!!" }),
+      ran({ jp_appointment_id: "2", result_option_name: "Demo No Sale" }),
+      ran({ jp_appointment_id: "3", result_option_name: "No Demo" }),
+      ran({ jp_appointment_id: "4", result_option_name: "No See" }),      // no-show: not run
+      appt({ jp_appointment_id: "5" }),                                    // cancelled / no result: not run
+      appt({ jp_appointment_id: "6", is_sales_type: false, title: "FINAL WALK THROUGH" }),
+    ];
+    const s = jpAppointmentStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
+    expect(s).toMatchObject({ total: 6, run: 3, nonSales: 1, noShows: 1, noResult: 1, salesType: 5 });
+    expect(s.run + s.nonSales + s.noShows + s.noResult).toBe(s.total); // the four always reconcile
+  });
+
   it("buckets weekly volume by Monday week start", () => {
     const rows = [
-      appt({ jp_appointment_id: "1", appointment_date: "2026-08-03" }), // Mon
-      appt({ jp_appointment_id: "2", appointment_date: "2026-08-09" }), // Sun same week
-      appt({ jp_appointment_id: "3", appointment_date: "2026-08-10" }), // next Mon
+      ran({ jp_appointment_id: "1", appointment_date: "2026-08-03" }), // Mon
+      appt({ jp_appointment_id: "2", appointment_date: "2026-08-09" }), // Sun same week, no result
+      ran({ jp_appointment_id: "3", appointment_date: "2026-08-10" }), // next Mon
     ];
     const s = jpAppointmentStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
     expect(s.weekly).toEqual([
-      { week: "2026-08-03", total: 2, salesType: 2 },
-      { week: "2026-08-10", total: 1, salesType: 1 },
+      { week: "2026-08-03", total: 2, salesType: 2, run: 1 },
+      { week: "2026-08-10", total: 1, salesType: 1, run: 1 },
     ]);
   });
 
@@ -133,42 +149,45 @@ describe("jpRevenueStats — signed-date attribution", () => {
 
 describe("jpSetterStats / jpRepStats", () => {
   const rows = [
-    appt({ jp_appointment_id: "1", appointment_setter: "Ashley", has_result: true }),
+    ran({ jp_appointment_id: "1", appointment_setter: "Ashley" }),
     appt({ jp_appointment_id: "2", appointment_setter: "Ashley" }),
     appt({ jp_appointment_id: "3", appointment_setter: null, sales_rep: null }),
-    appt({ jp_appointment_id: "4", sales_rep: "Rep B", two_leg_answer: "two_leg", has_result: true }),
+    ran({ jp_appointment_id: "4", sales_rep: "Rep B", two_leg_answer: "two_leg" }),
+    ran({ jp_appointment_id: "5", sales_rep: "Rep B", result_option_name: "No See" }),
   ];
 
-  it("groups setter volume with result coverage, unattributed rows under Unassigned", () => {
+  it("groups setter volume with run count and result coverage, unattributed rows under Unassigned", () => {
     const s = jpSetterStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
     const ashley = s.find((g) => g.name === "Ashley");
-    expect(ashley).toMatchObject({ total: 2, salesType: 2, withResult: 1, resultCoverageRate: 50 });
+    expect(ashley).toMatchObject({ total: 2, run: 1, salesType: 2, withResult: 1, resultCoverageRate: 50 });
     expect(s.find((g) => g.name === "Unassigned").total).toBe(1);
     expect(s[0].name).toBe("Ashley"); // sorted by volume
   });
 
-  it("groups rep volume with two-leg counts", () => {
+  it("groups rep volume with run count (no-shows excluded) and two-leg counts", () => {
     const s = jpRepStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
     const repB = s.find((g) => g.name === "Rep B");
-    expect(repB).toMatchObject({ total: 1, twoLeg: 1, twoLegRate: 100 });
+    expect(repB).toMatchObject({ total: 2, run: 1, twoLeg: 1, twoLegRate: 100 });
   });
 });
 
 describe("jpDebriefCoverage", () => {
   const jpRows = [
-    appt({ jp_appointment_id: "1", crm_lead_id: "1000-1", appointment_date: "2026-08-10" }),
-    appt({ jp_appointment_id: "2", crm_lead_id: "1000-2", appointment_date: "2026-08-11" }),
-    appt({ jp_appointment_id: "3", crm_lead_id: null }), // can never match
+    ran({ jp_appointment_id: "1", crm_lead_id: "1000-1", appointment_date: "2026-08-10" }),
+    ran({ jp_appointment_id: "2", crm_lead_id: "1000-2", appointment_date: "2026-08-11" }),
+    ran({ jp_appointment_id: "3", crm_lead_id: null }), // can never match
     appt({ jp_appointment_id: "4", is_sales_type: false }), // excluded from the funnel
+    ran({ jp_appointment_id: "5", crm_lead_id: "1000-5", result_option_name: "No See" }), // no-show: not expected to be debriefed
+    appt({ jp_appointment_id: "6", crm_lead_id: "1000-6" }), // cancelled / no result: not expected either
   ];
   const debriefs = [
     { crm_lead_id: "1000-1", appointment_date: "2026-08-10" },
     { crm_lead_id: "1000-2", appointment_date: "2026-07-01" }, // same lead, different visit
   ];
 
-  it("matches on lead id + date, so a rehash on another date does not count as covered", () => {
+  it("measures against run appointments and matches on lead id + date", () => {
     const s = jpDebriefCoverage(jpRows, debriefs, "Custom Range", "2026-08-01", "2026-08-31");
-    expect(s.jpSalesType).toBe(3);
+    expect(s.appointments).toBe(3);
     expect(s.debriefed).toBe(1);
     expect(s.missing).toBe(2);
     expect(s.unmatchable).toBe(1);
@@ -177,7 +196,7 @@ describe("jpDebriefCoverage", () => {
 
   it("matches lead ids case-insensitively, like the KPI engine does", () => {
     const s = jpDebriefCoverage(
-      [appt({ crm_lead_id: "ABC-1", appointment_date: "2026-08-10" })],
+      [ran({ crm_lead_id: "ABC-1", appointment_date: "2026-08-10" })],
       [{ crm_lead_id: "abc-1", appointment_date: "2026-08-10" }],
       "Custom Range", "2026-08-01", "2026-08-31",
     );

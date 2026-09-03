@@ -17,6 +17,7 @@ import {
   jpAppointmentStats, jpTwoLegStats, jpRevenueStats, jpSetterStats, jpRepStats,
   jpDebriefCoverage, JP_SOURCE_NOTE, JP_TWO_LEG_DEFINITION, JP_REVENUE_DEFINITION,
   JP_COVERAGE_DEFINITION,
+  JP_APPOINTMENTS_DEFINITION,
 } from "@allied/shared/jpStats";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Database, ClipboardList } from "lucide-react";
@@ -101,14 +102,16 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
   const coverage = jpDebriefCoverage(jpAppointments, debriefs || [], filter, cs, ce);
 
   const cards = [
-    { label: "CRM Appointments", value: stats.total,
-      title: "Every appointment on the JobProgress calendar in this period, debriefed or not." },
-    { label: "Sales-Type", value: stats.salesType,
-      title: "CRM appointments that are sales opportunities (non-sales titles like warranty or inspection excluded)." },
+    { label: "Appointments (CRM)", value: stats.run,
+      title: `${JP_APPOINTMENTS_DEFINITION} This period: ${stats.total} on the calendar − ${stats.nonSales} non-sales − ${stats.noShows} no-shows − ${stats.noResult} no result = ${stats.run}.` },
+    { label: "On Calendar", value: stats.total,
+      title: "Every appointment on the JobProgress calendar in this period, of every kind — the gross count before anything is excluded." },
+    { label: "No-Shows", value: stats.noShows,
+      title: "Sales-type appointments whose CRM result is \"No See\": the rep went, the customer did not." },
+    { label: "No Result / Cancelled", value: stats.noResult,
+      title: "Sales-type appointments with no result form — cancelled appointments still on the calendar, plus forms never filled in." },
     { label: "Non-Sales Visits", value: stats.nonSales,
-      title: "Warranty callbacks, inspections, deliveries — on the calendar but not sales opportunities." },
-    { label: "Result Forms Filled", value: stats.salesType > 0 ? stats.resultCoverageRate + "%" : "—",
-      title: "Share of sales-type CRM appointments whose result form was completed in JobProgress." },
+      title: "Warranty callbacks, walk-throughs, inspections, deliveries — on the calendar but not sales opportunities." },
     { label: "CRM Two-Leg %", value: twoLeg.twoLeg + twoLeg.oneLeg > 0 ? twoLeg.rate + "%" : "—",
       title: `${JP_TWO_LEG_DEFINITION} This period: ${twoLeg.twoLeg} two-leg / ${twoLeg.oneLeg} one-leg, ${twoLeg.answered} of ${twoLeg.eligible} answered.` },
     { label: "Signed Jobs", value: revenue.signedJobs,
@@ -118,13 +121,13 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
         ? ` ${revenue.missingFinancials} signed job(s) have no financial summary yet, so the true figure is higher.` : "") },
     { label: "Avg Job (CRM)", value: revenue.withFinancials > 0 ? money(revenue.avgJob) : "—",
       title: "Signed revenue ÷ signed jobs with financials." },
-    { label: "Debrief Coverage", value: coverage.jpSalesType > 0 ? coverage.coverageRate + "%" : "—",
-      title: `${JP_COVERAGE_DEFINITION} This period: ${coverage.debriefed} of ${coverage.jpSalesType} covered, ${coverage.missing} missing.` },
+    { label: "Debrief Coverage", value: coverage.appointments > 0 ? coverage.coverageRate + "%" : "—",
+      title: `${JP_COVERAGE_DEFINITION} This period: ${coverage.debriefed} of ${coverage.appointments} run appointments covered, ${coverage.missing} missing.` },
   ];
 
   return (
     <>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {cards.map((c) => <KpiCard key={c.label} label={c.label} value={c.value} title={c.title} />)}
       </div>
       <p className="text-[11px] text-muted-foreground">
@@ -160,8 +163,8 @@ export function JpKpiSection({ filter, cs, ce, debriefs }) {
               <XAxis dataKey="week" tick={{ fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="total" name="All" fill="#0369a1" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="salesType" name="Sales-type" fill="#16a34a" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="total" name="On calendar" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="run" name="Appointments run" fill="#0369a1" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -206,8 +209,8 @@ export function JpSetterSection({ filter, cs, ce, debriefs }) {
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b border-border">
               <th className="px-3 py-2">Booked By (CRM)</th>
-              <th className="px-3 py-2">Appointments</th>
-              <th className="px-3 py-2">Sales-Type</th>
+              <th className="px-3 py-2" title="On the calendar, of every kind">Booked</th>
+              <th className="px-3 py-2" title={JP_APPOINTMENTS_DEFINITION}>Appointments Run</th>
               <th className="px-3 py-2">Result Forms</th>
               <th className="px-3 py-2">Form Coverage</th>
             </tr>
@@ -217,7 +220,7 @@ export function JpSetterSection({ filter, cs, ce, debriefs }) {
               <tr key={r.name} className="border-b border-border/50">
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2">{r.total}</td>
-                <td className="px-3 py-2">{r.salesType}</td>
+                <td className="px-3 py-2 font-semibold">{r.run}</td>
                 <td className="px-3 py-2">{r.withResult}</td>
                 <td className={`px-3 py-2 font-semibold ${r.salesType === 0 ? "text-muted-foreground" : r.resultCoverageRate >= 80 ? "text-green-700" : r.resultCoverageRate >= 50 ? "text-amber-700" : "text-red-700"}`}>
                   {r.salesType > 0 ? r.resultCoverageRate + "%" : "—"}
@@ -251,8 +254,8 @@ export function JpRepSection({ filter, cs, ce, debriefs }) {
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b border-border">
               <th className="px-3 py-2">Rep (CRM)</th>
-              <th className="px-3 py-2">Appointments</th>
-              <th className="px-3 py-2">Sales-Type</th>
+              <th className="px-3 py-2" title="Assigned on the calendar, of every kind">Assigned</th>
+              <th className="px-3 py-2" title={JP_APPOINTMENTS_DEFINITION}>Appointments Run</th>
               <th className="px-3 py-2">Two-Leg</th>
               <th className="px-3 py-2">One-Leg</th>
               <th className="px-3 py-2">CRM Two-Leg %</th>
@@ -263,7 +266,7 @@ export function JpRepSection({ filter, cs, ce, debriefs }) {
               <tr key={r.name} className="border-b border-border/50">
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2">{r.total}</td>
-                <td className="px-3 py-2">{r.salesType}</td>
+                <td className="px-3 py-2 font-semibold">{r.run}</td>
                 <td className="px-3 py-2">{r.twoLeg}</td>
                 <td className="px-3 py-2">{r.oneLeg}</td>
                 <td className={`px-3 py-2 font-semibold ${r.twoLeg + r.oneLeg === 0 ? "text-muted-foreground" : r.twoLegRate >= 90 ? "text-green-700" : r.twoLegRate >= 80 ? "text-amber-700" : "text-red-700"}`}>

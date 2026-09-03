@@ -29,8 +29,25 @@ function weekStart(dateStr) {
 const isSalesType = (r) => r.is_sales_type === true;
 const isInsurance = (r) => r.is_insurance === true;
 
+/** The CRM result that means "the rep went, the customer did not show". */
+const NO_SHOW_RESULT = /no\s*see|no\s*show|cancel/i;
+export const isNoShowResult = (r) => NO_SHOW_RESULT.test(String(r.result_option_name ?? ""));
+
+/**
+ * An appointment that was actually RUN: a sales opportunity where the rep met
+ * the customer and a result was recorded. This is the headline "Appointments"
+ * figure, agreed with the office against July 2026 (98 on the calendar → 62
+ * run). Everything it excludes is reported alongside it, never hidden:
+ *   non-sales visits, no-shows ("No See"), and sales-type appointments with no
+ *   result form (cancellations still on the calendar, forms never filled in).
+ */
+export const isRunAppointment = (r) => isSalesType(r) && r.has_result === true && !isNoShowResult(r);
+
 export const JP_SOURCE_NOTE =
-  "Pulled directly from the JobProgress CRM by the scheduled sync. Counts every appointment on the calendar — including ones that never received a debrief — so these figures can exceed the debrief-based numbers above.";
+  "Pulled directly from the JobProgress CRM by the scheduled sync. Counts what the CRM recorded — including appointments that never received a debrief — so these figures can differ from the debrief-based numbers above.";
+
+export const JP_APPOINTMENTS_DEFINITION =
+  "Appointments = sales-type CRM appointments that were actually run: the rep met the customer and a result was recorded (Sale, Demo No Sale, No Demo…). Non-sales visits, no-shows (\"No See\") and appointments with no result — mostly cancellations — are excluded and shown on their own cards.";
 
 export const JP_TWO_LEG_DEFINITION =
   "Two-Leg answers parsed from JobProgress appointment result forms (the free-text \"Was it 2-Legs?\" question). Rate = Two-Leg ÷ (Two-Leg + One-Leg) among retail sales appointments; unanswered forms and insurance records are excluded.";
@@ -39,34 +56,43 @@ export const JP_REVENUE_DEFINITION =
   "Sum of each job's JobProgress financial summary (total job revenue), attributed to the month the contract was signed — the CRM-side counterpart of the debrief Sale Amount, which is typed in by the rep.";
 
 export const JP_COVERAGE_DEFINITION =
-  "Share of CRM sales-type appointments that have a matching debrief (same Lead ID and appointment date). The gap is appointments nobody debriefed — invisible to every debrief-based number.";
+  "Share of CRM appointments actually run (see Appointments) that have a matching debrief (same Lead ID and appointment date). The gap is run appointments nobody debriefed — invisible to every debrief-based number.";
 
 /**
- * Volume and result-form coverage for a period.
+ * Volume for a period: what was on the calendar, and how it splits into run
+ * appointments, no-shows, no-result and non-sales visits (the four always add
+ * back up to the calendar total).
  * Result coverage is measured against sales-type appointments only: nobody
  * expects a result form on a warranty visit.
  */
 export function jpAppointmentStats(rows, filter, cs, ce) {
   const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce);
   const sales = inRange.filter(isSalesType);
-  const salesWithResult = sales.filter((r) => r.has_result === true).length;
+  const salesWithResult = sales.filter((r) => r.has_result === true);
+  const run = sales.filter(isRunAppointment);
+  const noShows = salesWithResult.filter(isNoShowResult);
 
   const weeks = {};
   for (const r of inRange) {
     const w = weekStart(r.appointment_date);
     if (!w) continue;
-    weeks[w] = weeks[w] || { week: w, total: 0, salesType: 0 };
+    weeks[w] = weeks[w] || { week: w, total: 0, salesType: 0, run: 0 };
     weeks[w].total++;
     if (isSalesType(r)) weeks[w].salesType++;
+    if (isRunAppointment(r)) weeks[w].run++;
   }
 
   return {
     total: inRange.length,
+    /** The headline: appointments actually run. */
+    run: run.length,
     salesType: sales.length,
     nonSales: inRange.length - sales.length,
+    noShows: noShows.length,
+    noResult: sales.length - salesWithResult.length,
     insurance: inRange.filter(isInsurance).length,
     withResult: inRange.filter((r) => r.has_result === true).length,
-    resultCoverageRate: pct(salesWithResult, sales.length),
+    resultCoverageRate: pct(salesWithResult.length, sales.length),
     weekly: Object.values(weeks).sort((a, b) => a.week.localeCompare(b.week)),
   };
 }
@@ -144,6 +170,7 @@ export function jpSetterStats(rows, filter, cs, ce) {
     return {
       name,
       total: recs.length,
+      run: recs.filter(isRunAppointment).length,
       salesType: sales.length,
       withResult,
       resultCoverageRate: pct(sales.filter((r) => r.has_result === true).length, sales.length),
@@ -161,6 +188,7 @@ export function jpRepStats(rows, filter, cs, ce) {
     return {
       name,
       total: recs.length,
+      run: recs.filter(isRunAppointment).length,
       salesType: sales.length,
       withResult: recs.filter((r) => r.has_result === true).length,
       twoLeg, oneLeg,
@@ -170,12 +198,14 @@ export function jpRepStats(rows, filter, cs, ce) {
 }
 
 /**
- * How much of the CRM's sales-type appointment volume the debriefs cover.
+ * How much of the CRM's RUN appointment volume the debriefs cover — the same
+ * population as the Appointments card, so no-shows and cancellations nobody
+ * debriefed do not drag the figure down.
  * Matching mirrors computeKPIs: lowercased Lead ID + appointment date, so the
  * same lead debriefed for a different visit does not count.
  */
 export function jpDebriefCoverage(jpRows, debriefs, filter, cs, ce) {
-  const jpSales = filterByDate(jpRows || [], "appointment_date", filter, cs, ce).filter(isSalesType);
+  const jpSales = filterByDate(jpRows || [], "appointment_date", filter, cs, ce).filter(isRunAppointment);
   const keys = new Set();
   for (const d of debriefs || []) {
     if (d.crm_lead_id && d.appointment_date) {
@@ -190,6 +220,8 @@ export function jpDebriefCoverage(jpRows, debriefs, filter, cs, ce) {
     if (keys.has(key)) debriefed++;
   }
   return {
+    appointments: jpSales.length,
+    /** @deprecated same as `appointments`; kept for older callers. */
     jpSalesType: jpSales.length,
     debriefed,
     missing: jpSales.length - debriefed,
