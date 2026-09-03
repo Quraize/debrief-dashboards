@@ -1,8 +1,60 @@
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
+import "@maplibre/maplibre-gl-leaflet";
 import { jobTypeColor } from "@allied/shared/production";
+
+// OpenFreeMap: free, no API key, no usage limits, community-funded. "Liberty"
+// is the Google-Maps-like style (cream land, white roads, amber highways).
+// Vector tiles, so they render through MapLibre inside the Leaflet map.
+const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const BASEMAP_ATTRIBUTION =
+  '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> '
+  + 'Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+// If the vector service is unreachable, the board must still show a map.
+const FALLBACK_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const FALLBACK_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const STYLE_LOAD_TIMEOUT_MS = 10_000;
+
+function Basemap() {
+  const map = useMap();
+  useEffect(() => {
+    let vector = null;
+    let fallback = null;
+    let timer = null;
+
+    const useFallback = (why) => {
+      if (fallback) return;
+      console.warn(`[map] basemap fallback to OpenStreetMap raster tiles: ${why}`);
+      if (vector) { map.removeLayer(vector); vector = null; }
+      fallback = L.tileLayer(FALLBACK_TILES, { attribution: FALLBACK_ATTRIBUTION, maxZoom: 19 }).addTo(map);
+    };
+
+    try {
+      vector = L.maplibreGL({ style: BASEMAP_STYLE, attribution: BASEMAP_ATTRIBUTION }).addTo(map);
+      const gl = vector.getMaplibreMap();
+      gl.once("load", () => { if (timer) clearTimeout(timer); });
+      gl.on("error", (e) => {
+        // Errors before the style has loaded mean the service itself failed;
+        // later ones (a missing glyph, one tile) are cosmetic.
+        if (!gl.isStyleLoaded()) useFallback(e?.error?.message ?? "style failed to load");
+      });
+      timer = setTimeout(() => { if (!gl.isStyleLoaded()) useFallback("style load timed out"); }, STYLE_LOAD_TIMEOUT_MS);
+    } catch (err) {
+      // No WebGL (very old browser, remote desktop without acceleration).
+      useFallback(err?.message ?? "WebGL unavailable");
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (vector) map.removeLayer(vector);
+      if (fallback) map.removeLayer(fallback);
+    };
+  }, [map]);
+  return null;
+}
 
 // North Jersey service area — where the map rests when a day has no pins.
 const HOME_CENTER = [40.85, -74.2];
@@ -72,14 +124,7 @@ export default function ScheduleMap({ items, selectedId, onSelect }) {
 
   return (
     <MapContainer center={HOME_CENTER} zoom={HOME_ZOOM} scrollWheelZoom className="h-full w-full rounded-xl z-0">
-      {/* CARTO Voyager: a free, keyless basemap in the Google Maps idiom —
-          cream land, white roads, amber highways, quiet labels, retina tiles. */}
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        subdomains="abcd"
-        maxZoom={20}
-      />
+      <Basemap />
       <FitToItems items={items} />
       <FocusSelected items={items} selectedId={selectedId} markerRefs={markerRefs} />
       {items.map((item) => (
