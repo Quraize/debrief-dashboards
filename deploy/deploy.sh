@@ -4,15 +4,19 @@
 #   deploy/deploy.sh build            build both images (tag with TAG in .env.production)
 #   deploy/deploy.sh migrate          apply pending DB migrations (the gated step, §10.5)
 #   deploy/deploy.sh migrate-status   show applied/pending migrations
-#   deploy/deploy.sh up               start/refresh the stack (does NOT migrate)
-#   deploy/deploy.sh deploy           build + up + health check (still no migrate)
+#   deploy/deploy.sh up               start/refresh the stack (refuses while migrations are pending)
+#   deploy/deploy.sh deploy           build + up + health check (refuses while migrations are pending)
+#   deploy/deploy.sh release          build + migrate + up + health — the everyday upgrade
 #   deploy/deploy.sh seed-user <email> [role]   provision the login account (password prompted)
 #   deploy/deploy.sh health           check the running stack
 #   deploy/deploy.sh logs [service]   follow logs
 #
-# Migrations are deliberately their own command: a crash-looping container must
+# Migrations are deliberately their own step: a crash-looping container must
 # never repeatedly attempt schema changes, and a human should watch a migration
-# run. Typical release:  build -> migrate -> up -> health.
+# run. `release` runs it once, in front of you, between build and up. `up` and
+# `deploy` refuse to start a backend whose migrations are pending — the new
+# image would only crash-loop and take the site down (it did, twice) — so the
+# running stack keeps serving until the migration has been applied.
 set -Eeuo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,6 +43,30 @@ health() {
   return 1
 }
 
+migrate_status() {
+  "${COMPOSE[@]}" up -d postgres >/dev/null
+  "${COMPOSE[@]}" run --rm -T migrate node dist/db/migrate.js status
+}
+
+# Aborts (leaving whatever is running untouched) when the built image carries
+# migrations the database has not seen. Uses the image about to be started, so
+# it is exact for that image, not for whatever happens to be checked out.
+refuse_if_pending() {
+  local status pending
+  status="$(migrate_status)"
+  pending="$(printf '%s\n' "${status}" | grep -i 'PENDING' || true)"
+  if [[ -n "${pending}" ]]; then
+    echo >&2
+    echo "REFUSING TO START: this release has migrations the database has not applied:" >&2
+    printf '%s\n' "${pending}" >&2
+    echo >&2
+    echo "The running stack was left as it is. Apply them, then start:" >&2
+    echo "    deploy/deploy.sh migrate && deploy/deploy.sh up && deploy/deploy.sh health" >&2
+    echo "or do it all in one go next time:   deploy/deploy.sh release" >&2
+    exit 2
+  fi
+}
+
 case "${1:-}" in
   build)
     "${COMPOSE[@]}" build backend web
@@ -47,18 +75,23 @@ case "${1:-}" in
     "${COMPOSE[@]}" run --rm migrate
     ;;
   migrate-status)
-    "${COMPOSE[@]}" run --rm migrate node dist/db/migrate.js status
+    migrate_status
     ;;
   up)
+    refuse_if_pending
     "${COMPOSE[@]}" up -d postgres backend web
     ;;
   deploy)
     "${COMPOSE[@]}" build backend web
+    refuse_if_pending
     "${COMPOSE[@]}" up -d postgres backend web
     health
-    echo
-    echo "NOTE: migrations do not run automatically. If this release includes"
-    echo "schema changes, run:  deploy/deploy.sh migrate   (then re-run health)."
+    ;;
+  release)
+    "${COMPOSE[@]}" build backend web
+    "${COMPOSE[@]}" run --rm migrate
+    "${COMPOSE[@]}" up -d postgres backend web
+    health
     ;;
   seed-user)
     [[ -n "${2:-}" ]] || { echo "usage: deploy.sh seed-user <email> [role]   (password is prompted)" >&2; exit 1; }

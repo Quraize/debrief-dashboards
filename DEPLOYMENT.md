@@ -117,10 +117,20 @@ returns ok.
 ## 6. Releases and rollback
 
 ```bash
-# release
-rsync/git pull the new code
-deploy/deploy.sh deploy         # build + up + health; prints a reminder if you
-                                # need `deploy.sh migrate` for schema changes
+# release (the everyday command)
+git pull
+deploy/deploy.sh release        # build → migrate (watch it) → up → health
+
+# or step by step
+deploy/deploy.sh build
+deploy/deploy.sh migrate-status # shows PENDING rows if the release has schema changes
+deploy/deploy.sh migrate
+deploy/deploy.sh up && deploy/deploy.sh health
+
+# `deploy` and `up` REFUSE to start a backend whose migrations are pending —
+# the new image would only crash-loop behind Caddy (502s) — and leave the
+# running stack serving until you have run `migrate`.
+
 # rollback
 # set TAG in deploy/.env.production to the previous tag you built, then:
 deploy/deploy.sh up
