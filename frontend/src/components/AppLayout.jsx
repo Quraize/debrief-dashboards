@@ -76,7 +76,10 @@ export default function AppLayout() {
 
       <div className="flex">
         {/* Desktop sidebar */}
-        <aside className="hidden lg:flex flex-col w-64 min-h-[calc(100vh-3.5rem)] bg-white border-r border-border p-3 gap-1 sticky top-14 overflow-y-auto">
+        {/* self-start + a fixed viewport height are what make sticky work here:
+            inside the flex row the aside would otherwise stretch to the page's
+            full height and scroll away with it. Long menus scroll internally. */}
+        <aside className="hidden lg:flex flex-col w-64 shrink-0 self-start h-[calc(100vh-3.5rem)] bg-white border-r border-border p-3 gap-1 sticky top-14 overflow-y-auto">
           <NavSection label="Dashboards" items={DASHBOARDS} />
           <div className="my-1 border-t border-border/60" />
           <NavSection label="Operations" items={OPERATIONS} />
