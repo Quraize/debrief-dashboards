@@ -66,7 +66,7 @@ export default function ProductionSchedule() {
     queryFn: () => productionApi.board(range),
     enabled: allowed,
     staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: 2 * 60_000,
   });
 
   const refresh = useMutation({

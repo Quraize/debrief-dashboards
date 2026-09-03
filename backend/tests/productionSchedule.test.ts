@@ -267,6 +267,24 @@ describe.skipIf(!reachable)("production schedule sync + board", () => {
     expect((await app.inject({ method: "GET", url: "/api/entities/JPSchedule", ...as(PRODUCTION) })).statusCode).toBe(200);
   });
 
+  it("keeps the production role out of every sales-side table — API and database alike", async () => {
+    for (const entity of ["Appointment", "Debrief", "JPAppointment", "JPJob", "ListOption"]) {
+      const res = await app.inject({ method: "GET", url: `/api/entities/${entity}`, ...as(PRODUCTION) });
+      expect(res.statusCode, `${entity} must be closed to production`).toBe(403);
+    }
+    // Even a bug in the API layer would not help: the RLS helper says no.
+    const { asUser } = await import("./helpers/db.js");
+    const denied = await asUser(db.app, PRODUCTION, "production", async (c) =>
+      (await c.query(`SELECT allied_is_authenticated() AS ok, allied_is_production() AS prod`)).rows[0]);
+    expect(denied).toEqual({ ok: false, prod: true });
+    const staff = await asUser(db.app, REP, "outside_sales_rep", async (c) =>
+      (await c.query(`SELECT allied_is_authenticated() AS ok, allied_is_production() AS prod`)).rows[0]);
+    expect(staff).toEqual({ ok: true, prod: false });
+    // A production user's own account still works (auth routes, not the entity API).
+    expect((await app.inject({ method: "GET", url: "/api/auth/me", ...as(PRODUCTION) })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/auth/account", ...as(PRODUCTION) })).statusCode).toBe(200);
+  });
+
   it("refuses a manual refresh while the integration is unconfigured", async () => {
     const res = await app.inject({ method: "POST", url: "/api/production/sync", ...as(PRODUCTION) });
     expect(res.statusCode).toBe(501);

@@ -72,9 +72,13 @@ export default function ScheduleMap({ items, selectedId, onSelect }) {
 
   return (
     <MapContainer center={HOME_CENTER} zoom={HOME_ZOOM} scrollWheelZoom className="h-full w-full rounded-xl z-0">
+      {/* CARTO Voyager: a free, keyless basemap in the Google Maps idiom —
+          cream land, white roads, amber highways, quiet labels, retina tiles. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        subdomains="abcd"
+        maxZoom={20}
       />
       <FitToItems items={items} />
       <FocusSelected items={items} selectedId={selectedId} markerRefs={markerRefs} />

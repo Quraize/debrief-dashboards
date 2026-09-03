@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import { Outlet, NavLink, Navigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
@@ -6,7 +6,7 @@ import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
   AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin
 } from "lucide-react";
-import { PRODUCTION_ROLES } from "@allied/shared/constants";
+import { PRODUCTION_ROLES, isProductionOnly } from "@allied/shared/constants";
 
 const DASHBOARDS = [
   { to: "/", label: "Overview", icon: Home, end: true },
@@ -43,6 +43,10 @@ const PRODUCTION_NAV = [
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];
 
+/** Where a production-only account may go. Everything else redirects to the board. */
+const PRODUCTION_ONLY_PREFIXES = ["/production", "/account"];
+const PRODUCTION_HOME = "/production/schedule";
+
 export default function AppLayout() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
@@ -51,6 +55,16 @@ export default function AppLayout() {
     queryKey: ["me"],
     queryFn: () => base44.auth.me().catch(() => null)
   });
+
+  // The production role is production-ONLY. The server denies it every sales
+  // table regardless; this keeps the UI honest about it: one section in the
+  // menu, and any other URL lands on the board.
+  const productionOnly = isProductionOnly(me?.role);
+  const showSales = !productionOnly;
+  const showProduction = PRODUCTION_ROLES.includes(me?.role);
+  if (productionOnly && !PRODUCTION_ONLY_PREFIXES.some((p) => location.pathname.startsWith(p))) {
+    return <Navigate to={PRODUCTION_HOME} replace />;
+  }
 
   return (
     <div className="min-h-screen bg-secondary/40">
@@ -87,12 +101,16 @@ export default function AppLayout() {
             inside the flex row the aside would otherwise stretch to the page's
             full height and scroll away with it. Long menus scroll internally. */}
         <aside className="scroll-subtle hidden lg:flex flex-col w-64 shrink-0 self-start h-[calc(100vh-3.5rem)] bg-white border-r border-border p-3 gap-1 sticky top-14 overflow-y-auto">
-          <NavSection label="Dashboards" items={DASHBOARDS} />
-          <div className="my-1 border-t border-border/60" />
-          <NavSection label="Operations" items={OPERATIONS} />
-          {PRODUCTION_ROLES.includes(me?.role) && (
+          {showSales && (
             <>
+              <NavSection label="Dashboards" items={DASHBOARDS} />
               <div className="my-1 border-t border-border/60" />
+              <NavSection label="Operations" items={OPERATIONS} />
+            </>
+          )}
+          {showProduction && (
+            <>
+              {showSales && <div className="my-1 border-t border-border/60" />}
               <NavSection label="Production" items={PRODUCTION_NAV} />
             </>
           )}
@@ -114,12 +132,16 @@ export default function AppLayout() {
                 <button onClick={() => setOpen(false)}><X className="w-5 h-5" /></button>
               </div>
               <div className="flex flex-col gap-1">
-                <NavSection label="Dashboards" items={DASHBOARDS} onClick={() => setOpen(false)} />
-                <div className="my-1 border-t border-border/60" />
-                <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} />
-                {PRODUCTION_ROLES.includes(me?.role) && (
+                {showSales && (
                   <>
+                    <NavSection label="Dashboards" items={DASHBOARDS} onClick={() => setOpen(false)} />
                     <div className="my-1 border-t border-border/60" />
+                    <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} />
+                  </>
+                )}
+                {showProduction && (
+                  <>
+                    {showSales && <div className="my-1 border-t border-border/60" />}
                     <NavSection label="Production" items={PRODUCTION_NAV} onClick={() => setOpen(false)} />
                   </>
                 )}
@@ -142,8 +164,8 @@ export default function AppLayout() {
         </main>
       </div>
 
-      {/* Mobile bottom nav — dashboard switcher */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border grid grid-cols-5 h-16">
+      {/* Mobile bottom nav — dashboard switcher (sales roles only) */}
+      {showSales && <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border grid grid-cols-5 h-16">
         {DASHBOARDS.map((item) => {
           const Icon = item.icon;
           return (
@@ -158,7 +180,7 @@ export default function AppLayout() {
             </NavLink>
           );
         })}
-      </nav>
+      </nav>}
     </div>
   );
 }

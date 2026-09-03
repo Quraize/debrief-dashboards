@@ -117,7 +117,7 @@ export const ROLE_LABELS = {
   admin: "Admin / Owner",
   sales_manager: "Sales Manager",
   project_manager: "Project Manager",
-  production: "Production",
+  production: "Production (schedule only)",
   appointment_setter: "Appointment Setter",
   inside_sales_rep: "Inside Sales Rep",
   outside_sales_rep: "Outside Sales Rep",
@@ -128,6 +128,11 @@ export const ROLES = Object.keys(ROLE_LABELS);
 // Who sees the production schedule board (customer addresses on a map). The
 // database enforces the same list in allied_is_production() (migration 0012).
 export const PRODUCTION_ROLES = ["admin", "sales_manager", "project_manager", "production"];
+// `production` is production-ONLY: the schedule board and their own account,
+// no sales pages or data. Every other role is sales-side staff. The database
+// enforces the same split in allied_is_authenticated() (migration 0013).
+export const STAFF_ROLES = ROLES.filter((r) => r !== "production");
+export const isProductionOnly = (role) => role === "production";
 
 export const DATE_FILTERS = ["Today","Yesterday","This Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
 

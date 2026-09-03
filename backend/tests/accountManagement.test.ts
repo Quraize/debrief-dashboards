@@ -274,7 +274,11 @@ describe.skipIf(!reachable)("account management", () => {
         expect(created.statusCode, role).toBe(201);
         const s = await login(email, "temporary passphrase 1");
         const read = await app.inject({ method: "GET", url: "/api/entities/Appointment?limit=1", ...s });
-        expect(read.statusCode, `${role} can read appointments`).toBe(200);
+        // `production` is production-ONLY (0013): the schedule board, never
+        // sales data. The other new roles are ordinary staff.
+        expect(read.statusCode, `${role} reading appointments`).toBe(role === "production" ? 403 : 200);
+        const board = await app.inject({ method: "GET", url: "/api/production/board", ...s });
+        expect(board.statusCode, `${role} reading the production board`).toBe(role === "inside_sales_rep" ? 403 : 200);
       }
     });
 

@@ -28,7 +28,7 @@ export const SYNC_QUEUE = "leap-sync";
 /** Production calendar mirror: short window, frequent, independent of the
  *  sales sync (a backfill must never delay the dispatch board). */
 export const PRODUCTION_SCHEDULE_QUEUE = "production-schedule";
-const PRODUCTION_SCHEDULE_DEFAULT_CRON = "*/30 * * * *";
+const PRODUCTION_SCHEDULE_DEFAULT_CRON = "*/10 * * * *";
 const PRODUCTION_SCHEDULE_JOB_OPTS: PgBoss.SendOptions = {
   retryLimit: 1,
   retryDelay: 120,

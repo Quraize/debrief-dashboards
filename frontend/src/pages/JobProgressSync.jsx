@@ -15,6 +15,15 @@ function fmtDate(d) {
   return d.toISOString().slice(0, 10);
 }
 
+// A "*&#47;10 * * * *"-style cron reads as "every 10 min"; anything else is shown raw.
+function describeCron(cron) {
+  const m = /^\*\/(\d+) \* \* \* \*$/.exec(cron ?? "");
+  if (m) return `every ${m[1]} min`;
+  const hourly = /^(\d+) \* \* \* \*$/.exec(cron ?? "");
+  if (hourly) return "hourly";
+  return `cron "${cron}" (UTC)`;
+}
+
 export default function JobProgressSync() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -179,7 +188,7 @@ export default function JobProgressSync() {
             <span className="text-sm font-semibold">Production Schedule:</span>
             <span className={`text-sm ${syncStatus.productionSchedule.enabled ? "text-green-700 font-medium" : "text-muted-foreground"}`}
               title={syncStatus.productionSchedule.enabled ? `cron "${syncStatus.productionSchedule.cron}" (UTC)` : syncStatus.productionSchedule.reason}>
-              {syncStatus.productionSchedule.enabled ? "Active — every 30 min" : "Disabled"}
+              {syncStatus.productionSchedule.enabled ? `Active — ${describeCron(syncStatus.productionSchedule.cron)}` : "Disabled"}
             </span>
             {syncStatus.productionSchedule.lastRun && (
               <span className={`text-xs ${syncStatus.productionSchedule.lastRun.status === "completed" ? "text-muted-foreground" : "text-red-600"}`}>

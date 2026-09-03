@@ -19,7 +19,9 @@
  */
 import type pg from "pg";
 import { withServiceRole } from "../db/client.js";
-import { ROLES as SHARED_ROLES, PRODUCTION_ROLES as SHARED_PRODUCTION_ROLES } from "@allied/shared/constants";
+import {
+  ROLES as SHARED_ROLES, PRODUCTION_ROLES as SHARED_PRODUCTION_ROLES, STAFF_ROLES as SHARED_STAFF_ROLES,
+} from "@allied/shared/constants";
 
 export const ROLES = [
   // Mirrors shared ROLE_LABELS; the DB enforces the same list (0002/0011).
@@ -30,7 +32,9 @@ export type Role = (typeof ROLES)[number];
 export const MANAGERS: Role[] = ["admin", "sales_manager"];
 export const PRODUCTION: Role[] = [...SHARED_PRODUCTION_ROLES] as Role[];
 export const ADMIN_ONLY: Role[] = ["admin"];
-export const AUTHENTICATED: Role[] = [...ROLES];
+/** Every signed-in sales-side role. `production` is deliberately absent: that
+ *  role sees the schedule board and nothing else (RLS agrees — 0013). */
+export const STAFF: Role[] = [...SHARED_STAFF_ROLES] as Role[];
 
 export interface EntityPolicy {
   /** Physical table. */
@@ -51,27 +55,27 @@ export interface EntityPolicy {
 export const ENTITIES: Record<string, EntityPolicy> = {
   Appointment: {
     table: "appointment",
-    read: AUTHENTICATED,
+    read: STAFF,
     create: MANAGERS,
     // Any signed-in role may update: submitting a debrief sets debrief_status
     // on the linked appointment. RLS enforces the same rule.
-    update: AUTHENTICATED,
+    update: STAFF,
     remove: MANAGERS,
     defaultSort: "-created_at",
   },
   Debrief: {
     table: "debrief",
-    read: AUTHENTICATED,
-    create: AUTHENTICATED,
+    read: STAFF,
+    create: STAFF,
     // Row-level ownership (author or manager) is enforced by RLS, not here -
     // it depends on the row, which this layer deliberately does not fetch first.
-    update: AUTHENTICATED,
+    update: STAFF,
     remove: MANAGERS,
     defaultSort: "-created_at",
   },
   ListOption: {
     table: "list_option",
-    read: AUTHENTICATED,
+    read: STAFF,
     create: MANAGERS,
     update: MANAGERS,
     remove: MANAGERS,
@@ -97,12 +101,12 @@ export const ENTITIES: Record<string, EntityPolicy> = {
   // (jobs pool) writes these; exposing create/update would let a browser forge
   // "what the CRM said", which is the one thing this data must never be.
   JPAppointment: {
-    table: "jp_appointment", read: AUTHENTICATED,
+    table: "jp_appointment", read: STAFF,
     create: null, update: null, remove: null,
     defaultSort: "-appointment_date",
   },
   JPJob: {
-    table: "jp_job", read: AUTHENTICATED,
+    table: "jp_job", read: STAFF,
     create: null, update: null, remove: null,
     defaultSort: "-contract_signed_date",
   },
@@ -128,7 +132,7 @@ export const ENTITIES: Record<string, EntityPolicy> = {
   },
   User: {
     table: "app_user",
-    read: AUTHENTICATED,   // RLS narrows this to "own row, or everything if admin"
+    read: STAFF,   // RLS narrows this to "own row, or everything if admin"
     // Account provisioning is an operational act (scripts/seed-user.ts), never
     // an API call - see D11. Exposing create here would rebuild the
     // registration surface Sprint 2 deliberately removed.
