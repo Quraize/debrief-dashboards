@@ -109,14 +109,22 @@ export const FIRST_CALL_CLOSE = "First Call Close";
 export const CREDIT_DECLINE_CLOSE = "Credit Decline";
 export const CANCELLATION_CLOSE = "Cancellation";
 
+// The single source of truth for account roles. Adding one here is only the
+// first step — the database CHECK constraint on app_user.role and the
+// allied_is_authenticated() RLS helper enumerate them too (see migrations
+// 0002/0004, extended by 0011) and must move in lockstep.
 export const ROLE_LABELS = {
   admin: "Admin / Owner",
   sales_manager: "Sales Manager",
+  project_manager: "Project Manager",
+  production: "Production",
   appointment_setter: "Appointment Setter",
+  inside_sales_rep: "Inside Sales Rep",
   outside_sales_rep: "Outside Sales Rep",
   view_only: "View Only",
   user: "User"
 };
+export const ROLES = Object.keys(ROLE_LABELS);
 
 export const DATE_FILTERS = ["Today","Yesterday","This Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
 

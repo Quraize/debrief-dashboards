@@ -14,10 +14,7 @@
 import { createInterface, type Interface } from "node:readline";
 import pg from "pg";
 import { hashPassword } from "../src/auth/crypto.js";
-
-const VALID_ROLES = [
-  "admin", "sales_manager", "appointment_setter", "outside_sales_rep", "view_only", "user",
-];
+import { ROLES as VALID_ROLES } from "@allied/shared/constants";
 
 /**
  * Prompts without echoing. readline writes each keystroke through

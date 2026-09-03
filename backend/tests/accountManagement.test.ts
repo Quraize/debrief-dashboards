@@ -263,6 +263,21 @@ describe.skipIf(!reachable)("account management", () => {
       expect((await me(admin)).statusCode).toBe(200);
     });
 
+    it("accepts the newer roles end to end — create, sign in, read data", async () => {
+      // A role missing from allied_is_authenticated() would be denied every
+      // table read, so this checks the DB helper too, not only the API.
+      const admin = await login(ADMIN);
+      for (const role of ["project_manager", "production", "inside_sales_rep"]) {
+        const email = `${role}@allied.test`;
+        const created = await app.inject({ method: "POST", url: "/api/admin/users", ...admin,
+          payload: { email, role, password: "temporary passphrase 1" } });
+        expect(created.statusCode, role).toBe(201);
+        const s = await login(email, "temporary passphrase 1");
+        const read = await app.inject({ method: "GET", url: "/api/entities/Appointment?limit=1", ...s });
+        expect(read.statusCode, `${role} can read appointments`).toBe(200);
+      }
+    });
+
     it("still has no self-registration route", async () => {
       expect((await app.inject({ method: "POST", url: "/api/auth/register", payload: {} })).statusCode).toBe(404);
     });

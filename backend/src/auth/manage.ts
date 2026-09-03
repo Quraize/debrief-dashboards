@@ -13,11 +13,11 @@
 import { withServiceRole } from "../db/client.js";
 import { hashPassword, verifyPassword, hashToken } from "./crypto.js";
 import { revokeAllSessionsFor } from "./session.js";
+import { ROLES } from "@allied/shared/constants";
 
-export const VALID_ROLES = [
-  "admin", "sales_manager", "appointment_setter", "outside_sales_rep", "view_only", "user",
-] as const;
-export type Role = typeof VALID_ROLES[number];
+/** Mirrors shared ROLE_LABELS and the DB constraint (migrations 0002/0011). */
+export const VALID_ROLES: readonly string[] = ROLES;
+export type Role = string;
 
 /** Sessions are identified to clients by a 12-hex prefix of the token hash:
  *  useless for authentication, unique enough within one user's sessions. */
@@ -182,8 +182,8 @@ export async function listUsers(): Promise<ManagedUser[]> {
   }, "admin:list-users", { quiet: true });
 }
 
-function assertRole(role: string): asserts role is Role {
-  if (!(VALID_ROLES as readonly string[]).includes(role)) {
+function assertRole(role: string): void {
+  if (!VALID_ROLES.includes(role)) {
     throw httpError(`role must be one of: ${VALID_ROLES.join(", ")}`, 400);
   }
 }

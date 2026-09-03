@@ -19,9 +19,11 @@
  */
 import type pg from "pg";
 import { withServiceRole } from "../db/client.js";
+import { ROLES as SHARED_ROLES } from "@allied/shared/constants";
 
 export const ROLES = [
-  "admin", "sales_manager", "appointment_setter", "outside_sales_rep", "view_only", "user",
+  // Mirrors shared ROLE_LABELS; the DB enforces the same list (0002/0011).
+  ...SHARED_ROLES,
 ] as const;
 export type Role = (typeof ROLES)[number];
 

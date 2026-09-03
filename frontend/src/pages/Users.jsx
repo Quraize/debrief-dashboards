@@ -9,14 +9,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
-import { ROLE_LABELS } from "@allied/shared/constants";
+import { ROLE_LABELS, ROLES } from "@allied/shared/constants";
 import { Loader2, UserPlus, Lock, RefreshCw, Copy } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-const ROLES = ["admin", "sales_manager", "appointment_setter", "outside_sales_rep", "view_only", "user"];
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 
 /** 16 characters from an unambiguous alphabet — comfortably past the 12 minimum. */
