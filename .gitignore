@@ -42,6 +42,8 @@ export/
 uploads/
 
 pics/
+# Ad-hoc analysis workbooks (business data; never committed)
+reports/
 
 # Contract examples — customer PII, never commit
 docs/*.pdf
