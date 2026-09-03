@@ -91,6 +91,22 @@
   }
 }
 
+/* A scrollable panel whose scrollbar stays out of sight until the pointer is
+   over it — the sidebar uses this so a menu slightly taller than the window
+   scrolls without wearing a permanent scrollbar. Firefox via scrollbar-color,
+   Chromium/Safari via ::-webkit-scrollbar. */
+.scroll-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-subtle:hover {
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+.scroll-subtle::-webkit-scrollbar { width: 6px; }
+.scroll-subtle::-webkit-scrollbar-track { background: transparent; }
+.scroll-subtle::-webkit-scrollbar-thumb { background: transparent; border-radius: 9999px; }
+.scroll-subtle:hover::-webkit-scrollbar-thumb { background: hsl(var(--border)); }
+
 @media print {
   header, aside, nav { display: none !important; }
   main { padding: 0 !important; max-width: none !important; }
