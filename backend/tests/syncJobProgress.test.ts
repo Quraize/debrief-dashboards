@@ -348,6 +348,24 @@ describe.skipIf(!reachable)("runJobProgressSync", () => {
     expect(rows[0]!.contract_signed_date).toBe("2026-08-05");
   });
 
+  it("marks appointments Submitted when a debrief already exists for that lead and date", async () => {
+    // Imported debriefs never touched the appointments they belong to, so
+    // without this the queue lists visits that were debriefed months ago.
+    await db.owner.query(
+      `INSERT INTO debrief (customer_name, crm_lead_id, appointment_date, appointment_outcome,
+                            submitted_by, sales_rep, appointment_setter, created_by)
+       VALUES ('Smith Household', 'l-50', '2026-07-15', 'Demo Completed — Sale',
+               'Jason Malarchak', 'Jason Malarchak', 'Ashley Pasquale', 'csv-import')`);
+    await runJobProgressSync({
+      mode: "commit", dateFrom: "2026-07-01", dateTo: "2026-07-31", fullBackfill: true,
+      client: stubApi([appointment(50), appointment(51)]),
+    });
+    const { rows } = await db.owner.query<{ crm_lead_id: string; debrief_status: string }>(
+      `SELECT crm_lead_id, debrief_status FROM appointment WHERE crm_lead_id IN ('L-50','L-51') ORDER BY crm_lead_id`);
+    expect(rows.find((r) => r.crm_lead_id === "L-50")!.debrief_status, "case-insensitive lead match").toBe("Submitted");
+    expect(rows.find((r) => r.crm_lead_id === "L-51")!.debrief_status, "no debrief → still Missing").toBe("Missing");
+  });
+
   it("reads financials from the job listing's financial_details without a summary call", async () => {
     // The shape observed on production payloads — a plain object, not .data-wrapped.
     const result = await runJobProgressSync({

@@ -59,6 +59,7 @@ export interface SyncCounts {
   non_sales_exclusions: number;
   signed_sales_found: number;
   jp_appointments_upserted: number;
+  debrief_status_reconciled: number;
   jp_results_fetched: number;
   jp_two_leg_answers: number;
   jp_jobs_upserted: number;
@@ -102,6 +103,7 @@ const emptyCounts = (): SyncCounts => ({
   non_sales_exclusions: 0,
   signed_sales_found: 0,
   jp_appointments_upserted: 0,
+  debrief_status_reconciled: 0,
   jp_results_fetched: 0,
   jp_two_leg_answers: 0,
   jp_jobs_upserted: 0,
@@ -364,6 +366,27 @@ async function upsertAppointments(
   }, "sync:upsert-appointments");
 }
 
+/**
+ * Marks appointments as debriefed when a debrief already exists for the same
+ * Lead ID and date — the KPI engine's own matching rule. The Base44 form used
+ * to set this at submit time; imported debriefs and CRM-synced appointments
+ * never met, so the Open Debrief Queue and Missing Debriefs count would
+ * otherwise list appointments that were debriefed months ago.
+ */
+async function reconcileDebriefStatus(): Promise<number> {
+  return withServiceRole(async (c) => {
+    const { rowCount } = await c.query(
+      `UPDATE appointment a
+          SET debrief_status = 'Submitted', updated_at = now()
+         FROM debrief d
+        WHERE a.debrief_status IN ('Missing', 'Unmatched')
+          AND a.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
+          AND lower(trim(d.crm_lead_id)) = lower(trim(a.crm_lead_id))
+          AND d.appointment_date = a.appointment_date`);
+    return rowCount ?? 0;
+  }, "sync:reconcile-debrief-status", { quiet: true });
+}
+
 /** Generic batched upsert for the jp mirror tables (natural-key conflict). */
 async function upsertJpRows(
   table: "jp_appointment" | "jp_job", conflictColumn: string, rows: Record<string, unknown>[],
@@ -529,6 +552,7 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
       const outcome = await upsertAppointments(salesRows);
       counts.created = outcome.created;
       counts.updated = outcome.updated;
+      counts.debrief_status_reconciled = await reconcileDebriefStatus();
     }
 
     // Signed sales in one query rather than per-job probing (docs §3.2).

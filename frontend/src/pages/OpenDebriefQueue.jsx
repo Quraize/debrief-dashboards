@@ -35,10 +35,29 @@ export default function OpenDebriefQueue() {
   const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
   const weekStart = new Date(now); weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
 
+  // Debriefs that exist, keyed the way the KPI engine matches them (Lead ID +
+  // date). The appointment's own debrief_status can lag — imported debriefs
+  // never updated it — so the queue cross-checks rather than trusting it.
+  const debriefKeys = useMemo(() => {
+    const keys = new Set();
+    debriefs.forEach((d) => {
+      if (d.crm_lead_id && d.appointment_date) {
+        keys.add(String(d.crm_lead_id).toLowerCase().trim() + "|" + String(d.appointment_date).slice(0, 10));
+      }
+    });
+    return keys;
+  }, [debriefs]);
+  const hasDebrief = (a) =>
+    a.debrief_status === "Submitted" || a.debrief_status === "Approved" ||
+    (a.crm_lead_id && a.appointment_date &&
+      debriefKeys.has(String(a.crm_lead_id).toLowerCase().trim() + "|" + String(a.appointment_date).slice(0, 10)));
+
   const queue = useMemo(() => {
     return salesAppts.filter((a) => {
       const ad = a.appointment_date;
-      const isMissing = a.debrief_status === "Missing" || a.debrief_status === "Unmatched";
+      // A debrief is only "missing" once the appointment has actually happened.
+      const isMissing = !hasDebrief(a) && ad && ad <= todayStr
+        && (a.debrief_status === "Missing" || a.debrief_status === "Unmatched");
       const needsReview = a.debrief_status === "Needs Review";
       switch (filter) {
         case "Today": return ad === todayStr;
@@ -52,7 +71,8 @@ export default function OpenDebriefQueue() {
         default: return true;
       }
     }).sort((a, b) => (b.appointment_date || "").localeCompare(a.appointment_date || ""));
-  }, [salesAppts, filter, rep, setter, todayStr, yesterdayStr, weekStart]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesAppts, debriefKeys, filter, rep, setter, todayStr, yesterdayStr, weekStart]);
 
   const estimatesInProgress = useMemo(() => {
     return debriefs
@@ -88,7 +108,10 @@ export default function OpenDebriefQueue() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-heading font-bold text-primary">Open Debrief Queue</h1>
-        <p className="text-sm text-muted-foreground">Appointments awaiting a debrief.</p>
+        <p className="text-sm text-muted-foreground">
+          Appointments that have happened and have no debrief yet.
+          {!isLoading && !showEstimates && <> <span className="font-semibold text-foreground">{queue.length}</span> in this view.</>}
+        </p>
       </div>
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -188,7 +211,8 @@ export default function OpenDebriefQueue() {
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Insurance</span>
                 )}
                 <Badge text={a.appointment_status || "Set"} />
-                <Badge text={a.debrief_status || "Missing"} highlight={a.debrief_status === "Missing" || a.debrief_status === "Unmatched"} />
+                <Badge text={hasDebrief(a) ? "Submitted" : (a.debrief_status || "Missing")}
+                  highlight={!hasDebrief(a) && (a.debrief_status === "Missing" || a.debrief_status === "Unmatched")} />
               </div>
             </div>
           ))}
