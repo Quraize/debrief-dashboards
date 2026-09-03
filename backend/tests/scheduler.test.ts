@@ -90,7 +90,9 @@ describe.skipIf(!reachable)("scheduler", () => {
     await scheduler.startScheduler();
     boss = scheduler.getBoss()!;
     const names = (await boss.getSchedules()).map((s) => s.name).sort();
-    expect(names).toEqual([scheduler.SYNC_QUEUE, scheduler.PRICE_SCAN_QUEUE].sort());
+    expect(names).toEqual(
+      [scheduler.SYNC_QUEUE, scheduler.PRICE_SCAN_QUEUE, scheduler.PRODUCTION_SCHEDULE_QUEUE].sort());
+    expect((await boss.getQueue(scheduler.PRODUCTION_SCHEDULE_QUEUE))?.policy).toBe("singleton");
 
     // Cleanup for the tests that follow (they expect the sync schedule off).
     await scheduler.stopScheduler({ graceful: false });

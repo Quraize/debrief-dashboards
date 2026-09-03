@@ -134,7 +134,8 @@ async function lastSuccessfulSync(overlapMinutes = 30): Promise<Date | null> {
   return withServiceRole(async (c) => {
     const { rows } = await c.query<{ finished_at: Date }>(
       `SELECT finished_at FROM sync_run
-        WHERE mode = 'commit' AND status = 'completed' AND finished_at IS NOT NULL
+        WHERE kind = 'appointments'
+          AND mode = 'commit' AND status = 'completed' AND finished_at IS NOT NULL
         ORDER BY finished_at DESC LIMIT 1`);
     if (!rows[0]) return null;
     return new Date(rows[0].finished_at.getTime() - overlapMinutes * 60_000);

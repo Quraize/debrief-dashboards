@@ -22,8 +22,18 @@ import { dbJobs, withServiceRole } from "../db/client.js";
 import { runJobProgressSync, type SyncMode } from "./syncJobProgress.js";
 import { runBackfill, monthChunks, type BackfillResult } from "./backfill.js";
 import { scanContractPrices, type ScanResult } from "./contractPrices.js";
+import { runScheduleSync, type ScheduleSyncCounts } from "../production/syncSchedules.js";
 
 export const SYNC_QUEUE = "leap-sync";
+/** Production calendar mirror: short window, frequent, independent of the
+ *  sales sync (a backfill must never delay the dispatch board). */
+export const PRODUCTION_SCHEDULE_QUEUE = "production-schedule";
+const PRODUCTION_SCHEDULE_DEFAULT_CRON = "*/30 * * * *";
+const PRODUCTION_SCHEDULE_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 1,
+  retryDelay: 120,
+  expireInSeconds: 900,
+};
 /** Separate queue: the contract scan neither conflicts with the sync nor
  *  should ever wait behind a long backfill. */
 export const PRICE_SCAN_QUEUE = "price-scan";
@@ -177,6 +187,31 @@ export async function handlePriceScanJob(
   return result;
 }
 
+/** Same master switch as the sync; needs only the JobProgress token. */
+export function productionScheduleSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const cron = process.env.PRODUCTION_SCHEDULE_CRON ?? PRODUCTION_SCHEDULE_DEFAULT_CRON;
+  if (process.env.SYNC_SCHEDULE_ENABLED !== "true") {
+    return { enabled: false, cron, reason: "SYNC_SCHEDULE_ENABLED is not true" };
+  }
+  if (!process.env.LEAP_API_TOKEN) return { enabled: false, cron, reason: "LEAP_API_TOKEN not set" };
+  return { enabled: true, cron, reason: "" };
+}
+
+/** The schedule-sync worker. Failure is a value from the sync (its telemetry
+ *  row is always written); it becomes a throw here so pg-boss retries. */
+export async function handleProductionScheduleJob(
+  deps: { sync?: typeof runScheduleSync } = {},
+): Promise<ScheduleSyncCounts> {
+  const sync = deps.sync ?? runScheduleSync;
+  const result = await sync({ startedBy: "production-scheduler" });
+  if (result.status === "failed") throw new Error(result.errorMessage ?? "schedule sync failed");
+  console.info(
+    `[scheduler] production schedule: ${result.counts.schedules_examined} examined, `
+    + `${result.counts.schedules_created} new, ${result.counts.schedules_updated} updated, `
+    + `${result.counts.schedules_retired} retired`);
+  return result.counts;
+}
+
 /**
  * Marks abandoned runs. A crash mid-sync leaves a `running` row forever, and a
  * stale one both lies on the admin page and (worse) would make an overlap guard
@@ -277,6 +312,28 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       PRICE_SCAN_QUEUE,
       { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
       async () => handlePriceScanJob(),
+    );
+  }
+
+  // ── Production schedule mirror: its own queue and cron ──
+  const prodQueue = await instance.getQueue(PRODUCTION_SCHEDULE_QUEUE);
+  if (!prodQueue) {
+    await instance.createQueue(PRODUCTION_SCHEDULE_QUEUE, { name: PRODUCTION_SCHEDULE_QUEUE, policy: "singleton" });
+  }
+  const prod = productionScheduleSchedule();
+  if (prod.enabled) {
+    await instance.schedule(PRODUCTION_SCHEDULE_QUEUE, prod.cron, { startedBy: "production-scheduler" },
+      { ...PRODUCTION_SCHEDULE_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${PRODUCTION_SCHEDULE_QUEUE} scheduled: "${prod.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(PRODUCTION_SCHEDULE_QUEUE);
+    console.info(`[scheduler] production schedule sync disabled (${prod.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      PRODUCTION_SCHEDULE_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handleProductionScheduleJob(),
     );
   }
 
@@ -396,6 +453,10 @@ export interface SyncStatus {
     enabled: boolean; cron: string; reason: string;
     lastRun: { completed_on: string; state: string } | null;
   };
+  productionSchedule: {
+    enabled: boolean; cron: string; reason: string;
+    lastRun: { started_at: string; finished_at: string | null; status: string } | null;
+  };
   backfill: {
     active: boolean;
     jobId?: string;
@@ -408,11 +469,11 @@ export interface SyncStatus {
 
 /** What the admin page's status bar shows instead of hardcoded text. */
 export async function syncStatus(): Promise<SyncStatus> {
-  const lastScheduledRun = await withServiceRole(async (c) => {
+  const lastRunOf = (kind: "appointments" | "schedules", startedBy?: string) => withServiceRole(async (c) => {
     const { rows } = await c.query<{ started_at: Date; finished_at: Date | null; status: string }>(
       `SELECT started_at, finished_at, status FROM sync_run
-        WHERE started_by = 'scheduler'
-        ORDER BY started_at DESC LIMIT 1`);
+        WHERE kind = $1 AND ($2::text IS NULL OR started_by = $2)
+        ORDER BY started_at DESC LIMIT 1`, [kind, startedBy ?? null]);
     const row = rows[0];
     if (!row) return null;
     return {
@@ -421,6 +482,8 @@ export async function syncStatus(): Promise<SyncStatus> {
       status: row.status,
     };
   }, "scheduler:status", { quiet: true });
+  const lastScheduledRun = await lastRunOf("appointments", "scheduler");
+  const lastScheduleSync = await lastRunOf("schedules");
 
   let backfill: SyncStatus["backfill"] = { active: false };
   if (boss) {
@@ -468,6 +531,7 @@ export async function syncStatus(): Promise<SyncStatus> {
     },
     lastScheduledRun,
     priceScan: { ...priceScanSchedule(), lastRun: lastScanRun },
+    productionSchedule: { ...productionScheduleSchedule(), lastRun: lastScheduleSync },
     backfill,
   };
 }

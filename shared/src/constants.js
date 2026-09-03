@@ -125,6 +125,9 @@ export const ROLE_LABELS = {
   user: "User"
 };
 export const ROLES = Object.keys(ROLE_LABELS);
+// Who sees the production schedule board (customer addresses on a map). The
+// database enforces the same list in allied_is_production() (migration 0012).
+export const PRODUCTION_ROLES = ["admin", "sales_manager", "project_manager", "production"];
 
 export const DATE_FILTERS = ["Today","Yesterday","This Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
 

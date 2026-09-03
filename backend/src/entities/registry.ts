@@ -19,7 +19,7 @@
  */
 import type pg from "pg";
 import { withServiceRole } from "../db/client.js";
-import { ROLES as SHARED_ROLES } from "@allied/shared/constants";
+import { ROLES as SHARED_ROLES, PRODUCTION_ROLES as SHARED_PRODUCTION_ROLES } from "@allied/shared/constants";
 
 export const ROLES = [
   // Mirrors shared ROLE_LABELS; the DB enforces the same list (0002/0011).
@@ -28,6 +28,7 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number];
 
 export const MANAGERS: Role[] = ["admin", "sales_manager"];
+export const PRODUCTION: Role[] = [...SHARED_PRODUCTION_ROLES] as Role[];
 export const ADMIN_ONLY: Role[] = ["admin"];
 export const AUTHENTICATED: Role[] = [...ROLES];
 
@@ -111,6 +112,19 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     table: "jp_price_candidate", read: ADMIN_ONLY,
     create: null, update: null, remove: null,
     defaultSort: "-created_at",
+  },
+  // Production schedule mirror: customer addresses on a map, so reads are
+  // limited to production roles (RLS: allied_is_production()). Written only
+  // by the schedule sync.
+  JPSchedule: {
+    table: "jp_schedule", read: PRODUCTION,
+    create: null, update: null, remove: null,
+    defaultSort: "start_at",
+  },
+  JPJobLocation: {
+    table: "jp_job_location", read: PRODUCTION,
+    create: null, update: null, remove: null,
+    defaultSort: "jp_job_id",
   },
   User: {
     table: "app_user",

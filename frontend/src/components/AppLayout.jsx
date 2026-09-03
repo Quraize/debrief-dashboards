@@ -4,8 +4,9 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin
 } from "lucide-react";
+import { PRODUCTION_ROLES } from "@allied/shared/constants";
 
 const DASHBOARDS = [
   { to: "/", label: "Overview", icon: Home, end: true },
@@ -32,6 +33,12 @@ const ADMIN_OPERATIONS = [
   { to: "/jobprogress-sync", label: "JobProgress Sync", icon: RefreshCw },
   { to: "/price-review", label: "Price Review", icon: BadgeDollarSign },
   { to: "/users", label: "Users", icon: UsersIcon },
+];
+
+// Production lives in its own section so it can become its own front door
+// (a separate domain on the same backend) without touching the rest.
+const PRODUCTION_NAV = [
+  { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
 ];
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];
@@ -83,6 +90,12 @@ export default function AppLayout() {
           <NavSection label="Dashboards" items={DASHBOARDS} />
           <div className="my-1 border-t border-border/60" />
           <NavSection label="Operations" items={OPERATIONS} />
+          {PRODUCTION_ROLES.includes(me?.role) && (
+            <>
+              <div className="my-1 border-t border-border/60" />
+              <NavSection label="Production" items={PRODUCTION_NAV} />
+            </>
+          )}
           {me?.role === "admin" && (
             <>
               <div className="my-1 border-t border-border/60" />
@@ -104,6 +117,12 @@ export default function AppLayout() {
                 <NavSection label="Dashboards" items={DASHBOARDS} onClick={() => setOpen(false)} />
                 <div className="my-1 border-t border-border/60" />
                 <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} />
+                {PRODUCTION_ROLES.includes(me?.role) && (
+                  <>
+                    <div className="my-1 border-t border-border/60" />
+                    <NavSection label="Production" items={PRODUCTION_NAV} onClick={() => setOpen(false)} />
+                  </>
+                )}
                 {me?.role === "admin" && (
                   <>
                     <div className="my-1 border-t border-border/60" />

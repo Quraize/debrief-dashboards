@@ -174,6 +174,20 @@ export default function JobProgressSync() {
             </span>
           </div>
         )}
+        {syncStatus?.productionSchedule && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">Production Schedule:</span>
+            <span className={`text-sm ${syncStatus.productionSchedule.enabled ? "text-green-700 font-medium" : "text-muted-foreground"}`}
+              title={syncStatus.productionSchedule.enabled ? `cron "${syncStatus.productionSchedule.cron}" (UTC)` : syncStatus.productionSchedule.reason}>
+              {syncStatus.productionSchedule.enabled ? "Active — every 30 min" : "Disabled"}
+            </span>
+            {syncStatus.productionSchedule.lastRun && (
+              <span className={`text-xs ${syncStatus.productionSchedule.lastRun.status === "completed" ? "text-muted-foreground" : "text-red-600"}`}>
+                last {new Date(syncStatus.productionSchedule.lastRun.started_at).toLocaleString()} ({syncStatus.productionSchedule.lastRun.status})
+              </span>
+            )}
+          </div>
+        )}
         {syncStatus?.lastScheduledRun && (
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">Last Scheduled Run:</span>
@@ -350,7 +364,7 @@ export default function JobProgressSync() {
                     <td className="px-4 py-2 whitespace-nowrap">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
                     <td className="px-4 py-2">{r.mode}</td>
                     <td className="px-4 py-2 whitespace-nowrap">{r.date_from} → {r.date_to}</td>
-                    <td className="px-4 py-2">{r.full_backfill ? "backfill" : "incremental"}</td>
+                    <td className="px-4 py-2">{r.kind === "schedules" ? "production schedule" : r.full_backfill ? "backfill" : "incremental"}</td>
                     <td className={`px-4 py-2 font-semibold ${r.status === "completed" ? "text-green-700" : r.status === "running" ? "text-sky-700" : "text-red-600"}`}>{r.status}</td>
                     <td className="px-4 py-2">{r.counts?.api_appointments_examined ?? 0}</td>
                     <td className="px-4 py-2">{r.counts?.created ?? 0}</td>

@@ -270,6 +270,37 @@ export class JobProgressClient {
   }
 
   /**
+   * Job addresses, batched. JobProgress geocodes on entry, so the `address`
+   * include already carries lat/long — the production board never needs an
+   * external geocoder.
+   */
+  async listJobAddresses(ids: (string | number)[], batchSize = 20): Promise<Record<string, unknown>[]> {
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize).map(String);
+      out.push(...await this.collect<Record<string, unknown>>("/jobs", {
+        "job_ids[]": batch,
+        "includes[]": ["address"],
+      }, "jobs:addresses"));
+    }
+    return out;
+  }
+
+  /**
+   * Production-calendar entries (`type=schedule`; `event` is the office's
+   * non-job calendar) whose start falls in the window. Timestamps come back
+   * as `YYYY-MM-DD HH:MM:SS` in UTC.
+   */
+  async listSchedules(from: string, to: string): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/schedules", {
+      start_date_time: from,
+      end_date_time: to,
+      type: "schedule",
+      "includes[]": ["job", "customer", "sub_contractors", "trades", "work_types"],
+    }, "schedules");
+  }
+
+  /**
    * Jobs whose contract was signed in a window.
    *
    * Replaces the old approach of fetching every linked job and testing
