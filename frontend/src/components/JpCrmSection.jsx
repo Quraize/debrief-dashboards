@@ -18,6 +18,8 @@ import {
   jpDebriefCoverage, JP_SOURCE_NOTE, JP_TWO_LEG_DEFINITION, JP_REVENUE_DEFINITION,
   JP_COVERAGE_DEFINITION,
   JP_APPOINTMENTS_DEFINITION,
+  JP_AWAITING_DEFINITION,
+  AWAITING_RESULT_DAYS,
 } from "@allied/shared/jpStats";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Database, ClipboardList } from "lucide-react";
@@ -103,13 +105,18 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
 
   const cards = [
     { label: "Appointments (CRM)", value: stats.run,
-      title: `${JP_APPOINTMENTS_DEFINITION} This period: ${stats.total} on the calendar − ${stats.nonSales} non-sales − ${stats.noShows} no-shows − ${stats.noResult} no result = ${stats.run}.` },
+      title: `${JP_APPOINTMENTS_DEFINITION} This period: ${stats.total} on the calendar − ${stats.nonSales} non-sales − ${stats.noShows} no-shows`
+        + ` − ${stats.awaitingResult} awaiting result − ${stats.upcoming} upcoming − ${stats.noResult} cancelled / no result = ${stats.run}.` },
     { label: "On Calendar", value: stats.total,
       title: "Every appointment on the JobProgress calendar in this period, of every kind — the gross count before anything is excluded." },
+    { label: "Awaiting Result", value: stats.awaitingResult, rating: stats.awaitingResult > 0 ? "yellow" : null,
+      title: JP_AWAITING_DEFINITION },
+    { label: "Upcoming", value: stats.upcoming,
+      title: "Sales appointments dated today or later in this period — nothing to record yet." },
     { label: "No-Shows", value: stats.noShows,
       title: "Sales-type appointments whose CRM result is \"No See\": the rep went, the customer did not." },
-    { label: "No Result / Cancelled", value: stats.noResult,
-      title: "Sales-type appointments with no result form — cancelled appointments still on the calendar, plus forms never filled in." },
+    { label: "Cancelled / No Result", value: stats.noResult,
+      title: `Sales appointments titled CANCELLED, plus ones held more than ${AWAITING_RESULT_DAYS} days ago whose result was never recorded.` },
     { label: "Non-Sales Visits", value: stats.nonSales,
       title: "Warranty callbacks, walk-throughs, inspections, deliveries — on the calendar but not sales opportunities." },
     { label: "CRM Two-Leg %", value: twoLeg.twoLeg + twoLeg.oneLeg > 0 ? twoLeg.rate + "%" : "—",
@@ -127,8 +134,8 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {cards.map((c) => <KpiCard key={c.label} label={c.label} value={c.value} title={c.title} />)}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {cards.map((c) => <KpiCard key={c.label} label={c.label} value={c.value} title={c.title} rating={c.rating ?? null} />)}
       </div>
       <p className="text-[11px] text-muted-foreground">
         Hover any card for its definition. Revenue here is the contract value recorded in

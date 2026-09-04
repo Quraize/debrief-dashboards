@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   jpAppointmentStats, jpTwoLegStats, jpRevenueStats,
-  jpSetterStats, jpRepStats, jpDebriefCoverage,
+  jpSetterStats, jpRepStats, jpDebriefCoverage, classifyNoResult,
 } from "../src/jpStats.js";
 
 // Row factories mirror the jp_appointment / jp_job columns the sync writes.
@@ -53,12 +53,30 @@ describe("jpAppointmentStats", () => {
       ran({ jp_appointment_id: "2", result_option_name: "Demo No Sale" }),
       ran({ jp_appointment_id: "3", result_option_name: "No Demo" }),
       ran({ jp_appointment_id: "4", result_option_name: "No See" }),      // no-show: not run
-      appt({ jp_appointment_id: "5" }),                                    // cancelled / no result: not run
+      appt({ jp_appointment_id: "5", title: "CANCELLED ROOF EST" }),         // cancelled: not run
       appt({ jp_appointment_id: "6", is_sales_type: false, title: "FINAL WALK THROUGH" }),
     ];
-    const s = jpAppointmentStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
-    expect(s).toMatchObject({ total: 6, run: 3, nonSales: 1, noShows: 1, noResult: 1, salesType: 5 });
-    expect(s.run + s.nonSales + s.noShows + s.noResult).toBe(s.total); // the four always reconcile
+    const s = jpAppointmentStats(rows, "Custom Range", "2026-08-01", "2026-08-31", new Date("2026-09-15T12:00:00"));
+    expect(s).toMatchObject({ total: 6, run: 3, nonSales: 1, noShows: 1, noResult: 1, awaitingResult: 0, upcoming: 0, salesType: 5 });
+    expect(s.run + s.nonSales + s.noShows + s.noResult).toBe(s.total); // the buckets always reconcile
+  });
+
+  it("splits missing results into awaiting / upcoming / cancelled-or-stale, relative to today", () => {
+    const now = new Date("2026-08-20T15:00:00");
+    const rows = [
+      appt({ jp_appointment_id: "1", appointment_date: "2026-08-19" }),                    // held yesterday, form not filled → awaiting
+      appt({ jp_appointment_id: "2", appointment_date: "2026-08-06" }),                    // 14 days ago → still awaiting (inclusive)
+      appt({ jp_appointment_id: "3", appointment_date: "2026-08-05" }),                    // 15 days ago → no result
+      appt({ jp_appointment_id: "4", appointment_date: "2026-08-20" }),                    // today → upcoming
+      appt({ jp_appointment_id: "5", appointment_date: "2026-08-25" }),                    // later → upcoming
+      appt({ jp_appointment_id: "6", appointment_date: "2026-08-19", title: "CANCELLED - ROOF EST" }), // cancelled, any age
+      ran({ jp_appointment_id: "7", appointment_date: "2026-08-19" }),                     // run
+    ];
+    const s = jpAppointmentStats(rows, "Custom Range", "2026-08-01", "2026-08-31", now);
+    expect(s).toMatchObject({ total: 7, run: 1, awaitingResult: 2, upcoming: 2, noResult: 2, noShows: 0, nonSales: 0 });
+    expect(s.run + s.nonSales + s.noShows + s.awaitingResult + s.upcoming + s.noResult).toBe(s.total);
+    expect(classifyNoResult(appt({ appointment_date: "2026-08-19" }), now)).toBe("awaiting");
+    expect(classifyNoResult(appt({ appointment_date: "2026-07-01" }), now)).toBe("no_result");
   });
 
   it("buckets weekly volume by Monday week start", () => {

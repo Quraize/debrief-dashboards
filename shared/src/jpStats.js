@@ -43,11 +43,48 @@ export const isNoShowResult = (r) => NO_SHOW_RESULT.test(String(r.result_option_
  */
 export const isRunAppointment = (r) => isSalesType(r) && r.has_result === true && !isNoShowResult(r);
 
+/** The office marks a cancelled appointment by prefixing its title. */
+export const isCancelledTitle = (r) => /cancel/i.test(String(r.title ?? ""));
+
+/**
+ * A held appointment whose result has not been recorded yet is "awaiting
+ * result" for this many days — reps fill the CRM form after the fact, not on
+ * the day. Beyond it, a missing result is treated as never coming.
+ */
+export const AWAITING_RESULT_DAYS = 14;
+
+/** YYYY-MM-DD of `now` in the viewer's local time (dashboards run on office clocks). */
+function localDay(now) {
+  const d = now instanceof Date ? now : new Date(now);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Where a sales-type appointment WITHOUT a result belongs:
+ *   "cancelled"  — title says so (any age)
+ *   "upcoming"   — today or later: nothing to record yet
+ *   "awaiting"   — held within the last AWAITING_RESULT_DAYS, form not filled yet
+ *   "no_result"  — older than that: the result is not coming
+ */
+export function classifyNoResult(r, now = new Date()) {
+  if (isCancelledTitle(r)) return "cancelled";
+  const today = localDay(now);
+  const date = String(r.appointment_date ?? "").slice(0, 10);
+  if (!date || date >= today) return "upcoming";
+  const ageDays = (Date.parse(`${today}T00:00:00`) - Date.parse(`${date}T00:00:00`)) / 86_400_000;
+  return ageDays <= AWAITING_RESULT_DAYS ? "awaiting" : "no_result";
+}
+
 export const JP_SOURCE_NOTE =
   "Pulled directly from the JobProgress CRM by the scheduled sync. Counts what the CRM recorded — including appointments that never received a debrief — so these figures can differ from the debrief-based numbers above.";
 
 export const JP_APPOINTMENTS_DEFINITION =
-  "Appointments = sales-type CRM appointments that were actually run: the rep met the customer and a result was recorded (Sale, Demo No Sale, No Demo…). Non-sales visits, no-shows (\"No See\") and appointments with no result — mostly cancellations — are excluded and shown on their own cards.";
+  "Appointments = sales-type CRM appointments that were actually run: the rep met the customer and a result was recorded (Sale, Demo No Sale, No Demo…). Non-sales visits, no-shows (\"No See\"), appointments still awaiting their result, upcoming ones, and cancelled / no-result ones are excluded and shown on their own cards.";
+
+export const JP_AWAITING_DEFINITION =
+  `Sales appointments held in the last ${AWAITING_RESULT_DAYS} days whose result form has not been filled in JobProgress yet. They move into Appointments (or No-Shows) as soon as the rep records the result — so early in a month, Appointments lags by however long that takes.`;
 
 export const JP_TWO_LEG_DEFINITION =
   "Two-Leg answers parsed from JobProgress appointment result forms (the free-text \"Was it 2-Legs?\" question). Rate = Two-Leg ÷ (Two-Leg + One-Leg) among retail sales appointments; unanswered forms and insurance records are excluded.";
@@ -65,12 +102,18 @@ export const JP_COVERAGE_DEFINITION =
  * Result coverage is measured against sales-type appointments only: nobody
  * expects a result form on a warranty visit.
  */
-export function jpAppointmentStats(rows, filter, cs, ce) {
+export function jpAppointmentStats(rows, filter, cs, ce, now = new Date()) {
   const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce);
   const sales = inRange.filter(isSalesType);
   const salesWithResult = sales.filter((r) => r.has_result === true);
   const run = sales.filter(isRunAppointment);
   const noShows = salesWithResult.filter(isNoShowResult);
+
+  // Sales-type appointments with no result yet, split by what the silence means.
+  const pending = { cancelled: 0, upcoming: 0, awaiting: 0, no_result: 0 };
+  for (const r of sales) {
+    if (r.has_result !== true) pending[classifyNoResult(r, now)]++;
+  }
 
   const weeks = {};
   for (const r of inRange) {
@@ -89,7 +132,12 @@ export function jpAppointmentStats(rows, filter, cs, ce) {
     salesType: sales.length,
     nonSales: inRange.length - sales.length,
     noShows: noShows.length,
-    noResult: sales.length - salesWithResult.length,
+    /** Held recently, result form not filled yet — will move into `run` (or no-shows) once it is. */
+    awaitingResult: pending.awaiting,
+    /** Today or later: nothing to record yet. */
+    upcoming: pending.upcoming,
+    /** Cancelled by title, or held so long ago the result is not coming. */
+    noResult: pending.cancelled + pending.no_result,
     insurance: inRange.filter(isInsurance).length,
     withResult: inRange.filter((r) => r.has_result === true).length,
     resultCoverageRate: pct(salesWithResult.length, sales.length),
