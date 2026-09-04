@@ -56,6 +56,7 @@ export default function ProductionSchedule() {
   const [view, setView] = useState("day");
   const [crew, setCrew] = useState("");
   const [types, setTypes] = useState(() => new Set());
+  const [stageFilter, setStageFilter] = useState("");
   const [hideCompleted, setHideCompleted] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const cardRefs = useRef({});
@@ -90,11 +91,17 @@ export default function ProductionSchedule() {
       .filter((i) => !hideCompleted || i.status !== "completed")
       .filter((i) => !crew || (crew === NO_CREW ? i.crews.length === 0 : i.crews.some((c) => c.id === crew)))
       .filter((i) => types.size === 0 || types.has(i.parsed.code ?? ""))
+      .filter((i) => !stageFilter || i.stage === stageFilter)
       .map((i, idx) => ({
         ...i, index: idx + 1,
         startTime12: fmtTime(i.startTime), endTime12: fmtTime(i.endTime),
       }));
-  }, [board, hideCompleted, crew, types]);
+  }, [board, hideCompleted, crew, types, stageFilter]);
+  const stageOptions = useMemo(() => {
+    const seen = new Map();
+    for (const i of board?.items ?? []) if (i.stage) seen.set(i.stage, (seen.get(i.stage) ?? 0) + 1);
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]);
+  }, [board]);
   const mappable = useMemo(() => items.filter((i) => i.location?.lat != null && i.location?.lng != null), [items]);
 
   const counts = useMemo(() => {
@@ -107,7 +114,7 @@ export default function ProductionSchedule() {
     };
   }, [board]);
 
-  useEffect(() => { setSelectedId(null); }, [date, view, crew, types, hideCompleted]);
+  useEffect(() => { setSelectedId(null); }, [date, view, crew, types, hideCompleted, stageFilter]);
   useEffect(() => {
     if (selectedId) cardRefs.current[selectedId]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedId]);
@@ -191,6 +198,13 @@ export default function ProductionSchedule() {
             <option value={NO_CREW}>No crew assigned</option>
             {(board?.crews ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          {stageOptions.length > 0 && (
+            <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
+              className="border border-input rounded-lg px-2 py-1.5 text-sm bg-white max-w-[220px]" title="Job workflow stage in JobProgress">
+              <option value="">All job stages</option>
+              {stageOptions.map(([stage, n]) => <option key={stage} value={stage}>{stage} ({n})</option>)}
+            </select>
+          )}
           <label className="flex items-center gap-1.5 text-sm select-none">
             <input type="checkbox" checked={hideCompleted} onChange={(e) => setHideCompleted(e.target.checked)} />
             Hide completed

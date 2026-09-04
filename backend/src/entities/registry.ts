@@ -141,6 +141,11 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     create: null, update: null, remove: null,
     defaultSort: "jp_job_id",
   },
+  JPWorkflowStage: {
+    table: "jp_workflow_stage", read: [...ROLES] as Role[],
+    create: null, update: null, remove: null,
+    defaultSort: "position",
+  },
   User: {
     table: "app_user",
     read: STAFF,   // RLS narrows this to "own row, or everything if admin"

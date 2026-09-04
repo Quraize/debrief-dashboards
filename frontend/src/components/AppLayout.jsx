@@ -39,6 +39,7 @@ const ADMIN_OPERATIONS = [
 // (a separate domain on the same backend) without touching the rest.
 const PRODUCTION_NAV = [
   { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
+  { to: "/production/jobs", label: "Jobs by Stage", icon: HardHat },
 ];
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];

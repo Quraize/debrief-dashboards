@@ -23,6 +23,7 @@ import { runJobProgressSync, type SyncMode } from "./syncJobProgress.js";
 import { runBackfill, monthChunks, type BackfillResult } from "./backfill.js";
 import { scanContractPrices, type ScanResult } from "./contractPrices.js";
 import { runScheduleSync, type ScheduleSyncCounts } from "../production/syncSchedules.js";
+import { runJobStageSync } from "../production/syncJobStages.js";
 import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 
 export const SYNC_QUEUE = "leap-sync";
@@ -231,7 +232,7 @@ export async function handleCustomerSyncJob(
 /** The schedule-sync worker. Failure is a value from the sync (its telemetry
  *  row is always written); it becomes a throw here so pg-boss retries. */
 export async function handleProductionScheduleJob(
-  deps: { sync?: typeof runScheduleSync } = {},
+  deps: { sync?: typeof runScheduleSync; syncStages?: typeof runJobStageSync } = {},
 ): Promise<ScheduleSyncCounts> {
   const sync = deps.sync ?? runScheduleSync;
   const result = await sync({ startedBy: "production-scheduler" });
@@ -240,6 +241,13 @@ export async function handleProductionScheduleJob(
     `[scheduler] production schedule: ${result.counts.schedules_examined} examined, `
     + `${result.counts.schedules_created} new, ${result.counts.schedules_updated} updated, `
     + `${result.counts.schedules_retired} retired`);
+
+  // Jobs by stage ride the same tick. Its own telemetry row; its failure is
+  // logged, not thrown — a stage-list hiccup must not fail the schedule.
+  const syncStages = deps.syncStages ?? runJobStageSync;
+  const stages = await syncStages({ startedBy: "production-scheduler" });
+  if (stages.status === "failed") console.error(`[scheduler] job stages failed: ${stages.errorMessage}`);
+  else console.info(`[scheduler] job stages: ${stages.counts.jobs_examined} tracked job(s), ${stages.counts.jobs_moved_out} moved out`);
   return result.counts;
 }
 

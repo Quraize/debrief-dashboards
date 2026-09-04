@@ -8,6 +8,8 @@ import { requireAuth, requireCsrf, requireRole, clientIp } from "../middleware/a
 import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { boardForRange, validateRange, todayInBoardZone } from "./board.js";
 import { refreshSchedules } from "./syncSchedules.js";
+import { jobsBoard } from "./jobsBoard.js";
+import { runJobStageSync } from "./syncJobStages.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
 
@@ -27,6 +29,14 @@ export function registerProductionRoutes(app: FastifyInstance): void {
     },
   );
 
+  app.get(
+    "/api/production/jobs",
+    { preHandler: [requireAuth, productionOnly] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      return reply.send(await jobsBoard({ email: req.user!.email, role: req.user!.role }));
+    },
+  );
+
   app.post(
     "/api/production/sync",
     { preHandler: [requireAuth, requireCsrf, productionOnly] },
@@ -37,7 +47,7 @@ export function registerProductionRoutes(app: FastifyInstance): void {
           detail: "Needs LEAP_API_TOKEN in the backend environment.",
         });
       }
-      console.info(`[production] manual schedule refresh by=${req.user!.email} ip=${clientIp(req)}`);
+      console.info(`[production] manual refresh by=${req.user!.email} ip=${clientIp(req)}`);
       const result = await refreshSchedules(req.user!.email);
       if (result.status === "failed") {
         return reply.code(502).send({
@@ -46,7 +56,9 @@ export function registerProductionRoutes(app: FastifyInstance): void {
           syncRunId: result.syncRunId,
         });
       }
-      return reply.send(result);
+      // The jobs board refreshes with the schedule: same button, same cadence.
+      const stages = await runJobStageSync({ startedBy: req.user!.email });
+      return reply.send({ ...result, stages: { status: stages.status, counts: stages.counts, errorMessage: stages.errorMessage } });
     },
   );
 }

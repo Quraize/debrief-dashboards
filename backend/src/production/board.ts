@@ -48,6 +48,9 @@ export interface BoardItem {
   } | null;
   jpUrl: string | null;
   jpUpdatedAt: string | null;
+  /** The job's current workflow stage (from the jobs mirror), when known. */
+  stage: string | null;
+  stageCode: string | null;
 }
 
 export interface Board {
@@ -90,6 +93,7 @@ interface Row {
   start_day: string; end_day: string; start_time: string; end_time: string;
   address: string | null; address_line_1: string | null; city: string | null; state: string | null;
   zip: string | null; lat: number | null; lng: number | null;
+  stage: string | null; stage_code: string | null;
 }
 
 export function jobProgressUrl(customerId: string | null, jobId: string | null): string | null {
@@ -134,6 +138,8 @@ function toItem(r: Row): BoardItem {
     } : null,
     jpUrl: jobProgressUrl(r.jp_customer_id, r.jp_job_id),
     jpUpdatedAt: r.jp_updated_at ? r.jp_updated_at.toISOString() : null,
+    stage: r.stage,
+    stageCode: r.stage_code,
   };
 }
 
@@ -148,9 +154,11 @@ export async function boardForRange(ctx: SessionContext, from: string, to: strin
               (s.end_at   AT TIME ZONE $3)::date::text AS end_day,
               to_char(s.start_at AT TIME ZONE $3, 'HH24:MI') AS start_time,
               to_char(s.end_at   AT TIME ZONE $3, 'HH24:MI') AS end_time,
-              l.address, l.address_line_1, l.city, l.state, l.zip, l.lat, l.lng
+              l.address, l.address_line_1, l.city, l.state, l.zip, l.lat, l.lng,
+              j.current_stage AS stage, j.stage_code
          FROM jp_schedule s
          LEFT JOIN jp_job_location l ON l.jp_job_id = s.jp_job_id
+         LEFT JOIN jp_job j ON j.jp_job_id = s.jp_job_id
         WHERE s.deleted_at IS NULL
           AND (s.start_at AT TIME ZONE $3)::date <= $2::date
           AND (s.end_at   AT TIME ZONE $3)::date >= $1::date

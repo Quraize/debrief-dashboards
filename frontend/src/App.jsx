@@ -29,6 +29,7 @@ import Users from '@/pages/Users';
 import MarketingDashboard from '@/pages/MarketingDashboard';
 import InsuranceDashboard from '@/pages/InsuranceDashboard';
 import ProductionSchedule from '@/production/ProductionSchedule';
+import ProductionJobs from '@/production/ProductionJobs';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -92,6 +93,7 @@ const AuthenticatedApp = () => {
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
           <Route path="/price-review" element={<PriceReview />} />
           <Route path="/production/schedule" element={<ProductionSchedule />} />
+          <Route path="/production/jobs" element={<ProductionJobs />} />
           <Route path="/account" element={<Account />} />
           <Route path="/users" element={<Users />} />
         </Route>

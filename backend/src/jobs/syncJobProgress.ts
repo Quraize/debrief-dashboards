@@ -328,6 +328,10 @@ export function mapJpJob(
     trades: trades.map((t) => t["name"]).filter(Boolean).join(", ") || null,
     is_insurance: Boolean(apiJob["insurance"]),
     current_stage: (stage?.["name"] as string) ?? null,
+    stage_code: stage?.["code"] != null ? String(stage["code"]) : null,
+    stage_color: (stage?.["color"] as string) ?? null,
+    stage_last_modified: (apiJob["stage_last_modified"] as string) ?? null,
+    awarded_date: apiJob["awarded_date"] ? String(apiJob["awarded_date"]).slice(0, 10) : null,
     contract_signed_date: apiJob["contract_signed_date"]
       ? String(apiJob["contract_signed_date"]).slice(0, 10)
       : null,
@@ -336,6 +340,9 @@ export function mapJpJob(
     raw: JSON.stringify(rawRest),
   };
 }
+
+/** Exported for the job-stage sweep, which upserts the same mirror rows. */
+export { upsertJpRows };
 
 /**
  * Upserts operational appointments on identity_key — the constraint that makes

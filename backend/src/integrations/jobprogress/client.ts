@@ -286,6 +286,25 @@ export class JobProgressClient {
     return out;
   }
 
+  /** Every workflow stage: code, name, position, colour, live jobs_count. */
+  async listWorkflowStages(): Promise<Record<string, unknown>[]> {
+    const body = await this.request<{ data?: unknown }>(`${this.baseUrl}/workflow/stages`, "workflow:stages");
+    return unwrapMany<Record<string, unknown>>(body.data ?? body);
+  }
+
+  /**
+   * Jobs currently in any of the given stages (by stage CODE), with the
+   * fields the jobs board shows. A page holds 100; the tracked stages are a
+   * few hundred jobs in total.
+   */
+  async listJobsInStages(stageCodes: string[]): Promise<Record<string, unknown>[]> {
+    if (stageCodes.length === 0) return [];
+    return this.collect<Record<string, unknown>>("/jobs", {
+      "stages[]": stageCodes,
+      "includes[]": ["division", "trades", "address", "reps", "insurance_details"],
+    }, "jobs:by-stage");
+  }
+
   /** The office's referral-source list (the CRM side of the marketing dropdown). */
   async listReferrals(): Promise<Record<string, unknown>[]> {
     return this.collect<Record<string, unknown>>("/referrals", {}, "referrals");
