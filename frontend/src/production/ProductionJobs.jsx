@@ -17,6 +17,9 @@ function relative(iso) {
   return hrs < 24 ? `${hrs} h ago` : new Date(iso).toLocaleString();
 }
 const fmtDay = (s) => (s ? new Date(`${s}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric" }) : "");
+const todayInBoardZone = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const addDays = (s, n) => new Date(new Date(`${s}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
 
 export default function ProductionJobs() {
@@ -28,6 +31,8 @@ export default function ProductionJobs() {
   const [group, setGroup] = useState("production");
   const [stages, setStages] = useState(() => new Set());
   const [search, setSearch] = useState("");
+  const [visit, setVisit] = useState("");      // "" | today | week | 2weeks | none
+  const [waiting, setWaiting] = useState("");  // "" | 7 | 14 | 30
   const [showMap, setShowMap] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
 
@@ -49,9 +54,18 @@ export default function ProductionJobs() {
   const items = useMemo(() => {
     const all = board?.items ?? [];
     const q = search.trim().toLowerCase();
+    const today = todayInBoardZone();
+    const horizon = { today, week: addDays(today, 7), "2weeks": addDays(today, 14) };
     return all
       .filter((i) => !group || i.stageGroup === group)
       .filter((i) => stages.size === 0 || stages.has(i.stageCode))
+      .filter((i) => {
+        if (!visit) return true;
+        if (visit === "none") return !i.nextVisit;
+        const day = i.nextVisit?.startDay;
+        return !!day && day <= horizon[visit];
+      })
+      .filter((i) => !waiting || (i.daysInStage ?? 0) >= Number(waiting))
       .filter((i) => !q || [i.customerName, i.jobNumber, i.jobName, i.location?.address, i.location?.city, i.division]
         .some((v) => String(v ?? "").toLowerCase().includes(q)))
       .map((i, idx) => ({
@@ -62,7 +76,7 @@ export default function ProductionJobs() {
         crews: (i.nextVisit?.crews ?? []).map((n) => ({ id: n, name: n })),
         fullDay: true, startTime12: "", endTime12: "",
       }));
-  }, [board, group, stages, search]);
+  }, [board, group, stages, search, visit, waiting]);
   const mappable = items.filter((i) => i.location?.lat != null && i.location?.lng != null);
 
   const toggleStage = (code) => setStages((prev) => { const n = new Set(prev); if (n.has(code)) n.delete(code); else n.add(code); return n; });
@@ -78,8 +92,10 @@ export default function ProductionJobs() {
         <div>
           <h1 className="text-2xl font-heading font-bold text-primary">Jobs by Stage</h1>
           <p className="text-sm text-muted-foreground">
-            Every job in the Project Won, Production and Warranty stages, straight from the JobProgress workflow.
-            {board?.sync && <span className={board.sync.status === "completed" ? "" : "text-red-600"}> Updated {relative(board.sync.finishedAt || board.sync.startedAt)}.</span>}
+            A live snapshot of the pipeline, not a calendar: every job that is <em>currently</em> in a Project Won, Production or
+            Warranty stage in JobProgress, whatever date it was sold or is scheduled for. Use the <strong>Next visit</strong> and
+            <strong> In stage for</strong> filters to narrow by time.
+            {board?.sync && <span className={board.sync.status === "completed" ? "" : "text-red-600"}> Synced every 10 minutes; updated {relative(board.sync.finishedAt || board.sync.startedAt)}.</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -123,7 +139,24 @@ export default function ProductionJobs() {
             );
           })}
           {stages.size > 0 && <button onClick={() => setStages(new Set())} className="text-xs text-accent font-semibold px-2">Show all</button>}
-          <div className="ml-auto relative">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <select value={visit} onChange={(e) => setVisit(e.target.value)} title="Filter by the job's next scheduled visit"
+              className="border border-input rounded-lg px-2 py-1 text-sm bg-white">
+              <option value="">Next visit: any</option>
+              <option value="today">Scheduled today</option>
+              <option value="week">Scheduled within 7 days</option>
+              <option value="2weeks">Scheduled within 14 days</option>
+              <option value="none">Not scheduled</option>
+            </select>
+            <select value={waiting} onChange={(e) => setWaiting(e.target.value)} title="Filter by how long the job has sat in its current stage"
+              className="border border-input rounded-lg px-2 py-1 text-sm bg-white">
+              <option value="">In stage for: any</option>
+              <option value="7">7+ days</option>
+              <option value="14">14+ days</option>
+              <option value="30">30+ days</option>
+            </select>
+          </div>
+          <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-muted-foreground" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Customer, job #, town…"
               className="border border-input rounded-lg pl-7 pr-2 py-1 text-sm bg-white w-56" />
