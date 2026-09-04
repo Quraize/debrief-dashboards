@@ -10,6 +10,7 @@
  *
  * All aggregation logic lives in @allied/shared/jpStats; this file is layout.
  */
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import KpiCard from "@/components/KpiCard";
@@ -155,10 +156,10 @@ const pctOr = (n, d, v) => (d > 0 ? v + "%" : "—");
  * the office's tracking sheet, in the same order as the debrief KPI strip
  * above it so the two sections read side by side.
  */
-export function JpFunnelCards({ filter, cs, ce }) {
+export function JpFunnelCards({ filter, cs, ce, rep = "" }) {
   const { jpAppointments, jpJobs, isLoading } = useJpMirror();
   if (isLoading) return null;
-  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce);
+  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce, rep);
 
   const cards = [
     { label: "Appointments", value: f.newAppts, title: D.newAppts },
@@ -213,10 +214,10 @@ const RATE_DENOM = { twoLegRate: (r) => r.twoLeg + r.oneLeg, demoRate: (r) => r.
   noDemoRate: (r) => r.attended, noSeeRate: (r) => r.attended + r.noSee };
 
 /** The tracking sheet's grid: one row per job type (CRM division), plus the total. */
-export function JpJobTypeTable({ filter, cs, ce }) {
+export function JpJobTypeTable({ filter, cs, ce, rep = "" }) {
   const { jpAppointments, jpJobs, isLoading } = useJpMirror();
   if (isLoading) return null;
-  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce);
+  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce, rep);
   if (f.byJobType.length === 0) return null;
 
   const cell = (r, key) => {
@@ -358,6 +359,9 @@ export function JpSetterSection({ filter, cs, ce, debriefs }) {
 
 /** Sales-rep dashboard: CRM headline cards + assigned volume per CRM user. */
 export function JpRepSection({ filter, cs, ce, debriefs }) {
+  // Which rep's scorecard to show ("" = the whole team). Lets a manager put
+  // one rep's CRM numbers next to that rep's own tracking sheet.
+  const [rep, setRep] = useState("");
   const { jpAppointments, isLoading } = useJpMirror();
   if (isLoading) return null;
   if (jpAppointments.length === 0) {
@@ -370,8 +374,17 @@ export function JpRepSection({ filter, cs, ce, debriefs }) {
       "The sales scorecard as JobProgress recorded it: result forms give the outcome of every run appointment, "
       + "titles mark resets and rehashes, and job financials give the contract value. Same columns as the tracking sheet."
     }>
-      <JpFunnelCards filter={filter} cs={cs} ce={ce} />
-      <JpJobTypeTable filter={filter} cs={cs} ce={ce} />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scorecard for</span>
+        <select value={rep} onChange={(e) => setRep(e.target.value)}
+          className="border border-input rounded-lg px-2 py-1.5 text-sm bg-white">
+          <option value="">Whole team</option>
+          {rows.filter((r) => r.name !== "Unassigned").map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+        </select>
+        {rep && <span className="text-xs text-muted-foreground">appointments assigned to {rep} in JobProgress</span>}
+      </div>
+      <JpFunnelCards filter={filter} cs={cs} ce={ce} rep={rep} />
+      <JpJobTypeTable filter={filter} cs={cs} ce={ce} rep={rep} />
       <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-x-auto">
         <table className="w-full text-sm">

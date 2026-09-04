@@ -180,6 +180,7 @@ export function jobTypeFromDivision(division) {
   if (!d) return "Unassigned";
   if (d.includes("roofing & siding") || d.includes("roofing and siding") || d.includes("roof & siding")) return "Roof & Siding";
   if (d.includes("siding")) return "Siding Only";
+  if (d.includes("window")) return "Windows";
   if (d.includes("service") || d.includes("repair")) return "Roof Repair";
   if (d.includes("commercial")) return "Commercial";
   if (d.includes("warranty")) return "Warranty";
@@ -244,10 +245,13 @@ function jobAmount(job) {
  *
  * @param rows   jp_appointment rows
  * @param jobs   jp_job rows (for sale amounts, matched on crm_job_id)
+ * @param rep    optional CRM sales rep name — restricts the funnel to that rep's assigned appointments
  */
-export function jpSalesFunnel(rows, jobs, filter, cs, ce) {
+export function jpSalesFunnel(rows, jobs, filter, cs, ce, rep = "") {
+  const wanted = String(rep ?? "").trim().toLowerCase();
   const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce)
-    .filter((r) => isSalesType(r) && !isInsurance(r));
+    .filter((r) => isSalesType(r) && !isInsurance(r))
+    .filter((r) => !wanted || String(r.sales_rep ?? "").trim().toLowerCase() === wanted);
   const jobById = new Map();
   for (const j of jobs || []) if (j.jp_job_id != null) jobById.set(String(j.jp_job_id), j);
 

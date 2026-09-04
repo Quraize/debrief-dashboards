@@ -199,6 +199,7 @@ describe("jobTypeFromDivision — the sheet's rows from CRM division names", () 
     expect(jobTypeFromDivision("ACR Commercial Roofing Division")).toBe("Commercial");
     expect(jobTypeFromDivision("ACR Warranty Callbacks")).toBe("Warranty");
     expect(jobTypeFromDivision("MISC - Other")).toBe("MISC");
+    expect(jobTypeFromDivision("ACR Window Division")).toBe("Windows");
     expect(jobTypeFromDivision(null)).toBe("Unassigned");
     expect(jobTypeFromDivision("Solar Division")).toBe("Solar Division");
   });
@@ -245,6 +246,17 @@ describe("jpSalesFunnel — the scorecard from CRM results", () => {
     expect(f.byJobType.map((r) => r.jobType)).toEqual(["Roof Replacement", "Roof Repair"]);
     expect(f.byJobType[0]).toMatchObject({ attended: 6, newAppts: 4, resetDemo: 1, rehash: 1, noSee: 1, demos: 4, sales: 2, salesAmount: 37299 });
     expect(f.byJobType[1]).toMatchObject({ attended: 1, sales: 1, salesMissingAmount: 1, salesAmount: 0 });
+  });
+
+  it("can be restricted to one rep's assigned appointments", () => {
+    const mixed = [
+      roof({ jp_appointment_id: "1", sales_rep: "Jason", result_option_name: "$ale!!!", crm_job_id: "J1" }),
+      roof({ jp_appointment_id: "2", sales_rep: "Michael", result_option_name: "Demo No Sale" }),
+      roof({ jp_appointment_id: "3", sales_rep: " jason ", result_option_name: "No See" }),
+    ];
+    const jason = jpSalesFunnel(mixed, jobs, "Custom Range", "2026-08-01", "2026-08-31", "Jason");
+    expect(jason).toMatchObject({ attended: 1, sales: 1, noSee: 1, salesAmount: 16500 });
+    expect(jpSalesFunnel(mixed, jobs, "Custom Range", "2026-08-01", "2026-08-31").attended).toBe(2);
   });
 
   it("is empty-safe", () => {
