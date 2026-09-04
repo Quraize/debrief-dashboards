@@ -28,12 +28,12 @@ export default function ProductionJobs() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: () => base44.auth.me().catch(() => null) });
   const allowed = !!me && PRODUCTION_ROLES.includes(me.role);
 
-  const [group, setGroup] = useState("production");
+  const [group, setGroup] = useState(""); // "" = every tracked job; a group card narrows it
   const [stages, setStages] = useState(() => new Set());
   const [search, setSearch] = useState("");
   const [visit, setVisit] = useState("");      // "" | today | week | 2weeks | none
   const [waiting, setWaiting] = useState("");  // "" | 7 | 14 | 30
-  const [showMap, setShowMap] = useState(false);
+  const [showMap, setShowMap] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
 
   const { data: board, isLoading, error } = useQuery({
@@ -80,7 +80,8 @@ export default function ProductionJobs() {
   const mappable = items.filter((i) => i.location?.lat != null && i.location?.lng != null);
 
   const toggleStage = (code) => setStages((prev) => { const n = new Set(prev); if (n.has(code)) n.delete(code); else n.add(code); return n; });
-  const pickGroup = (key) => { setGroup(key); setStages(new Set()); setSelectedId(null); };
+  // Click a group to narrow to it; click it again to go back to all jobs.
+  const pickGroup = (key) => { setGroup((g) => (g === key ? "" : key)); setStages(new Set()); setSelectedId(null); };
 
   if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">Production access required.</div>;
 
@@ -109,8 +110,13 @@ export default function ProductionJobs() {
         </div>
       </div>
 
-      {/* Groups, like the JobProgress Jobs screen */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Groups, like the JobProgress Jobs screen. All selected by default. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <button onClick={() => pickGroup("")}
+          className={`text-left rounded-xl border p-4 shadow-sm transition-colors ${group === "" ? "bg-primary text-primary-foreground border-primary" : "bg-white border-border hover:bg-secondary"}`}>
+          <div className={`text-[11px] uppercase tracking-wide font-semibold ${group === "" ? "text-primary-foreground/80" : "text-muted-foreground"}`}>All Jobs</div>
+          <div className="text-2xl font-heading font-bold mt-1">{board ? board.items.length : "—"}</div>
+        </button>
         {STAGE_GROUPS.map((g) => {
           const info = board?.groups?.find((x) => x.key === g.key);
           const on = group === g.key;
