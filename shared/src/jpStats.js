@@ -145,6 +145,163 @@ export function jpAppointmentStats(rows, filter, cs, ce, now = new Date()) {
   };
 }
 
+// ── Sales funnel (the salesperson's scorecard, computed from the CRM) ──────
+//
+// Column definitions agreed from the office's own tracking sheet
+// ("2026 ARC Sales Tracking"), with the CRM result form as the source:
+//   attended   = appointments actually run (result recorded, not a no-show)
+//   demos      = result "$ale!!!" or "Demo No Sale"
+//   noDemo     = result "No Demo"
+//   sales      = result "$ale!!!"
+//   resetDemo  = attended appointment titled RESET (a rescheduled visit)
+//   rehash     = attended appointment titled REHASH (an old lead worked again)
+//   newAppts   = attended − resetDemo − rehash (first visits)
+//   firstCall  = a sale on a first visit
+//   salesAmount= contract price of the jobs sold, from the CRM's financials,
+//                attributed to the appointment's month (the sheet's "Sales $")
+
+const SALE_RESULT = /\$?ale|sold/i;                 // "$ale!!!"
+const DEMO_NO_SALE_RESULT = /demo\s*no\s*sale/i;
+const NO_DEMO_RESULT = /^\s*no\s*demo/i;
+const RESET_TITLE = /\breset\b/i;
+const REHASH_TITLE = /re-?hash/i;
+
+const resultName = (r) => String(r.result_option_name ?? "");
+export const isSaleResult = (r) => SALE_RESULT.test(resultName(r)) && !DEMO_NO_SALE_RESULT.test(resultName(r));
+export const isDemoNoSaleResult = (r) => DEMO_NO_SALE_RESULT.test(resultName(r));
+export const isNoDemoResult = (r) => NO_DEMO_RESULT.test(resultName(r));
+export const isDemoResult = (r) => isSaleResult(r) || isDemoNoSaleResult(r);
+export const isResetTitle = (r) => RESET_TITLE.test(String(r.title ?? ""));
+export const isRehashTitle = (r) => REHASH_TITLE.test(String(r.title ?? ""));
+
+/** The sheet's job-type rows, from the CRM division name. Unknown → the division itself. */
+export function jobTypeFromDivision(division) {
+  const d = String(division ?? "").toLowerCase();
+  if (!d) return "Unassigned";
+  if (d.includes("roofing & siding") || d.includes("roofing and siding") || d.includes("roof & siding")) return "Roof & Siding";
+  if (d.includes("siding")) return "Siding Only";
+  if (d.includes("service") || d.includes("repair")) return "Roof Repair";
+  if (d.includes("commercial")) return "Commercial";
+  if (d.includes("warranty")) return "Warranty";
+  if (d.includes("roofing")) return "Roof Replacement";
+  if (d.includes("misc") || d.includes("other")) return "MISC";
+  return String(division);
+}
+
+export const JP_FUNNEL_DEFINITIONS = {
+  newAppts: "First-visit sales appointments that were run (result recorded, not a no-show), excluding resets and rehashes. The sheet's \"New Appts\".",
+  resetDemo: "Run appointments whose CRM title says RESET — a rescheduled visit after a no-demo or no-show.",
+  rehash: "Run appointments whose CRM title says REHASH — an older unsold lead worked and booked again.",
+  noSee: "Appointments with the CRM result \"No See\": the rep went, the customer did not.",
+  demos: "Presentations given: CRM result \"$ale!!!\" or \"Demo No Sale\".",
+  noDemo: "Rep met the customer but no presentation happened: CRM result \"No Demo\".",
+  sales: "CRM result \"$ale!!!\" on an appointment in this period.",
+  firstCall: "Sales closed on a first visit (not a reset or rehash).",
+  salesAmount: "Contract price of the jobs sold at these appointments, from JobProgress financials, attributed to the appointment month — the sheet's \"Sales $\". Differs from Signed Revenue, which is attributed to the signing month.",
+  demoRate: "Demos ÷ appointments run (new + reset + rehash).",
+  closeRate: "Sales ÷ demos.",
+  noDemoRate: "No Demo ÷ appointments run.",
+  noSeeRate: "No-shows ÷ (appointments run + no-shows).",
+  firstCallRate: "First-call closes ÷ sales.",
+  twoLegRate: "Two-Leg ÷ (Two-Leg + One-Leg) among answered result forms.",
+};
+
+function funnelBucket() {
+  return {
+    attended: 0, newAppts: 0, resetDemo: 0, rehash: 0, noSee: 0,
+    demos: 0, noDemo: 0, otherResult: 0, sales: 0, firstCall: 0,
+    twoLeg: 0, oneLeg: 0, salesAmount: 0, salesWithAmount: 0, salesMissingAmount: 0,
+  };
+}
+
+function finishBucket(b) {
+  return {
+    ...b,
+    demoRate: pct(b.demos, b.attended),
+    closeRate: pct(b.sales, b.demos),
+    noDemoRate: pct(b.noDemo, b.attended),
+    noSeeRate: pct(b.noSee, b.attended + b.noSee),
+    firstCallRate: pct(b.firstCall, b.sales),
+    twoLegRate: pct(b.twoLeg, b.twoLeg + b.oneLeg),
+    avgSale: b.salesWithAmount > 0 ? Math.round(b.salesAmount / b.salesWithAmount) : 0,
+  };
+}
+
+/** Best available contract value for a CRM job row (NUMERIC arrives as string). */
+function jobAmount(job) {
+  if (!job) return null;
+  for (const k of ["total_job_price", "total_job_revenue", "final_job_total"]) {
+    const n = Number(job[k]);
+    if (job[k] != null && job[k] !== "" && Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/**
+ * The scorecard for a period: totals plus one row per job type (division).
+ * Insurance appointments are excluded — they have their own dashboard and
+ * their own funnel (contingencies, claims), and the sheet never mixed them in.
+ *
+ * @param rows   jp_appointment rows
+ * @param jobs   jp_job rows (for sale amounts, matched on crm_job_id)
+ */
+export function jpSalesFunnel(rows, jobs, filter, cs, ce) {
+  const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce)
+    .filter((r) => isSalesType(r) && !isInsurance(r));
+  const jobById = new Map();
+  for (const j of jobs || []) if (j.jp_job_id != null) jobById.set(String(j.jp_job_id), j);
+
+  const total = funnelBucket();
+  const byType = new Map();
+  const bucketFor = (r) => {
+    const key = jobTypeFromDivision(r.division);
+    if (!byType.has(key)) byType.set(key, funnelBucket());
+    return byType.get(key);
+  };
+
+  for (const r of inRange) {
+    const buckets = [total, bucketFor(r)];
+    if (r.has_result === true && isNoShowResult(r)) {
+      for (const b of buckets) b.noSee++;
+      continue;
+    }
+    if (!isRunAppointment(r)) continue; // awaiting / upcoming / cancelled: not in the funnel yet
+
+    const reset = isResetTitle(r);
+    const rehash = !reset && isRehashTitle(r);
+    const sale = isSaleResult(r);
+    const amount = sale ? jobAmount(r.crm_job_id != null ? jobById.get(String(r.crm_job_id)) : null) : null;
+
+    for (const b of buckets) {
+      b.attended++;
+      if (reset) b.resetDemo++;
+      else if (rehash) b.rehash++;
+      else b.newAppts++;
+      if (isDemoResult(r)) b.demos++;
+      else if (isNoDemoResult(r)) b.noDemo++;
+      else b.otherResult++;
+      if (sale) {
+        b.sales++;
+        if (!reset && !rehash) b.firstCall++;
+        if (amount != null) { b.salesAmount += amount; b.salesWithAmount++; }
+        else b.salesMissingAmount++;
+      }
+      if (r.two_leg_answer === TWO_LEG) b.twoLeg++;
+      else if (r.two_leg_answer === ONE_LEG) b.oneLeg++;
+    }
+  }
+
+  const ORDER = ["Roof Replacement", "Roof & Siding", "Siding Only", "Roof Repair", "Commercial", "MISC", "Warranty"];
+  const byJobType = [...byType.entries()]
+    .map(([jobType, b]) => ({ jobType, ...finishBucket(b) }))
+    .sort((a, b) => {
+      const ia = ORDER.indexOf(a.jobType), ib = ORDER.indexOf(b.jobType);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.jobType.localeCompare(b.jobType);
+    });
+
+  return { ...finishBucket(total), byJobType };
+}
+
 /**
  * Two-Leg as JobProgress recorded it. Insurance is excluded from both
  * numerator and denominator — the same convention as the retail Two-Leg %

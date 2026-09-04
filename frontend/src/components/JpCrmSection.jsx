@@ -20,6 +20,7 @@ import {
   JP_APPOINTMENTS_DEFINITION,
   JP_AWAITING_DEFINITION,
   AWAITING_RESULT_DAYS,
+  jpSalesFunnel, JP_FUNNEL_DEFINITIONS,
 } from "@allied/shared/jpStats";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Database, ClipboardList } from "lucide-react";
@@ -146,6 +147,118 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
   );
 }
 
+const D = JP_FUNNEL_DEFINITIONS;
+const pctOr = (n, d, v) => (d > 0 ? v + "%" : "—");
+
+/**
+ * The salesperson's scorecard, computed from CRM results. Same columns as
+ * the office's tracking sheet, in the same order as the debrief KPI strip
+ * above it so the two sections read side by side.
+ */
+export function JpFunnelCards({ filter, cs, ce }) {
+  const { jpAppointments, jpJobs, isLoading } = useJpMirror();
+  if (isLoading) return null;
+  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce);
+
+  const cards = [
+    { label: "Appointments", value: f.newAppts, title: D.newAppts },
+    { label: "Reset Demos", value: f.resetDemo, title: D.resetDemo },
+    { label: "Rehash", value: f.rehash, title: D.rehash },
+    { label: "No See", value: f.noSee, chip: pctOr(0, f.attended + f.noSee, f.noSeeRate), title: `${D.noSee} Rate: ${D.noSeeRate}` },
+    { label: "Demos", value: f.demos, title: D.demos },
+    { label: "Demo %", value: pctOr(0, f.attended, f.demoRate), title: D.demoRate },
+    { label: "No Demo", value: f.noDemo, chip: pctOr(0, f.attended, f.noDemoRate), title: `${D.noDemo} Rate: ${D.noDemoRate}` },
+    { label: "Two-Leg %", value: pctOr(0, f.twoLeg + f.oneLeg, f.twoLegRate),
+      title: `${D.twoLegRate} This period: ${f.twoLeg} two-leg / ${f.oneLeg} one-leg.` },
+    { label: "Sales", value: f.sales, accent: true, title: D.sales },
+    { label: "Sales %", value: pctOr(0, f.demos, f.closeRate), title: D.closeRate },
+    { label: "1st Call Closes", value: f.firstCall, chip: pctOr(0, f.sales, f.firstCallRate), title: `${D.firstCall} Rate: ${D.firstCallRate}` },
+    { label: "Sales $ (appt. month)", value: money(f.salesAmount),
+      title: D.salesAmount + (f.salesMissingAmount > 0
+        ? ` ${f.salesMissingAmount} sale(s) have no contract value in the CRM yet, so the true figure is higher.` : ""),
+      rating: f.salesMissingAmount > 0 ? "yellow" : null },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {cards.map((c) => c.chip !== undefined
+        ? <CountWithChipCard key={c.label} {...c} />
+        : <KpiCard key={c.label} label={c.label} value={c.value} title={c.title} accent={c.accent} rating={c.rating ?? null} />)}
+    </div>
+  );
+}
+
+function CountWithChipCard({ label, value, chip, title }) {
+  return (
+    <div className="rounded-xl border border-border bg-white p-4 shadow-sm" title={title}>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold leading-tight">{label}</div>
+      <div className="flex items-baseline gap-2 mt-1">
+        <div className="text-2xl font-heading font-bold text-primary">{value}</div>
+        {chip && chip !== "—" && <span className="text-xs font-semibold text-muted-foreground">{chip}</span>}
+      </div>
+    </div>
+  );
+}
+
+const JOB_TYPE_COLS = [
+  ["newAppts", "Appts", D.newAppts], ["resetDemo", "Reset", D.resetDemo], ["rehash", "Rehash", D.rehash],
+  ["noSee", "No See", D.noSee], ["demos", "Demos", D.demos], ["noDemo", "No Demo", D.noDemo],
+  ["twoLeg", "2-Legs", "Two-Leg answers on the result form."], ["sales", "Sales", D.sales],
+  ["firstCall", "1st Call", D.firstCall], ["salesAmount", "Sales $", D.salesAmount],
+  ["twoLegRate", "2-Leg %", D.twoLegRate], ["demoRate", "Demo %", D.demoRate],
+  ["closeRate", "Sales %", D.closeRate], ["noDemoRate", "No Demo %", D.noDemoRate], ["noSeeRate", "No See %", D.noSeeRate],
+];
+const RATE_COLS = new Set(["twoLegRate", "demoRate", "closeRate", "noDemoRate", "noSeeRate"]);
+const RATE_DENOM = { twoLegRate: (r) => r.twoLeg + r.oneLeg, demoRate: (r) => r.attended, closeRate: (r) => r.demos,
+  noDemoRate: (r) => r.attended, noSeeRate: (r) => r.attended + r.noSee };
+
+/** The tracking sheet's grid: one row per job type (CRM division), plus the total. */
+export function JpJobTypeTable({ filter, cs, ce }) {
+  const { jpAppointments, jpJobs, isLoading } = useJpMirror();
+  if (isLoading) return null;
+  const f = jpSalesFunnel(jpAppointments, jpJobs, filter, cs, ce);
+  if (f.byJobType.length === 0) return null;
+
+  const cell = (r, key) => {
+    if (key === "salesAmount") return r.salesAmount ? money(r.salesAmount) : "—";
+    if (RATE_COLS.has(key)) return RATE_DENOM[key](r) > 0 ? r[key] + "%" : "—";
+    return r[key] || (r[key] === 0 ? "" : r[key]);
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+      <div className="p-3 border-b border-border/60">
+        <h3 className="font-heading font-bold text-sm text-primary">Scorecard by Job Type (CRM)</h3>
+        <p className="text-xs text-muted-foreground">The tracking sheet's columns, computed from JobProgress result forms. Hover a column header for its definition.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-max">
+          <thead>
+            <tr className="border-b border-border bg-secondary/50 text-left text-muted-foreground">
+              <th className="px-2.5 py-2 font-semibold whitespace-nowrap">Job Type</th>
+              {JOB_TYPE_COLS.map(([key, label, title]) => (
+                <th key={key} title={title} className="px-2.5 py-2 font-semibold whitespace-nowrap text-center cursor-help">{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {f.byJobType.map((r) => (
+              <tr key={r.jobType} className="border-b border-border/50">
+                <td className="px-2.5 py-2 font-medium whitespace-nowrap">{r.jobType}</td>
+                {JOB_TYPE_COLS.map(([key]) => <td key={key} className="px-2.5 py-2 text-center">{cell(r, key)}</td>)}
+              </tr>
+            ))}
+            <tr className="bg-secondary/40 font-bold">
+              <td className="px-2.5 py-2 whitespace-nowrap">Total</td>
+              {JOB_TYPE_COLS.map(([key]) => <td key={key} className="px-2.5 py-2 text-center">{cell(f, key)}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /** The KPI dashboard's JP section: headline cards + volume + signed revenue. */
 export function JpKpiSection({ filter, cs, ce, debriefs }) {
   const { jpAppointments, jpJobs, isLoading } = useJpMirror();
@@ -159,7 +272,9 @@ export function JpKpiSection({ filter, cs, ce, debriefs }) {
 
   return (
     <JpSectionShell>
+      <JpFunnelCards filter={filter} cs={cs} ce={ce} />
       <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
+      <JpJobTypeTable filter={filter} cs={cs} ce={ce} />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
@@ -252,9 +367,11 @@ export function JpRepSection({ filter, cs, ce, debriefs }) {
 
   return (
     <JpSectionShell subtitle={
-      "Appointment volume as assigned in JobProgress, with the Two-Leg answers reps recorded on the CRM's "
-      + "result forms. Coverage is partial — an unanswered form says nothing either way."
+      "The sales scorecard as JobProgress recorded it: result forms give the outcome of every run appointment, "
+      + "titles mark resets and rehashes, and job financials give the contract value. Same columns as the tracking sheet."
     }>
+      <JpFunnelCards filter={filter} cs={cs} ce={ce} />
+      <JpJobTypeTable filter={filter} cs={cs} ce={ce} />
       <JpHeadlineCards filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-x-auto">
         <table className="w-full text-sm">

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jpAppointmentStats, jpTwoLegStats, jpRevenueStats,
   jpSetterStats, jpRepStats, jpDebriefCoverage, classifyNoResult,
+  jpSalesFunnel, jobTypeFromDivision,
 } from "../src/jpStats.js";
 
 // Row factories mirror the jp_appointment / jp_job columns the sync writes.
@@ -186,6 +187,71 @@ describe("jpSetterStats / jpRepStats", () => {
     const s = jpRepStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
     const repB = s.find((g) => g.name === "Rep B");
     expect(repB).toMatchObject({ total: 2, run: 1, twoLeg: 1, twoLegRate: 100 });
+  });
+});
+
+describe("jobTypeFromDivision — the sheet's rows from CRM division names", () => {
+  it("maps the ACR divisions", () => {
+    expect(jobTypeFromDivision("ACR Roofing Division")).toBe("Roof Replacement");
+    expect(jobTypeFromDivision("ACR Roofing & Siding Division")).toBe("Roof & Siding");
+    expect(jobTypeFromDivision("ACR Siding Only Division")).toBe("Siding Only");
+    expect(jobTypeFromDivision("ACR Service/Repair Division")).toBe("Roof Repair");
+    expect(jobTypeFromDivision("ACR Commercial Roofing Division")).toBe("Commercial");
+    expect(jobTypeFromDivision("ACR Warranty Callbacks")).toBe("Warranty");
+    expect(jobTypeFromDivision("MISC - Other")).toBe("MISC");
+    expect(jobTypeFromDivision(null)).toBe("Unassigned");
+    expect(jobTypeFromDivision("Solar Division")).toBe("Solar Division");
+  });
+});
+
+describe("jpSalesFunnel — the scorecard from CRM results", () => {
+  const roof = (over = {}) => ran({ division: "ACR Roofing Division", ...over });
+  const rows = [
+    roof({ jp_appointment_id: "1", result_option_name: "$ale!!!", crm_job_id: "J1", two_leg_answer: "two_leg" }),
+    roof({ jp_appointment_id: "2", result_option_name: "$ale!!!", crm_job_id: "J2", title: "RESET ROOF EST", two_leg_answer: "two_leg" }),
+    roof({ jp_appointment_id: "3", result_option_name: "Demo No Sale", two_leg_answer: "one_leg" }),
+    roof({ jp_appointment_id: "4", result_option_name: "Demo No Sale", title: "REHASH: Town/1 Main St/Cust" }),
+    roof({ jp_appointment_id: "5", result_option_name: "No Demo" }),
+    roof({ jp_appointment_id: "6", result_option_name: "No See" }),
+    roof({ jp_appointment_id: "7", result_option_name: "Other:" }),
+    ran({ jp_appointment_id: "8", division: "ACR Service/Repair Division", result_option_name: "$ale!!!", crm_job_id: "J-missing" }),
+    appt({ jp_appointment_id: "9", division: "ACR Roofing Division" }),                          // awaiting result: not in the funnel
+    ran({ jp_appointment_id: "10", is_insurance: true, result_option_name: "$ale!!!" }),           // insurance: excluded
+    appt({ jp_appointment_id: "11", is_sales_type: false, title: "FINAL WALK THROUGH" }),        // non-sales: excluded
+  ];
+  const jobs = [
+    { jp_job_id: "J1", total_job_price: "16500", total_job_revenue: "16500" },
+    { jp_job_id: "J2", total_job_price: null, total_job_revenue: "20799" },
+  ];
+
+  it("counts the sheet's columns from CRM results and titles", () => {
+    const f = jpSalesFunnel(rows, jobs, "Custom Range", "2026-08-01", "2026-08-31");
+    expect(f).toMatchObject({
+      attended: 7, newAppts: 5, resetDemo: 1, rehash: 1, noSee: 1,
+      demos: 5, noDemo: 1, otherResult: 1, sales: 3, firstCall: 2,
+      twoLeg: 2, oneLeg: 1,
+      salesAmount: 37299, salesWithAmount: 2, salesMissingAmount: 1,
+    });
+    expect(f.demoRate).toBe(71);      // 5 / 7
+    expect(f.closeRate).toBe(60);     // 3 / 5
+    expect(f.noSeeRate).toBe(13);     // 1 / 8
+    expect(f.firstCallRate).toBe(67); // 2 / 3
+    expect(f.twoLegRate).toBe(67);    // 2 / 3
+    expect(f.avgSale).toBe(Math.round(37299 / 2));
+  });
+
+  it("breaks the same columns down by job type in the sheet's order", () => {
+    const f = jpSalesFunnel(rows, jobs, "Custom Range", "2026-08-01", "2026-08-31");
+    expect(f.byJobType.map((r) => r.jobType)).toEqual(["Roof Replacement", "Roof Repair"]);
+    expect(f.byJobType[0]).toMatchObject({ attended: 6, newAppts: 4, resetDemo: 1, rehash: 1, noSee: 1, demos: 4, sales: 2, salesAmount: 37299 });
+    expect(f.byJobType[1]).toMatchObject({ attended: 1, sales: 1, salesMissingAmount: 1, salesAmount: 0 });
+  });
+
+  it("is empty-safe", () => {
+    const f = jpSalesFunnel([], [], "Custom Range", "2026-08-01", "2026-08-31");
+    expect(f.attended).toBe(0);
+    expect(f.byJobType).toEqual([]);
+    expect(f.closeRate).toBe(0);
   });
 });
 
