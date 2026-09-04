@@ -68,6 +68,16 @@ export const NON_SALES_KEYWORDS = [
   // deciding deliberately.
   "callback",
   "call back",
+
+  // Seen on the live calendar (Sep 2026 audit of every sales-type title):
+  // office errands booked as appointments, not opportunities.
+  "contract signing",
+  "site assess",         // "Site Assessment", "Site Assesment"
+  "dropping off",        // "DROPPING OFF SUPPLIES"
+  "paper work",
+  "paperwork",
+  "deposit pick",        // "deposit pick up"
+  "adjuster",            // "MEET WITH THE ADJUSTER" (insurance)
 ];
 
 /**
