@@ -34,6 +34,10 @@ export default function ProductionJobs() {
   const [visit, setVisit] = useState("");      // "" | today | week | 2weeks | none
   const [waiting, setWaiting] = useState("");  // "" | 7 | 14 | 30
   const [showMap, setShowMap] = useState(true);
+  // The list renders in pages of 100 (the map always pins everything): the
+  // filters are the navigation, this is just a guard against a long table.
+  const PAGE = 100;
+  const [shown, setShown] = useState(PAGE);
   const [selectedId, setSelectedId] = useState(null);
 
   const { data: board, isLoading, error } = useQuery({
@@ -81,7 +85,7 @@ export default function ProductionJobs() {
 
   const toggleStage = (code) => setStages((prev) => { const n = new Set(prev); if (n.has(code)) n.delete(code); else n.add(code); return n; });
   // Click a group to narrow to it; click it again to go back to all jobs.
-  const pickGroup = (key) => { setGroup((g) => (g === key ? "" : key)); setStages(new Set()); setSelectedId(null); };
+  const pickGroup = (key) => { setGroup((g) => (g === key ? "" : key)); setStages(new Set()); setSelectedId(null); setShown(PAGE); };
 
   if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">Production access required.</div>;
 
@@ -199,7 +203,7 @@ export default function ProductionJobs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((i) => (
+                  {items.slice(0, shown).map((i) => (
                     <tr key={i.id} onClick={() => setSelectedId(i.id === selectedId ? null : i.id)}
                       className={`border-b border-border/50 cursor-pointer ${i.id === selectedId ? "bg-accent/10" : "hover:bg-secondary/30"}`}>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{i.index}</td>
@@ -219,8 +223,14 @@ export default function ProductionJobs() {
             </div>
           )}
           {items.length > 0 && (
-            <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border flex items-center gap-2">
-              <Clock className="w-3 h-3" /> {items.length} job{items.length === 1 ? "" : "s"} · sorted by stage, longest waiting first
+            <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border flex flex-wrap items-center gap-2">
+              <Clock className="w-3 h-3" />
+              {items.length > shown ? `Showing ${shown} of ${items.length} jobs` : `${items.length} job${items.length === 1 ? "" : "s"}`} · sorted by stage, longest waiting first
+              {items.length > shown && (
+                <button onClick={() => setShown((n) => n + PAGE)} className="ml-auto font-semibold text-accent underline">
+                  Show {Math.min(PAGE, items.length - shown)} more
+                </button>
+              )}
             </div>
           )}
         </div>
