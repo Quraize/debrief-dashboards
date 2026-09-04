@@ -9,7 +9,8 @@ import { setterStats, filterByDate, safeNum, DEMO_RATE_DEFINITION, NO_DEMO_RATE_
 import { nonInsuranceDebriefs } from "@allied/shared/insurance";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie, Legend } from "recharts";
 import { Loader2 } from "lucide-react";
-import { JpSetterSection, DebriefSectionHeader } from "@/components/JpCrmSection";
+import { DebriefSectionHeader } from "@/components/JpCrmSection";
+import JpCallCenterSection from "@/components/JpCallCenterSection";
 
 const COLORS = { Excellent: "#16a34a", Good: "#f59e0b", Poor: "#dc2626", "No Data": "#94a3b8" };
 
@@ -220,7 +221,7 @@ export default function AppointmentSetterDashboard() {
 
       {/* Independent of the debrief section by design: renders even when the
           period has no debriefs at all — that gap is exactly what it shows. */}
-      <JpSetterSection filter={filter} cs={cs} ce={ce} debriefs={debriefs} />
+      <JpCallCenterSection filter={filter} cs={cs} ce={ce} />
     </div>
   );
 }

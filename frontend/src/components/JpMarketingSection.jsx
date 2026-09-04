@@ -4,25 +4,18 @@
  * and sales those leads produced — the top of the funnel the debrief form
  * never sees.
  */
-import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/client";
 import KpiCard from "@/components/KpiCard";
-import { JpSectionShell, useJpMirror } from "@/components/JpCrmSection";
+import { JpSectionShell, useJpMirror, useJpCustomers } from "@/components/JpCrmSection";
 import { jpMarketingStats, JP_MARKETING_DEFINITIONS as D, UNKNOWN_SOURCE } from "@allied/shared/jpMarketing";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { AlertTriangle } from "lucide-react";
 
-const JP_STALE_MS = 5 * 60 * 1000;
 function money(v) { return "$" + Math.round(Number(v) || 0).toLocaleString(); }
 const pctOr = (d, v) => (d > 0 ? v + "%" : "—");
 
 export default function JpMarketingSection({ filter, cs, ce }) {
   const { jpAppointments, jpJobs, isLoading: mirrorLoading } = useJpMirror();
-  const { data: customers = [], isLoading: customersLoading } = useQuery({
-    queryKey: ["jp-customers"],
-    queryFn: () => base44.entities.JPCustomer.list("-jp_created_at"),
-    staleTime: JP_STALE_MS,
-  });
+  const { customers, isLoading: customersLoading } = useJpCustomers();
   if (mirrorLoading || customersLoading) return null;
 
   if (customers.length === 0) {

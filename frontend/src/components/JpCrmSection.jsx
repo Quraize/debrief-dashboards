@@ -44,6 +44,16 @@ export function useJpMirror() {
   return { jpAppointments, jpJobs, isLoading: apptsLoading || jobsLoading };
 }
 
+/** CRM customers (leads). Loaded only by the sections that need them. */
+export function useJpCustomers() {
+  const { data: customers = [], isLoading } = useQuery({
+    queryKey: ["jp-customers"],
+    queryFn: () => base44.entities.JPCustomer.list("-jp_created_at"),
+    staleTime: JP_STALE_MS,
+  });
+  return { customers, isLoading };
+}
+
 function money(v) { return "$" + Math.round(Number(v) || 0).toLocaleString(); }
 
 /**
