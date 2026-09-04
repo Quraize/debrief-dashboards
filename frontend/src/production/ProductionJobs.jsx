@@ -172,8 +172,9 @@ export default function ProductionJobs() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{error.message}</div>}
 
-      <div className={`grid grid-cols-1 gap-4 items-start ${showMap ? "lg:grid-cols-[minmax(0,1fr)_480px]" : ""}`}>
-        <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+      {/* Half list, half map on desktop; the table scrolls sideways inside its half. */}
+      <div className={`grid grid-cols-1 gap-4 items-start ${showMap ? "lg:grid-cols-2" : ""}`}>
+        <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden min-w-0">
           {isLoading ? (
             <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
           ) : items.length === 0 ? (
@@ -224,8 +225,8 @@ export default function ProductionJobs() {
           )}
         </div>
         {showMap && (
-          <div className="lg:sticky lg:top-20 bg-white rounded-xl border border-border shadow-sm overflow-hidden">
-            <div className="h-[420px] lg:h-[calc(100vh-13rem)]">
+          <div className="lg:sticky lg:top-20 bg-white rounded-xl border border-border shadow-sm overflow-hidden min-w-0">
+            <div className="h-[420px] lg:h-[calc(100vh-11rem)] min-h-[480px]">
               <ScheduleMap items={mappable} selectedId={selectedId} onSelect={setSelectedId} />
             </div>
             <div className="p-3 border-t border-border text-[11px] text-muted-foreground">
