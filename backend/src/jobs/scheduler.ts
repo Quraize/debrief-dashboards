@@ -23,6 +23,7 @@ import { runJobProgressSync, type SyncMode } from "./syncJobProgress.js";
 import { runBackfill, monthChunks, type BackfillResult } from "./backfill.js";
 import { scanContractPrices, type ScanResult } from "./contractPrices.js";
 import { runScheduleSync, type ScheduleSyncCounts } from "../production/syncSchedules.js";
+import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 
 export const SYNC_QUEUE = "leap-sync";
 /** Production calendar mirror: short window, frequent, independent of the
@@ -33,6 +34,14 @@ const PRODUCTION_SCHEDULE_JOB_OPTS: PgBoss.SendOptions = {
   retryLimit: 1,
   retryDelay: 120,
   expireInSeconds: 900,
+};
+/** Customers (leads) + referral list: a full sweep (~60 pages), 4×/day. */
+export const CUSTOMER_SYNC_QUEUE = "customer-sync";
+const CUSTOMER_SYNC_DEFAULT_CRON = "15 3,9,15,21 * * *";
+const CUSTOMER_SYNC_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 1,
+  retryDelay: 600,
+  expireInSeconds: 1800,
 };
 /** Separate queue: the contract scan neither conflicts with the sync nor
  *  should ever wait behind a long backfill. */
@@ -197,6 +206,28 @@ export function productionScheduleSchedule(): { enabled: boolean; cron: string; 
   return { enabled: true, cron, reason: "" };
 }
 
+/** Same gate as the production schedule: master switch + the JobProgress token. */
+export function customerSyncSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const cron = process.env.CUSTOMER_SYNC_CRON ?? CUSTOMER_SYNC_DEFAULT_CRON;
+  if (process.env.SYNC_SCHEDULE_ENABLED !== "true") {
+    return { enabled: false, cron, reason: "SYNC_SCHEDULE_ENABLED is not true" };
+  }
+  if (!process.env.LEAP_API_TOKEN) return { enabled: false, cron, reason: "LEAP_API_TOKEN not set" };
+  return { enabled: true, cron, reason: "" };
+}
+
+export async function handleCustomerSyncJob(
+  deps: { sync?: typeof runCustomerSync } = {},
+): Promise<CustomerSyncCounts> {
+  const sync = deps.sync ?? runCustomerSync;
+  const result = await sync({ startedBy: "customer-scheduler" });
+  if (result.status === "failed") throw new Error(result.errorMessage ?? "customer sync failed");
+  console.info(
+    `[scheduler] customers: ${result.counts.customers_examined} examined, ${result.counts.customers_created} new, `
+    + `${result.counts.referrals_examined} referral sources, ${result.counts.marketing_sources_added} dropdown value(s) added`);
+  return result.counts;
+}
+
 /** The schedule-sync worker. Failure is a value from the sync (its telemetry
  *  row is always written); it becomes a throw here so pg-boss retries. */
 export async function handleProductionScheduleJob(
@@ -337,6 +368,28 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
     );
   }
 
+  // ── Customers (leads) + referral list ──
+  const custQueue = await instance.getQueue(CUSTOMER_SYNC_QUEUE);
+  if (!custQueue) {
+    await instance.createQueue(CUSTOMER_SYNC_QUEUE, { name: CUSTOMER_SYNC_QUEUE, policy: "singleton" });
+  }
+  const cust = customerSyncSchedule();
+  if (cust.enabled) {
+    await instance.schedule(CUSTOMER_SYNC_QUEUE, cust.cron, { startedBy: "customer-scheduler" },
+      { ...CUSTOMER_SYNC_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${CUSTOMER_SYNC_QUEUE} scheduled: "${cust.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(CUSTOMER_SYNC_QUEUE);
+    console.info(`[scheduler] customer sync disabled (${cust.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      CUSTOMER_SYNC_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handleCustomerSyncJob(),
+    );
+  }
+
   // Liveness watchdog: checked through OUR pool, not pg-boss's, so it works
   // precisely when pg-boss's own plumbing is what died. unref() keeps it from
   // holding the process open.
@@ -457,6 +510,10 @@ export interface SyncStatus {
     enabled: boolean; cron: string; reason: string;
     lastRun: { started_at: string; finished_at: string | null; status: string } | null;
   };
+  customers: {
+    enabled: boolean; cron: string; reason: string;
+    lastRun: { started_at: string; finished_at: string | null; status: string } | null;
+  };
   backfill: {
     active: boolean;
     jobId?: string;
@@ -469,7 +526,7 @@ export interface SyncStatus {
 
 /** What the admin page's status bar shows instead of hardcoded text. */
 export async function syncStatus(): Promise<SyncStatus> {
-  const lastRunOf = (kind: "appointments" | "schedules", startedBy?: string) => withServiceRole(async (c) => {
+  const lastRunOf = (kind: "appointments" | "schedules" | "customers", startedBy?: string) => withServiceRole(async (c) => {
     const { rows } = await c.query<{ started_at: Date; finished_at: Date | null; status: string }>(
       `SELECT started_at, finished_at, status FROM sync_run
         WHERE kind = $1 AND ($2::text IS NULL OR started_by = $2)
@@ -484,6 +541,7 @@ export async function syncStatus(): Promise<SyncStatus> {
   }, "scheduler:status", { quiet: true });
   const lastScheduledRun = await lastRunOf("appointments", "scheduler");
   const lastScheduleSync = await lastRunOf("schedules");
+  const lastCustomerSync = await lastRunOf("customers");
 
   let backfill: SyncStatus["backfill"] = { active: false };
   if (boss) {
@@ -532,6 +590,7 @@ export async function syncStatus(): Promise<SyncStatus> {
     lastScheduledRun,
     priceScan: { ...priceScanSchedule(), lastRun: lastScanRun },
     productionSchedule: { ...productionScheduleSchedule(), lastRun: lastScheduleSync },
+    customers: { ...customerSyncSchedule(), lastRun: lastCustomerSync },
     backfill,
   };
 }

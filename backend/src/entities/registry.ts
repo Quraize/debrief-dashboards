@@ -110,6 +110,17 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     create: null, update: null, remove: null,
     defaultSort: "-contract_signed_date",
   },
+  // CRM leads and the referral-source list, for the marketing dashboard.
+  JPCustomer: {
+    table: "jp_customer", read: STAFF,
+    create: null, update: null, remove: null,
+    defaultSort: "-jp_created_at",
+  },
+  JPReferral: {
+    table: "jp_referral", read: STAFF,
+    create: null, update: null, remove: null,
+    defaultSort: "name",
+  },
   // Money workflow: reads are admin-only, and writes happen exclusively
   // through the scan/approve function endpoints (jobs pool), never this API.
   JPPriceCandidate: {

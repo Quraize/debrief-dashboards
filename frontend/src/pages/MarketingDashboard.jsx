@@ -15,6 +15,8 @@ import { nonInsuranceDebriefs } from "@allied/shared/insurance";
 import { getMarketingCategory, isUnmappedSource, isSelfGenNeedsDetail, MARKETING_CATEGORIES, ALL_MARKETING_SOURCES } from "@allied/shared/marketingSources";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ComposedChart, Line } from "recharts";
 import { Loader2, ChevronDown, ChevronRight, Info, AlertTriangle } from "lucide-react";
+import { DebriefSectionHeader } from "@/components/JpCrmSection";
+import JpMarketingSection from "@/components/JpMarketingSection";
 
 function num(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function pct(a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; }
@@ -190,6 +192,8 @@ export default function MarketingDashboard() {
         {unmappedCount > 0 && <span className="bg-red-50 text-red-700 font-semibold px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Unmapped / Needs Cleanup: {unmappedCount}</span>}
         <span className="bg-amber-50 text-amber-700 font-semibold px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Missing Lead ID: {missingLeadIds}</span>
       </div>
+
+      <DebriefSectionHeader />
 
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
@@ -392,6 +396,9 @@ export default function MarketingDashboard() {
           </div>
         </>
       )}
+
+      {/* Independent of the debrief section by design — never gated on it. */}
+      <JpMarketingSection filter={filter} cs={cs} ce={ce} />
     </div>
   );
 }

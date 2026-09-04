@@ -15,6 +15,7 @@ import { runJobProgressSync, type SyncMode } from "../jobs/syncJobProgress.js";
 import { JobProgressClient } from "../integrations/jobprogress/client.js";
 import { runSyncExclusive, enqueueBackfill, syncStatus } from "../jobs/scheduler.js";
 import { scanContractPrices, approveCandidate, rejectCandidate } from "../jobs/contractPrices.js";
+import { runCustomerSync } from "../jobs/syncCustomers.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -99,6 +100,18 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
 
         case "getSyncStatus":
           return reply.send(await syncStatus());
+
+        case "syncCustomers": {
+          if (!process.env.LEAP_API_TOKEN) {
+            return reply.code(501).send({ error: "Customer sync is not enabled.", detail: "Needs LEAP_API_TOKEN." });
+          }
+          console.info(`[functions] syncCustomers by=${actor} ip=${ctx.ip}`);
+          const result = await runCustomerSync({ startedBy: actor });
+          if (result.status === "failed") {
+            return reply.code(502).send({ error: "JobProgress did not return the customer list.", detail: result.errorMessage, syncRunId: result.syncRunId });
+          }
+          return reply.send(result);
+        }
 
         case "scanContractPrices": {
           if (!process.env.ANTHROPIC_API_KEY) {

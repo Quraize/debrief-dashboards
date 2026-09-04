@@ -40,6 +40,7 @@ export default function JobProgressSync() {
   const [backfillFrom, setBackfillFrom] = useState("2026-01-01");
   const [backfillTo, setBackfillTo] = useState(fmtDate(today));
   const [backfillQueued, setBackfillQueued] = useState(null);
+  const [customersSyncing, setCustomersSyncing] = useState(false);
 
   const { data: lastCommits = [] } = useQuery({
     queryKey: ["last-commit"],
@@ -90,6 +91,26 @@ export default function JobProgressSync() {
       toast({ title: "Dry run failed", description: err.message, variant: "destructive" });
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function syncCustomersNow() {
+    setCustomersSyncing(true);
+    try {
+      const res = await base44.functions.invoke("syncCustomers", {});
+      const c = res.data.counts;
+      toast({
+        title: "Customers synced",
+        description: `${c.customers_examined} CRM customers read, ${c.customers_created} new; `
+          + `${c.referrals_examined} referral sources, ${c.marketing_sources_added} added to the Marketing Source dropdown.`,
+      });
+      qc.invalidateQueries({ queryKey: ["sync-runs"] });
+      qc.invalidateQueries({ queryKey: ["sync-status"] });
+      qc.invalidateQueries({ queryKey: ["jp-customers"] });
+    } catch (err) {
+      toast({ title: "Customer sync failed", description: err.message, variant: "destructive" });
+    } finally {
+      setCustomersSyncing(false);
     }
   }
 
@@ -195,6 +216,24 @@ export default function JobProgressSync() {
                 last {new Date(syncStatus.productionSchedule.lastRun.started_at).toLocaleString()} ({syncStatus.productionSchedule.lastRun.status})
               </span>
             )}
+          </div>
+        )}
+        {syncStatus?.customers && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">Customers / Leads:</span>
+            <span className={`text-sm ${syncStatus.customers.enabled ? "text-green-700 font-medium" : "text-muted-foreground"}`}
+              title={syncStatus.customers.enabled ? `cron "${syncStatus.customers.cron}" (UTC)` : syncStatus.customers.reason}>
+              {syncStatus.customers.enabled ? "Active — 4×/day" : "Disabled"}
+            </span>
+            {syncStatus.customers.lastRun && (
+              <span className={`text-xs ${syncStatus.customers.lastRun.status === "completed" ? "text-muted-foreground" : "text-red-600"}`}>
+                last {new Date(syncStatus.customers.lastRun.started_at).toLocaleString()} ({syncStatus.customers.lastRun.status})
+              </span>
+            )}
+            <button onClick={syncCustomersNow} disabled={customersSyncing}
+              className="text-xs font-semibold text-accent underline disabled:opacity-50">
+              {customersSyncing ? "Syncing…" : "Sync now"}
+            </button>
           </div>
         )}
         {syncStatus?.lastScheduledRun && (
@@ -373,7 +412,7 @@ export default function JobProgressSync() {
                     <td className="px-4 py-2 whitespace-nowrap">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
                     <td className="px-4 py-2">{r.mode}</td>
                     <td className="px-4 py-2 whitespace-nowrap">{r.date_from} → {r.date_to}</td>
-                    <td className="px-4 py-2">{r.kind === "schedules" ? "production schedule" : r.full_backfill ? "backfill" : "incremental"}</td>
+                    <td className="px-4 py-2">{r.kind === "schedules" ? "production schedule" : r.kind === "customers" ? "customers / leads" : r.full_backfill ? "backfill" : "incremental"}</td>
                     <td className={`px-4 py-2 font-semibold ${r.status === "completed" ? "text-green-700" : r.status === "running" ? "text-sky-700" : "text-red-600"}`}>{r.status}</td>
                     <td className="px-4 py-2">{r.counts?.api_appointments_examined ?? 0}</td>
                     <td className="px-4 py-2">{r.counts?.created ?? 0}</td>

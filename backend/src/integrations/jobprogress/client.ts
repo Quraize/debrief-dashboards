@@ -286,6 +286,22 @@ export class JobProgressClient {
     return out;
   }
 
+  /** The office's referral-source list (the CRM side of the marketing dropdown). */
+  async listReferrals(): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/referrals", {}, "referrals");
+  }
+
+  /**
+   * Every customer, with the lead source (`referred_by`) and address. ~60
+   * pages for the whole account; the customer sync sweeps it a few times a
+   * day, which is trivial against the rate budget.
+   */
+  async listCustomers(): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/customers", {
+      "includes[]": ["referred_by", "address"],
+    }, "customers");
+  }
+
   /**
    * Production-calendar entries (`type=schedule`; `event` is the office's
    * non-job calendar) whose start falls in the window. Timestamps come back

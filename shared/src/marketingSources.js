@@ -52,7 +52,7 @@ export const MARKETING_SOURCE_BY_CATEGORY = {
   ],
   "Lead Aggregators / Purchased Leads": [
     "Angie's List", "Craft Jack", "Directorii (Roofing Insights)", "Guaranteed Estimates", "Hardie Lead",
-    "Home Advisor", "Jared's Leads", "PMH", "Thumbtack",
+    "Home Advisor", "Home Avengers", "Jared's Leads", "PMH", "Thumbtack",
   ],
   "Website / Digital Properties": [
     "Apex Chat/Website Chat Bot", "GAF Website", "Owens Corning Website", "Roofr Instant Estimate: Website Lead",

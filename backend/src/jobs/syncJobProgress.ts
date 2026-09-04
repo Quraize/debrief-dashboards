@@ -288,6 +288,9 @@ export function mapJpAppointment(
     location: (apiAppointment["location"] as string) ?? null,
     crm_lead_id: job?.["number"] != null ? String(job["number"]) : null,
     crm_job_id: job?.["id"] != null ? String(job["id"]) : null,
+    // The join key to jp_customer (marketing attribution by lead source).
+    jp_customer_id: apiAppointment["customer_id"] != null ? String(apiAppointment["customer_id"])
+      : customer["id"] != null ? String(customer["id"]) : null,
     sales_rep: name(user) || null,
     appointment_setter: name(createdBy) || null,
     division: division || null,
@@ -317,6 +320,7 @@ export function mapJpJob(
 
   return {
     jp_job_id: String(apiJob["id"] ?? ""),
+    jp_customer_id: apiJob["customer_id"] != null ? String(apiJob["customer_id"]) : null,
     job_number: apiJob["number"] != null ? String(apiJob["number"]) : null,
     job_name: (apiJob["name"] as string) ?? null,
     division: (division?.["name"] as string)
