@@ -36,8 +36,8 @@ export default function JpCallCenterSection({ filter, cs, ce }) {
     { label: "No See", value: s.noSee, title: D.noSee },
     { label: "Demos", value: s.demos, title: D.demos },
     { label: "Demo %", value: pctOr(s.run, s.demoRate), title: D.demoRate },
-    { label: "Two-Leg %", value: pctOr(s.twoLeg + s.oneLeg, s.twoLegRate), rating: s.twoLegRating === "Excellent" ? "green" : s.twoLegRating === "Good" ? "yellow" : s.twoLegRating === "Poor" ? "red" : null,
-      title: `${D.twoLegRate} This period: ${s.twoLeg} two-leg / ${s.oneLeg} one-leg.` },
+    { label: "Two-Leg %", value: pctOr(s.twoLegEligible, s.twoLegRate), rating: s.twoLegRating === "Excellent" ? "green" : s.twoLegRating === "Good" ? "yellow" : s.twoLegRating === "Poor" ? "red" : null,
+      title: `${D.twoLegRate} This period: ${s.twoLeg} two-leg of ${s.twoLegEligible} run (${s.oneLeg} one-leg, ${s.twoLegEligible - s.twoLeg - s.oneLeg} unanswered).` },
     { label: "Sales", value: s.sales, title: D.sales },
     { label: "Sales $ (CRM)", value: money(s.salesAmount), title: D.salesAmount + (s.salesMissingAmount ? ` ${s.salesMissingAmount} sale(s) have no contract value in the CRM yet.` : "") },
     { label: "SER", value: s.demos > 0 ? s.ser : "—", rating: s.serRating === "Excellent" ? "green" : s.serRating === "Good" ? "yellow" : s.serRating === "Poor" ? "red" : null, title: D.ser },
@@ -94,7 +94,7 @@ const COLS = [
   ["twoLegRate", "2-Leg %", D.twoLegRate, "rate:twoleg"], ["sales", "Sales", D.sales],
   ["salesAmount", "Sales $", D.salesAmount, "money"], ["ser", "SER", D.ser, "ser"], ["resets", "Resets", D.resets], ["pending", "Pending", D.pending],
 ];
-const DENOM = { "rate:leads": (r) => r.leadsAssigned, "rate:shows": (r) => r.run + r.noSee, "rate:run": (r) => r.run, "rate:twoleg": (r) => r.twoLeg + r.oneLeg };
+const DENOM = { "rate:leads": (r) => r.leadsAssigned, "rate:shows": (r) => r.run + r.noSee, "rate:run": (r) => r.run, "rate:twoleg": (r) => r.twoLegEligible };
 
 function cell(r, key, kind, hasLeadData) {
   if (kind === "leads") return hasLeadData ? (r[key] || "") : "—";
@@ -106,6 +106,6 @@ function cell(r, key, kind, hasLeadData) {
 }
 function cellClass(r, key, kind) {
   if (kind === "ser" && r.demos > 0) return `font-bold ${RATING[r.serRating]}`;
-  if (kind === "rate:twoleg" && r.twoLeg + r.oneLeg > 0) return `font-bold ${RATING[r.twoLegRating]}`;
+  if (kind === "rate:twoleg" && r.twoLegEligible > 0) return `font-bold ${RATING[r.twoLegRating]}`;
   return "";
 }

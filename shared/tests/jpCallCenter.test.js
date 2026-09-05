@@ -3,7 +3,7 @@ import { jpCallCenterStats, nameKey, REP_SELF_BOOKED, UNKNOWN_SETTER } from "../
 
 const appt = (over = {}) => ({
   jp_appointment_id: "a", appointment_date: "2026-08-12", jp_created_at: "2026-08-01T13:00:00.000Z",
-  is_sales_type: true, is_insurance: false, has_result: true, result_option_name: "Demo No Sale",
+  is_sales_type: true, is_insurance: false, has_result: true, result_option_name: "Demo No Sale", division: "ACR Roofing Division",
   appointment_setter: "Ashley  Pascual", sales_rep: "Jason Malarchak", two_leg_answer: null, title: "ROOF EST: Town/1 Main/Cust",
   crm_job_id: null, ...over,
 });
@@ -48,7 +48,8 @@ describe("jpCallCenterStats", () => {
     });
     expect(s.showRate).toBe(80);   // 4 / 5
     expect(s.demoRate).toBe(75);   // 3 / 4
-    expect(s.twoLegRate).toBe(67);
+    expect(s.twoLegEligible).toBe(4);
+    expect(s.twoLegRate).toBe(50);  // 2 two-leg / 4 retail run
     expect(s.ser).toBe(90);        // 27000 / 3 / 100
     expect(s.serRating).toBe("Poor");
     expect(s.setRate).toBe(233);   // 7 set / 3 leads — the tooltip says why this can exceed 100

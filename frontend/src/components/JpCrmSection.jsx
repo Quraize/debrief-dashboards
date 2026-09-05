@@ -131,8 +131,8 @@ export function JpHeadlineCards({ filter, cs, ce, debriefs }) {
       title: `Sales appointments titled CANCELLED, plus ones held more than ${AWAITING_RESULT_DAYS} days ago whose result was never recorded.` },
     { label: "Non-Sales Visits", value: stats.nonSales,
       title: "Warranty callbacks, walk-throughs, inspections, deliveries — on the calendar but not sales opportunities." },
-    { label: "CRM Two-Leg %", value: twoLeg.twoLeg + twoLeg.oneLeg > 0 ? twoLeg.rate + "%" : "—",
-      title: `${JP_TWO_LEG_DEFINITION} This period: ${twoLeg.twoLeg} two-leg / ${twoLeg.oneLeg} one-leg, ${twoLeg.answered} of ${twoLeg.eligible} answered.` },
+    { label: "CRM Two-Leg %", value: twoLeg.eligible > 0 ? twoLeg.rate + "%" : "—",
+      title: `${JP_TWO_LEG_DEFINITION} This period: ${twoLeg.twoLeg} two-leg of ${twoLeg.eligible} retail appointments run (${twoLeg.oneLeg} one-leg, ${twoLeg.unanswered} unanswered).` },
     { label: "Signed Jobs", value: revenue.signedJobs,
       title: "Jobs whose contract was signed in this period, straight from JobProgress." },
     { label: "Signed Revenue", value: money(revenue.revenue),
@@ -179,8 +179,8 @@ export function JpFunnelCards({ filter, cs, ce, rep = "" }) {
     { label: "Demos", value: f.demos, title: D.demos },
     { label: "Demo %", value: pctOr(0, f.attended, f.demoRate), title: D.demoRate },
     { label: "No Demo", value: f.noDemo, chip: pctOr(0, f.attended, f.noDemoRate), title: `${D.noDemo} Rate: ${D.noDemoRate}` },
-    { label: "Two-Leg %", value: pctOr(0, f.twoLeg + f.oneLeg, f.twoLegRate),
-      title: `${D.twoLegRate} This period: ${f.twoLeg} two-leg / ${f.oneLeg} one-leg.` },
+    { label: "Two-Leg %", value: pctOr(0, f.twoLegEligible, f.twoLegRate),
+      title: `${D.twoLegRate} This period: ${f.twoLeg} two-leg of ${f.twoLegEligible} retail appointments run (${f.oneLeg} one-leg, ${f.twoLegEligible - f.twoLeg - f.oneLeg} unanswered).` },
     { label: "Sales", value: f.sales, accent: true, title: D.sales },
     { label: "Sales %", value: pctOr(0, f.demos, f.closeRate), title: D.closeRate },
     { label: "1st Call Closes", value: f.firstCall, chip: pctOr(0, f.sales, f.firstCallRate), title: `${D.firstCall} Rate: ${D.firstCallRate}` },
@@ -220,7 +220,7 @@ const JOB_TYPE_COLS = [
   ["closeRate", "Sales %", D.closeRate], ["noDemoRate", "No Demo %", D.noDemoRate], ["noSeeRate", "No See %", D.noSeeRate],
 ];
 const RATE_COLS = new Set(["twoLegRate", "demoRate", "closeRate", "noDemoRate", "noSeeRate"]);
-const RATE_DENOM = { twoLegRate: (r) => r.twoLeg + r.oneLeg, demoRate: (r) => r.attended, closeRate: (r) => r.demos,
+const RATE_DENOM = { twoLegRate: (r) => r.twoLegEligible, demoRate: (r) => r.attended, closeRate: (r) => r.demos,
   noDemoRate: (r) => r.attended, noSeeRate: (r) => r.attended + r.noSee };
 
 /** The tracking sheet's grid: one row per job type (CRM division), plus the total. */
@@ -416,8 +416,8 @@ export function JpRepSection({ filter, cs, ce, debriefs }) {
                 <td className="px-3 py-2 font-semibold">{r.run}</td>
                 <td className="px-3 py-2">{r.twoLeg}</td>
                 <td className="px-3 py-2">{r.oneLeg}</td>
-                <td className={`px-3 py-2 font-semibold ${r.twoLeg + r.oneLeg === 0 ? "text-muted-foreground" : r.twoLegRate >= 90 ? "text-green-700" : r.twoLegRate >= 80 ? "text-amber-700" : "text-red-700"}`}>
-                  {r.twoLeg + r.oneLeg > 0 ? r.twoLegRate + "%" : "—"}
+                <td className={`px-3 py-2 font-semibold ${r.twoLegEligible === 0 ? "text-muted-foreground" : r.twoLegRate >= 90 ? "text-green-700" : r.twoLegRate >= 80 ? "text-amber-700" : "text-red-700"}`}>
+                  {r.twoLegEligible > 0 ? r.twoLegRate + "%" : "—"}
                 </td>
               </tr>
             ))}

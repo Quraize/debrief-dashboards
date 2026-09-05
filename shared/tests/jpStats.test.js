@@ -12,6 +12,7 @@ const appt = (over = {}) => ({
   jp_appointment_id: "1",
   appointment_date: "2026-08-10",
   title: "ROOF EST",
+  division: "ACR Roofing Division",
   is_sales_type: true,
   is_insurance: false,
   has_result: false,
@@ -101,33 +102,33 @@ describe("jpAppointmentStats", () => {
   });
 });
 
-describe("jpTwoLegStats", () => {
+describe("jpTwoLegStats — the sales manager's rule", () => {
   const rows = [
-    appt({ jp_appointment_id: "1", two_leg_answer: "two_leg", has_result: true }),
-    appt({ jp_appointment_id: "2", two_leg_answer: "two_leg", has_result: true }),
-    appt({ jp_appointment_id: "3", two_leg_answer: "one_leg", has_result: true }),
-    appt({ jp_appointment_id: "4", two_leg_answer: "other", has_result: true }),
-    appt({ jp_appointment_id: "5" }), // unanswered
-    appt({ jp_appointment_id: "6", two_leg_answer: "two_leg", is_insurance: true, has_result: true }),
+    ran({ jp_appointment_id: "1", two_leg_answer: "two_leg" }),
+    ran({ jp_appointment_id: "2", two_leg_answer: "two_leg" }),
+    ran({ jp_appointment_id: "3", two_leg_answer: "one_leg" }),
+    ran({ jp_appointment_id: "4", two_leg_answer: "other" }),
+    ran({ jp_appointment_id: "5" }),                                         // run, form unanswered: counts against the rate
+    ran({ jp_appointment_id: "6", two_leg_answer: "two_leg", is_insurance: true }),                   // insurance: out
+    ran({ jp_appointment_id: "7", two_leg_answer: "two_leg", division: "ACR Service/Repair Division" }), // repair: out
+    ran({ jp_appointment_id: "8", two_leg_answer: "two_leg", division: "ACR Siding Only Division" }),   // siding: in
+    appt({ jp_appointment_id: "9", two_leg_answer: "two_leg" }),                                     // not run (no result): out
   ];
 
-  it("computes the rate as two-leg over decided answers, excluding 'other'", () => {
+  it("divides two-leg by ALL retail appointments run — roofing, roof & siding, siding only", () => {
     const s = jpTwoLegStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
-    expect(s.twoLeg).toBe(2);
+    expect(s.eligible).toBe(6);   // rows 1–5 and 8
+    expect(s.twoLeg).toBe(3);     // 1, 2, 8
     expect(s.oneLeg).toBe(1);
     expect(s.other).toBe(1);
-    expect(s.rate).toBe(67); // 2 / (2+1)
+    expect(s.unanswered).toBe(1);
+    expect(s.rate).toBe(50);      // 3 / 6, not 3 / (3+1)
   });
 
-  it("excludes insurance records entirely, matching the app's retail Two-Leg convention", () => {
+  it("reports how many of the eligible forms were answered", () => {
     const s = jpTwoLegStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
-    expect(s.answered).toBe(4); // insurance row's answer not counted
-  });
-
-  it("reports answer coverage against sales-type non-insurance volume", () => {
-    const s = jpTwoLegStats(rows, "Custom Range", "2026-08-01", "2026-08-31");
-    // 5 sales-type non-insurance rows, 4 answered
-    expect(s.coverageRate).toBe(80);
+    expect(s.answered).toBe(5);
+    expect(s.coverageRate).toBe(83);
   });
 });
 
@@ -237,7 +238,8 @@ describe("jpSalesFunnel — the scorecard from CRM results", () => {
     expect(f.closeRate).toBe(60);     // 3 / 5
     expect(f.noSeeRate).toBe(13);     // 1 / 8
     expect(f.firstCallRate).toBe(67); // 2 / 3
-    expect(f.twoLegRate).toBe(67);    // 2 / 3
+    expect(f.twoLegEligible).toBe(6); // the six roofing appointments run; the repair sale is out
+    expect(f.twoLegRate).toBe(33);    // 2 two-leg / 6 retail run (not 2 / 3 answered)
     expect(f.avgSale).toBe(Math.round(37299 / 2));
   });
 
@@ -245,7 +247,7 @@ describe("jpSalesFunnel — the scorecard from CRM results", () => {
     const f = jpSalesFunnel(rows, jobs, "Custom Range", "2026-08-01", "2026-08-31");
     expect(f.byJobType.map((r) => r.jobType)).toEqual(["Roof Replacement", "Roof Repair"]);
     expect(f.byJobType[0]).toMatchObject({ attended: 6, newAppts: 4, resetDemo: 1, rehash: 1, noSee: 1, demos: 4, sales: 2, salesAmount: 37299 });
-    expect(f.byJobType[1]).toMatchObject({ attended: 1, sales: 1, salesMissingAmount: 1, salesAmount: 0 });
+    expect(f.byJobType[1]).toMatchObject({ attended: 1, sales: 1, salesMissingAmount: 1, salesAmount: 0, twoLegEligible: 0, twoLegRate: 0 });
   });
 
   it("can be restricted to one rep's assigned appointments", () => {

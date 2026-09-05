@@ -15,7 +15,7 @@
 
 import { filterByDate } from "./kpi.js";
 import {
-  isRunAppointment, isNoShowResult, isDemoResult, isSaleResult, isResetTitle, classifyNoResult,
+  isRunAppointment, isNoShowResult, isDemoResult, isSaleResult, isResetTitle, classifyNoResult, isTwoLegEligible,
 } from "./jpStats.js";
 import { TWO_LEG, ONE_LEG } from "./jpResult.js";
 
@@ -38,7 +38,7 @@ export const JP_CALL_CENTER_DEFINITIONS = {
   showRate: "Run ÷ (run + no-shows).",
   demos: "Result $ale!!! or Demo No Sale.",
   demoRate: "Demos ÷ appointments run.",
-  twoLegRate: "Two-Leg ÷ (Two-Leg + One-Leg) on answered result forms.",
+  twoLegRate: "Two-Leg appointments ÷ all appointments run, Roof Replacement / Roof & Siding / Siding Only only — the same rule as the debrief Two-Leg %.",
   sales: "Result $ale!!!.",
   salesAmount: "Contract value of the sold jobs (JobProgress financials), appointment month.",
   ser: "Sales $ ÷ demos ÷ 100 — the Call Center dashboard's Setter Efficiency Ratio.",
@@ -48,11 +48,11 @@ export const JP_CALL_CENTER_DEFINITIONS = {
 
 function bucket(label) {
   return { label, isReps: false, leadsAssigned: 0, set: 0, run: 0, noSee: 0, demos: 0, sales: 0,
-    salesAmount: 0, salesMissingAmount: 0, twoLeg: 0, oneLeg: 0, resets: 0, pending: 0, cancelled: 0 };
+    salesAmount: 0, salesMissingAmount: 0, twoLegEligible: 0, twoLeg: 0, oneLeg: 0, resets: 0, pending: 0, cancelled: 0 };
 }
 function finish(b) {
   const ser = b.demos > 0 ? Math.round(b.salesAmount / b.demos / 100) : 0;
-  const twoLegRate = pct(b.twoLeg, b.twoLeg + b.oneLeg);
+  const twoLegRate = pct(b.twoLeg, b.twoLegEligible);
   return {
     ...b,
     setRate: pct(b.set, b.leadsAssigned),
@@ -61,7 +61,7 @@ function finish(b) {
     demoRate: pct(b.demos, b.run),
     closeRate: pct(b.sales, b.demos),
     twoLegRate,
-    twoLegRating: b.twoLeg + b.oneLeg === 0 ? "No Data" : twoLegRate >= 90 ? "Excellent" : twoLegRate >= 80 ? "Good" : "Poor",
+    twoLegRating: b.twoLegEligible === 0 ? "No Data" : twoLegRate >= 90 ? "Excellent" : twoLegRate >= 80 ? "Good" : "Poor",
     ser,
     serRating: b.demos === 0 ? "No Data" : ser >= 135 ? "Excellent" : ser >= 120 ? "Good" : "Poor",
   };
@@ -123,8 +123,11 @@ export function jpCallCenterStats(appointments, customers, jobs, filter, cs, ce,
       if (isDemoResult(r)) b.demos++;
       if (isResetTitle(r)) b.resets++;
       if (sale) { b.sales++; if (amount != null) b.salesAmount += amount; else b.salesMissingAmount++; }
-      if (r.two_leg_answer === TWO_LEG) b.twoLeg++;
-      else if (r.two_leg_answer === ONE_LEG) b.oneLeg++;
+      if (isTwoLegEligible(r)) {
+        b.twoLegEligible++;
+        if (r.two_leg_answer === TWO_LEG) b.twoLeg++;
+        else if (r.two_leg_answer === ONE_LEG) b.oneLeg++;
+      }
     }
   }
 

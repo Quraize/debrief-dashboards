@@ -87,7 +87,10 @@ export const JP_AWAITING_DEFINITION =
   `Sales appointments held in the last ${AWAITING_RESULT_DAYS} days whose result form has not been filled in JobProgress yet. They move into Appointments (or No-Shows) as soon as the rep records the result — so early in a month, Appointments lags by however long that takes.`;
 
 export const JP_TWO_LEG_DEFINITION =
-  "Two-Leg answers parsed from JobProgress appointment result forms (the free-text \"Was it 2-Legs?\" question). Rate = Two-Leg ÷ (Two-Leg + One-Leg) among retail sales appointments; unanswered forms and insurance records are excluded.";
+  "Two-Leg answers parsed from JobProgress appointment result forms (the free-text \"Was it 2-Legs?\" question). Rate = Two-Leg appointments ÷ ALL appointments run, counting only Roof Replacement, Roof & Siding and Siding Only (the retail install job types) — the same rule as the debrief Two-Leg %. Repairs, commercial and misc are excluded from both sides; an unanswered form counts against the rate.";
+
+/** The job types Two-Leg is measured on (sales manager's rule, Sep 2026). */
+export const TWO_LEG_JOB_TYPES = ["Roof Replacement", "Roof & Siding", "Siding Only"];
 
 export const JP_REVENUE_DEFINITION =
   "Sum of each job's JobProgress financial summary (total job revenue), attributed to the month the contract was signed — the CRM-side counterpart of the debrief Sale Amount, which is typed in by the rep.";
@@ -174,6 +177,10 @@ export const isDemoResult = (r) => isSaleResult(r) || isDemoNoSaleResult(r);
 export const isResetTitle = (r) => RESET_TITLE.test(String(r.title ?? ""));
 export const isRehashTitle = (r) => REHASH_TITLE.test(String(r.title ?? ""));
 
+/** A run appointment that counts toward Two-Leg %: retail install job type, not insurance. */
+export const isTwoLegEligible = (r) =>
+  isRunAppointment(r) && !isInsurance(r) && TWO_LEG_JOB_TYPES.includes(jobTypeFromDivision(r.division));
+
 /** The sheet's job-type rows, from the CRM division name. Unknown → the division itself. */
 export function jobTypeFromDivision(division) {
   const d = String(division ?? "").toLowerCase();
@@ -204,14 +211,17 @@ export const JP_FUNNEL_DEFINITIONS = {
   noDemoRate: "No Demo ÷ appointments run.",
   noSeeRate: "No-shows ÷ (appointments run + no-shows).",
   firstCallRate: "First-call closes ÷ sales.",
-  twoLegRate: "Two-Leg ÷ (Two-Leg + One-Leg) among answered result forms.",
+  twoLegRate: "Two-Leg appointments ÷ all appointments run, Roof Replacement / Roof & Siding / Siding Only only (an unanswered form counts against it). Other job types show n/a.",
 };
 
 function funnelBucket() {
   return {
     attended: 0, newAppts: 0, resetDemo: 0, rehash: 0, noSee: 0,
     demos: 0, noDemo: 0, otherResult: 0, sales: 0, firstCall: 0,
-    twoLeg: 0, oneLeg: 0, salesAmount: 0, salesWithAmount: 0, salesMissingAmount: 0,
+    // Two-Leg is measured on retail install job types only (TWO_LEG_JOB_TYPES):
+    // twoLegEligible = run appointments of those types; twoLeg/oneLeg counted there only.
+    twoLegEligible: 0, twoLeg: 0, oneLeg: 0,
+    salesAmount: 0, salesWithAmount: 0, salesMissingAmount: 0,
   };
 }
 
@@ -223,7 +233,7 @@ function finishBucket(b) {
     noDemoRate: pct(b.noDemo, b.attended),
     noSeeRate: pct(b.noSee, b.attended + b.noSee),
     firstCallRate: pct(b.firstCall, b.sales),
-    twoLegRate: pct(b.twoLeg, b.twoLeg + b.oneLeg),
+    twoLegRate: pct(b.twoLeg, b.twoLegEligible),
     avgSale: b.salesWithAmount > 0 ? Math.round(b.salesAmount / b.salesWithAmount) : 0,
   };
 }
@@ -290,8 +300,11 @@ export function jpSalesFunnel(rows, jobs, filter, cs, ce, rep = "") {
         if (amount != null) { b.salesAmount += amount; b.salesWithAmount++; }
         else b.salesMissingAmount++;
       }
-      if (r.two_leg_answer === TWO_LEG) b.twoLeg++;
-      else if (r.two_leg_answer === ONE_LEG) b.oneLeg++;
+      if (isTwoLegEligible(r)) {
+        b.twoLegEligible++;
+        if (r.two_leg_answer === TWO_LEG) b.twoLeg++;
+        else if (r.two_leg_answer === ONE_LEG) b.oneLeg++;
+      }
     }
   }
 
@@ -313,7 +326,8 @@ export function jpSalesFunnel(rows, jobs, filter, cs, ce, rep = "") {
  */
 export function jpTwoLegStats(rows, filter, cs, ce) {
   const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce);
-  const eligible = inRange.filter((r) => isSalesType(r) && !isInsurance(r));
+  // Denominator: every appointment RUN in the retail install job types.
+  const eligible = inRange.filter(isTwoLegEligible);
   const answered = eligible.filter((r) => r.two_leg_answer != null);
   const twoLeg = answered.filter((r) => r.two_leg_answer === TWO_LEG).length;
   const oneLeg = answered.filter((r) => r.two_leg_answer === ONE_LEG).length;
@@ -322,7 +336,8 @@ export function jpTwoLegStats(rows, filter, cs, ce) {
     twoLeg, oneLeg, other,
     answered: answered.length,
     eligible: eligible.length,
-    rate: pct(twoLeg, twoLeg + oneLeg),
+    unanswered: eligible.length - answered.length,
+    rate: pct(twoLeg, eligible.length),
     coverageRate: pct(answered.length, eligible.length),
   };
 }
@@ -392,16 +407,18 @@ export function jpRepStats(rows, filter, cs, ce) {
   const inRange = filterByDate(rows || [], "appointment_date", filter, cs, ce);
   return Object.entries(groupBy(inRange, "sales_rep")).map(([name, recs]) => {
     const sales = recs.filter(isSalesType);
-    const twoLeg = recs.filter((r) => r.two_leg_answer === TWO_LEG).length;
-    const oneLeg = recs.filter((r) => r.two_leg_answer === ONE_LEG).length;
+    const eligible = recs.filter(isTwoLegEligible);
+    const twoLeg = eligible.filter((r) => r.two_leg_answer === TWO_LEG).length;
+    const oneLeg = eligible.filter((r) => r.two_leg_answer === ONE_LEG).length;
     return {
       name,
       total: recs.length,
       run: recs.filter(isRunAppointment).length,
       salesType: sales.length,
       withResult: recs.filter((r) => r.has_result === true).length,
+      twoLegEligible: eligible.length,
       twoLeg, oneLeg,
-      twoLegRate: pct(twoLeg, twoLeg + oneLeg),
+      twoLegRate: pct(twoLeg, eligible.length),
     };
   }).sort((a, b) => b.total - a.total);
 }
