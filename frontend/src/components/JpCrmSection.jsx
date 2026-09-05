@@ -217,11 +217,12 @@ const JOB_TYPE_COLS = [
   ["twoLeg", "2-Legs", "Two-Leg answers on the result form."], ["sales", "Sales", D.sales],
   ["firstCall", "1st Call", D.firstCall], ["salesAmount", "Sales $", D.salesAmount],
   ["twoLegRate", "2-Leg %", D.twoLegRate], ["demoRate", "Demo %", D.demoRate],
-  ["closeRate", "Sales %", D.closeRate], ["noDemoRate", "No Demo %", D.noDemoRate], ["noSeeRate", "No See %", D.noSeeRate],
+  ["closeRate", "Sales %", D.closeRate], ["firstCallRate", "1st Call %", D.firstCallRate],
+  ["noDemoRate", "No Demo %", D.noDemoRate], ["noSeeRate", "No See %", D.noSeeRate],
 ];
-const RATE_COLS = new Set(["twoLegRate", "demoRate", "closeRate", "noDemoRate", "noSeeRate"]);
+const RATE_COLS = new Set(["twoLegRate", "demoRate", "closeRate", "firstCallRate", "noDemoRate", "noSeeRate"]);
 const RATE_DENOM = { twoLegRate: (r) => r.twoLegEligible, demoRate: (r) => r.attended, closeRate: (r) => r.demos,
-  noDemoRate: (r) => r.attended, noSeeRate: (r) => r.attended + r.noSee };
+  firstCallRate: (r) => r.sales, noDemoRate: (r) => r.attended, noSeeRate: (r) => r.attended + r.noSee };
 
 /** The tracking sheet's grid: one row per job type (CRM division), plus the total. */
 export function JpJobTypeTable({ filter, cs, ce, rep = "" }) {
