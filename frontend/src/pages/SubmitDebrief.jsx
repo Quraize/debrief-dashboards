@@ -78,8 +78,8 @@ export default function SubmitDebrief() {
   });
 
   useEffect(() => {
-    if (me?.full_name && !form.submitted_by) {
-      setForm((f) => ({ ...f, submitted_by: me.full_name }));
+    if (me?.fullName && !form.submitted_by) {
+      setForm((f) => ({ ...f, submitted_by: me.fullName }));
     }
   }, [me]);
 
@@ -98,7 +98,7 @@ export default function SubmitDebrief() {
         business_division: prefillAppt.business_division === "Insurance" ? "Insurance" : f.business_division,
         marketing_source: prefillAppt.marketing_source || "",
         referral_source: prefillAppt.referral_source || "",
-        submitted_by: me?.full_name || f.submitted_by
+        submitted_by: me?.fullName || f.submitted_by
       }));
     }
   }, [prefillAppt, me]);
@@ -200,8 +200,22 @@ export default function SubmitDebrief() {
     return true;
   })();
 
+  // One debrief per appointment: if one already exists for this Lead ID and
+  // date, submitting UPDATES it — which the database allows only for its author
+  // or a manager. Say so up front instead of failing at the end with "Not found".
+  const existingDebrief = (form.crm_lead_id || form.appointment_record_id) && form.appointment_date
+    ? findExistingDebrief(form, debriefs) : null;
+  const isManager = me?.role === "admin" || me?.role === "sales_manager";
+  const canEditExisting = !existingDebrief || isManager
+    || (me?.email && String(existingDebrief.created_by || "").toLowerCase() === String(me.email).toLowerCase());
+  const existingOwner = existingDebrief ? (existingDebrief.submitted_by || existingDebrief.created_by || "someone else") : "";
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!canEditExisting) {
+      toast({ title: "Already debriefed", description: `This appointment already has a debrief by ${existingOwner}. Only they or a manager can change it.`, variant: "destructive" });
+      return;
+    }
     if (!valid) {
       toast({ title: "Missing required fields", description: "Please complete all required fields.", variant: "destructive" });
       return;
@@ -301,15 +315,23 @@ export default function SubmitDebrief() {
         toast({ title: "Debrief saved; appointment needs matching", description: result.warning || "Recorded successfully." });
       }
 
-      setForm({ ...EMPTY, submitted_by: me?.full_name || "" });
+      setForm({ ...EMPTY, submitted_by: me?.fullName || "" });
       setGaveSecondPrice(false);
       setGaveThirdPrice(false);
       setTimeout(() => navigate("/queue"), 800);
       return result;
     } catch (err) {
       result.error = err.message;
-      // Pre-save validation error — nothing was saved.
-      toast({ title: "Submission failed", description: err.message, variant: "destructive" });
+      // "Not found" on the update means the row exists but the database refused
+      // the write: not the author, not a manager. Everything else is a real error.
+      const refused = existingDebrief && /not found/i.test(err.message || "");
+      toast({
+        title: refused ? "Already debriefed" : "Submission failed",
+        description: refused
+          ? `A debrief for this appointment was already submitted by ${existingOwner}. Only they or a manager can change it — ask a manager to edit it in Results Review.`
+          : err.message,
+        variant: "destructive",
+      });
       return result;
     } finally {
       setSubmitting(false);
@@ -680,12 +702,27 @@ export default function SubmitDebrief() {
         </Field>
       </Section>
 
-      <button type="submit" disabled={submitting || !valid}
+      {existingDebrief && (
+        canEditExisting ? (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900">
+            <span className="font-semibold">This appointment already has a debrief</span> (by {existingOwner}
+            {existingDebrief.created_date ? `, ${new Date(existingDebrief.created_date).toLocaleDateString()}` : ""}).
+            Submitting will <span className="font-semibold">update</span> that debrief with what is on this form.
+          </div>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-800">
+            <span className="font-semibold">This appointment was already debriefed by {existingOwner}</span>
+            {existingDebrief.created_date ? ` on ${new Date(existingDebrief.created_date).toLocaleDateString()}` : ""}.
+            Only they or a manager can change it. If it needs a correction, ask a manager to edit it in Results Review.
+          </div>
+        )
+      )}
+      <button type="submit" disabled={submitting || !valid || !canEditExisting}
         className="w-full bg-accent hover:bg-accent/90 disabled:opacity-50 text-white font-bold text-lg py-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-colors">
         {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-        {submitting ? "Submitting…" : "Submit Debrief"}
+        {submitting ? "Submitting…" : existingDebrief && canEditExisting ? "Update Debrief" : "Submit Debrief"}
       </button>
-      {!valid && <p className="text-center text-xs text-muted-foreground">Complete required (*) fields to submit.</p>}
+      {!valid && canEditExisting && <p className="text-center text-xs text-muted-foreground">Complete required (*) fields to submit.</p>}
     </form>
   );
 }
