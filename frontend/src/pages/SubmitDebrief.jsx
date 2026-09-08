@@ -5,8 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui/use-toast";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import {
-  SALE_OUTCOMES, DEMO_NO_SALE_OUTCOME, SALE_CANCELLATION_OUTCOME, RESET_OUTCOMES,
-  TRADES, INSURANCE_OUTCOMES, APPOINTMENT_TYPE_HELP_TEXT
+  SALE_OUTCOMES, DEMO_OUTCOMES, DEMO_NO_SALE_OUTCOME, SALE_CANCELLATION_OUTCOME, RESET_OUTCOMES, NON_COMPLETED_OUTCOMES,
+  DECISION_MAKER_STATUS, TRADES, INSURANCE_OUTCOMES, APPOINTMENT_TYPE_HELP_TEXT
 } from "@allied/shared/constants";
 import { dataQualityFlags } from "@allied/shared/kpi";
 import { normalizeAppointmentType } from "@allied/shared/appointmentTypes";
@@ -102,6 +102,23 @@ export default function SubmitDebrief() {
     }
   }, [prefillAppt, me]);
 
+  // The CRM result form for this appointment, if the rep already answered
+  // "Was it 2-Legs?" there. Pre-fills the question below; the rep can change it.
+  const { data: crmRows = [] } = useQuery({
+    queryKey: ["jp-appointment-for", prefillAppt?.crm_lead_id, prefillAppt?.appointment_date],
+    queryFn: () => base44.entities.JPAppointment.filter({ crm_lead_id: prefillAppt.crm_lead_id, appointment_date: prefillAppt.appointment_date }),
+    enabled: !!(prefillAppt?.crm_lead_id && prefillAppt?.appointment_date),
+  });
+  const crmLeg = crmRows.find((r) => r.two_leg_answer === "two_leg" || r.two_leg_answer === "one_leg") ?? null;
+  const [legPrefilled, setLegPrefilled] = useState(false);
+  useEffect(() => {
+    if (crmLeg && !legPrefilled && !form.decision_maker_status) {
+      set("decision_maker_status", crmLeg.two_leg_answer === "two_leg" ? "Two-Leg" : "One-Leg");
+      setLegPrefilled(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crmLeg]);
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const outcome = form.appointment_outcome;
@@ -113,17 +130,24 @@ export default function SubmitDebrief() {
   const isInsurance = form.product === "Insurance" || form.business_division === "Insurance";
   const showResetSection = (isResetNeeded || isResetDemo) && !isInsurance;
   const showOneLegReason = form.decision_maker_status === "One-Leg";
+  // Two-Leg / One-Leg is asked for every appointment that actually happened
+  // (it is the Two-Leg % denominator), and required whenever a demo was given.
+  const isDemo = DEMO_OUTCOMES.includes(outcome);
+  const showLegQuestion = !isInsurance && !!outcome && !NON_COMPLETED_OUTCOMES.includes(outcome);
+  const legRequired = isDemo && !isInsurance;
 
   const valid = (() => {
     const base = isInsurance
       ? ["customer_name", "appointment_date", "sales_rep", "appointment_setter", "insurance_outcome", "submitted_by"]
       : ["customer_name", "appointment_date", "sales_rep", "appointment_setter", "appointment_outcome", "submitted_by"];
     for (const k of base) if (!String(form[k] || "").trim()) return false;
-    if (isDemoNoSale && !isInsurance) {
+    if (legRequired) {
       if (!String(form.decision_maker_status || "").trim()) return false;
+      if (form.decision_maker_status === "One-Leg" && !String(form.one_leg_reason || "").trim()) return false;
+    }
+    if (isDemoNoSale && !isInsurance) {
       if (!String(form.first_price_given || "").trim()) return false;
       if (!String(form.step7_result || "").trim()) return false;
-      if (form.decision_maker_status === "One-Leg" && !String(form.one_leg_reason || "").trim()) return false;
       if (form.financing_offered === false && !String(form.financing_not_offered_reason || "").trim()) return false;
     }
     if (showResetSection) {
@@ -332,6 +356,24 @@ export default function SubmitDebrief() {
             <span className="block text-xs text-muted-foreground mt-1">Demo = a substantial residential presentation, typically about one hour, in which the rep showed products and gave the customer a price.</span>
           </Field>
         )}
+        {showLegQuestion && (
+          <>
+            <Field label={`Were all decision makers present? ${legRequired ? "*" : ""}`} required={legRequired}
+              hint="Two-Leg = every decision maker was there (a single decision maker counts as Two-Leg). One-Leg = a decision maker was missing. N/A = commercial or not applicable.">
+              <LegRadio value={form.decision_maker_status} onChange={(v) => set("decision_maker_status", v)} />
+              {crmLeg && (
+                <span className="block text-xs text-sky-700 mt-1">
+                  Pre-filled from the JobProgress result form{crmLeg.two_leg_raw ? ` ("${crmLeg.two_leg_raw}")` : ""}. Change it if that was wrong.
+                </span>
+              )}
+            </Field>
+            {showOneLegReason && (
+              <Field label={`Why was a decision maker missing? ${legRequired ? "*" : ""}`} required={legRequired}>
+                <textarea className={inputCls + " min-h-20"} value={form.one_leg_reason} onChange={(e) => set("one_leg_reason", e.target.value)} />
+              </Field>
+            )}
+          </>
+        )}
       </Section>
 
       {isInsurance && (
@@ -456,15 +498,6 @@ export default function SubmitDebrief() {
 
       {isDemoNoSale && !isInsurance && (
         <Section title="Demo No Sale — Rodney Webb Coaching">
-          <Field label="Decision-Maker Status *" required hint="Two-Leg means all decision makers were present. If there is only one decision maker, select Two-Leg.">
-            <ComboSelect category="decision_maker_status" value={form.decision_maker_status} onChange={(v) => set("decision_maker_status", v)} placeholder="Select…" />
-          </Field>
-          {showOneLegReason && (
-            <Field label="If this was a one-leg presentation, why was a decision maker missing? *" required>
-              <textarea className={inputCls + " min-h-20"} value={form.one_leg_reason} onChange={(e) => set("one_leg_reason", e.target.value)} />
-            </Field>
-          )}
-
           <Field label="What products did you present?">
             <CheckboxGroup options={PRODUCTS_PRESENTED} value={form.products_discussed} onChange={(v) => set("products_discussed", v)} />
           </Field>
@@ -575,14 +608,6 @@ export default function SubmitDebrief() {
           <Field label="Why did the appointment have to be reset? *" required>
             <textarea className={inputCls + " min-h-20"} value={form.reset_reason} onChange={(e) => set("reset_reason", e.target.value)} />
           </Field>
-          <Field label="Were all decision makers present?" hint="Two-Leg = all decision makers present">
-            <ComboSelect category="decision_maker_status" value={form.decision_maker_status} onChange={(v) => set("decision_maker_status", v)} placeholder="Select…" />
-          </Field>
-          {showOneLegReason && (
-            <Field label="If One-Leg, what was the reason?">
-              <input className={inputCls} value={form.one_leg_reason} onChange={(e) => set("one_leg_reason", e.target.value)} />
-            </Field>
-          )}
           <Field label="Was the follow-up/reset appointment scheduled? *" required>
             <YesNoRadio value={form.reset_appointment_scheduled} onChange={(v) => set("reset_appointment_scheduled", v)} />
           </Field>
@@ -658,6 +683,20 @@ function Toggle({ label, value, onChange }) {
         className={`relative w-12 h-7 rounded-full transition-colors ${value ? "bg-accent" : "bg-muted"}`}>
         <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${value ? "translate-x-5" : ""}`} />
       </button>
+    </div>
+  );
+}
+
+/** Two-Leg / One-Leg / N/A — fixed choices, not a managed list, so it can never render empty. */
+function LegRadio({ value, onChange }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {DECISION_MAKER_STATUS.map((v) => (
+        <button type="button" key={v} onClick={() => onChange(value === v ? "" : v)}
+          className={`px-5 py-2.5 rounded-lg text-sm font-semibold border transition-colors ${value === v ? "bg-accent text-white border-accent" : "border-input bg-white text-foreground"}`}>
+          {v}
+        </button>
+      ))}
     </div>
   );
 }
