@@ -8,6 +8,7 @@ import KpiCard from "@/components/KpiCard";
 import { computeKPIs } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { nonInsuranceAppointments } from "@allied/shared/insurance";
+import { localDay } from "@allied/shared/debriefQueue";
 import { ClipboardList, Inbox, AlertTriangle, TrendingUp, CalendarClock, Upload, FileText, ClipboardCheck } from "lucide-react";
 
 export default function Home() {
@@ -26,7 +27,9 @@ export default function Home() {
 
   const salesAppts = salesAppointmentsOnly(nonInsuranceAppointments(appointments));
   const kpis = computeKPIs(debriefs, salesAppts, filter, cs, ce);
-  const todayAppts = salesAppts.filter((a) => a.appointment_date === new Date().toISOString().slice(0, 10));
+  // Office-clock "today". toISOString() is UTC, which after 8 PM Eastern is
+  // already tomorrow — that listed tomorrow's appointments under Today.
+  const todayAppts = salesAppts.filter((a) => a.appointment_date === localDay());
   const missing = salesAppts.filter((a) => {
     if (!a.appointment_date) return false;
     return new Date(a.appointment_date + "T00:00:00").getTime() < Date.now() && (a.debrief_status === "Missing" || a.debrief_status === "Unmatched");
