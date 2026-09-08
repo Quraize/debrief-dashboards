@@ -124,6 +124,11 @@ describe.skipIf(!reachable)("runDebriefReminders", () => {
     await db.owner.query(
       `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_outcome, crm_lead_id, created_by)
        VALUES ('t','x',$1,'Jason','Ashley','Demo Completed — Sale','l-debriefed','t')`, [hoursAgo(3).toISOString().slice(0, 10)]);
+    // Debriefed via the JobProgress appointment id only (Lead ID left blank, wrong date typed).
+    await jp("debriefed-by-record-id");
+    await db.owner.query(
+      `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_outcome, appointment_record_id, created_by)
+       VALUES ('t','x','2026-01-01','Jason','Ashley','Demo Completed — Sale','debriefed-by-record-id','t')`);
     // Result form filled (Demo No Sale) but no debrief → still owed.
     await jp("result-no-debrief", { has_result: true, result_option_name: "Demo No Sale" });
 

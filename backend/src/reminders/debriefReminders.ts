@@ -104,11 +104,15 @@ export async function findDueReminders(now: Date, opts: { delayHours: number; lo
           AND NOT (ja.has_result AND coalesce(ja.result_option_name, '') ~* 'no\\s*see|no\\s*show|cancel')
           AND coalesce(ja.title, '') !~* 'cancel'
           AND coalesce(a.debrief_status, 'Missing') IN ('Missing', 'Unmatched')
+          -- No debrief by any of the three links: Lead ID + date, the appointment
+          -- row, or the JobProgress appointment id (the same rules as the queue).
           AND NOT EXISTS (
             SELECT 1 FROM debrief d
-             WHERE ja.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
-               AND lower(trim(d.crm_lead_id)) = lower(trim(ja.crm_lead_id))
-               AND d.appointment_date = ja.appointment_date)
+             WHERE (ja.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
+                    AND lower(trim(d.crm_lead_id)) = lower(trim(ja.crm_lead_id))
+                    AND d.appointment_date = ja.appointment_date)
+                OR (a.id IS NOT NULL AND d.appointment_id = a.id)
+                OR (d.appointment_record_id IS NOT NULL AND lower(trim(d.appointment_record_id)) = ja.jp_appointment_id))
           AND NOT EXISTS (SELECT 1 FROM debrief_reminder r WHERE r.jp_appointment_id = ja.jp_appointment_id AND r.status = 'sent')
           AND (SELECT count(*) FROM debrief_reminder r WHERE r.jp_appointment_id = ja.jp_appointment_id AND r.status = 'failed') < $4
         ORDER BY ja.starts_at`,

@@ -48,6 +48,40 @@ export function indexJpAppointments(jpRows) {
   return byKey;
 }
 
+/**
+ * Every way a debrief can point at an appointment, indexed once:
+ *   - Lead ID + date (the KPI engine's rule)
+ *   - the appointment row's id (set when the form matched at submit time)
+ *   - the JobProgress appointment id (the form's own duplicate check)
+ * The queue, the reminder job and the sync's reconcile all use the same three,
+ * so an appointment the form calls "already debriefed" never stays "missing".
+ */
+export function debriefIndex(debriefs) {
+  const byLeadDate = new Set();
+  const byAppointmentId = new Set();
+  const byRecordId = new Set();
+  for (const d of debriefs || []) {
+    const k = crmKey(d.crm_lead_id, d.appointment_date);
+    if (k) byLeadDate.add(k);
+    if (d.appointment_id) byAppointmentId.add(String(d.appointment_id));
+    const rid = String(d.appointment_record_id ?? "").trim().toLowerCase();
+    if (rid) byRecordId.add(rid);
+  }
+  return { byLeadDate, byAppointmentId, byRecordId };
+}
+
+/** Whether an appointment row has a debrief, by status or by any link in the index. */
+export function hasDebriefFor(appt, index) {
+  if (!appt) return false;
+  if (appt.debrief_status === "Submitted" || appt.debrief_status === "Approved") return true;
+  if (!index) return false;
+  const k = crmKey(appt.crm_lead_id, appt.appointment_date);
+  if (k && index.byLeadDate.has(k)) return true;
+  if (appt.id && index.byAppointmentId.has(String(appt.id))) return true;
+  const rid = String(appt.appointment_record_id ?? "").trim().toLowerCase();
+  return !!rid && index.byRecordId.has(rid);
+}
+
 export function indexById(rows, idField) {
   const m = new Map();
   for (const r of rows || []) if (r[idField] != null) m.set(String(r[idField]), r);

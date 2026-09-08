@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   crmKey, indexJpAppointments, indexById, jobProgressJobUrl, crmStatus, enrichQueueItem,
   daysSince, queueDisposition, localDay, EXCLUDED_CRM_STATUSES, isImportant, OVERDUE_DAYS,
+  debriefIndex, hasDebriefFor,
 } from "../src/debriefQueue.js";
 
 const NOW = new Date("2026-09-08T10:00:00");
@@ -97,6 +98,26 @@ describe("daysSince / localDay", () => {
     expect(daysSince("2026-09-01T00:00:00", NOW)).toBe(7);
     expect(daysSince("2026-09-09", NOW)).toBeNull();
     expect(daysSince(null, NOW)).toBeNull();
+  });
+});
+
+describe("debriefIndex / hasDebriefFor", () => {
+  const index = debriefIndex([
+    { crm_lead_id: " J-100", appointment_date: "2026-09-03" },
+    { appointment_id: "row-7" },
+    { appointment_record_id: "31937935 " },
+    { crm_lead_id: null, appointment_date: "2026-09-03" }, // contributes nothing
+  ]);
+  it("finds a debrief by Lead ID + date, by appointment row, or by JobProgress appointment id", () => {
+    expect(hasDebriefFor({ crm_lead_id: "j-100", appointment_date: "2026-09-03T00:00:00" }, index)).toBe(true);
+    expect(hasDebriefFor({ id: "row-7", crm_lead_id: "J-999", appointment_date: "2026-09-05" }, index)).toBe(true);
+    expect(hasDebriefFor({ id: "row-8", appointment_record_id: "31937935", crm_lead_id: "J-999", appointment_date: "2026-09-05" }, index)).toBe(true);
+  });
+  it("otherwise trusts only a Submitted / Approved status", () => {
+    expect(hasDebriefFor({ id: "row-9", crm_lead_id: "J-999", appointment_date: "2026-09-05", debrief_status: "Missing" }, index)).toBe(false);
+    expect(hasDebriefFor({ id: "row-9", debrief_status: "Submitted" }, null)).toBe(true);
+    expect(hasDebriefFor({ id: "row-9", debrief_status: "Approved" }, index)).toBe(true);
+    expect(hasDebriefFor(null, index)).toBe(false);
   });
 });
 

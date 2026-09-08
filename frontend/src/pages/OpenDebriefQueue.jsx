@@ -8,7 +8,8 @@ import { filterByDate } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { isInsuranceAppointment } from "@allied/shared/insurance";
 import {
-  crmKey, indexJpAppointments, indexById, enrichQueueItem, queueDisposition, localDay, CRM_STATUS_LABELS, isImportant, OVERDUE_DAYS,
+  indexJpAppointments, indexById, enrichQueueItem, queueDisposition, localDay, CRM_STATUS_LABELS, isImportant, OVERDUE_DAYS,
+  debriefIndex, hasDebriefFor,
 } from "@allied/shared/debriefQueue";
 import { useJpMirror, useJpCustomers } from "@/components/JpCrmSection";
 import DateRangeFilter from "@/components/DateRangeFilter";
@@ -63,17 +64,12 @@ export default function OpenDebriefQueue() {
   const now = new Date();
   const todayStr = localDay(now);
 
-  // Debriefs that exist, keyed the way the KPI engine matches them (Lead ID +
-  // date). The appointment's own debrief_status can lag — imported debriefs
-  // never updated it — so the queue cross-checks rather than trusting it.
-  const debriefKeys = useMemo(() => {
-    const keys = new Set();
-    debriefs.forEach((d) => { const k = crmKey(d.crm_lead_id, d.appointment_date); if (k) keys.add(k); });
-    return keys;
-  }, [debriefs]);
-  const hasDebrief = (a) =>
-    a.debrief_status === "Submitted" || a.debrief_status === "Approved" ||
-    debriefKeys.has(crmKey(a.crm_lead_id, a.appointment_date));
+  // Debriefs that exist, by every link a debrief can carry (Lead ID + date,
+  // appointment row, JobProgress appointment id) — the same three the submit
+  // form uses to detect a duplicate. The appointment's own debrief_status can
+  // lag, so the queue cross-checks rather than trusting it.
+  const debriefKeys = useMemo(() => debriefIndex(debriefs), [debriefs]);
+  const hasDebrief = (a) => hasDebriefFor(a, debriefKeys);
 
   // Every sales appointment, joined to the CRM and classified once.
   const items = useMemo(() => salesAppts.map((a) => {

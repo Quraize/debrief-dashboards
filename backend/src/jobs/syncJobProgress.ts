@@ -413,9 +413,18 @@ async function reconcileDebriefStatus(): Promise<number> {
           SET debrief_status = 'Submitted', updated_at = now()
          FROM debrief d
         WHERE a.debrief_status IN ('Missing', 'Unmatched')
-          AND a.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
-          AND lower(trim(d.crm_lead_id)) = lower(trim(a.crm_lead_id))
-          AND d.appointment_date = a.appointment_date`);
+          AND (
+            -- Lead ID + date (the KPI engine's rule) …
+            (a.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
+              AND lower(trim(d.crm_lead_id)) = lower(trim(a.crm_lead_id))
+              AND d.appointment_date = a.appointment_date)
+            -- … or the debrief points straight at this appointment row …
+            OR d.appointment_id = a.id
+            -- … or at the same JobProgress appointment id (the form's own duplicate check).
+            OR (a.appointment_record_id IS NOT NULL AND a.appointment_record_id <> ''
+              AND d.appointment_record_id IS NOT NULL
+              AND lower(trim(d.appointment_record_id)) = lower(trim(a.appointment_record_id)))
+          )`);
     return rowCount ?? 0;
   }, "sync:reconcile-debrief-status", { quiet: true });
 }
