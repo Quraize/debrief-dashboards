@@ -95,12 +95,34 @@ export default function SubmitDebrief() {
         sales_rep: prefillAppt.original_sales_rep || "",
         appointment_setter: prefillAppt.original_appointment_setter || "",
         product: prefillAppt.product || "",
+        business_division: prefillAppt.business_division === "Insurance" ? "Insurance" : f.business_division,
         marketing_source: prefillAppt.marketing_source || "",
         referral_source: prefillAppt.referral_source || "",
         submitted_by: me?.full_name || f.submitted_by
       }));
     }
   }, [prefillAppt, me]);
+
+  // JobProgress's divisions, each with its trades — what the Division and
+  // Trade fields offer. Until the first sync has run, the old managed list is
+  // the fallback so the form never renders an empty dropdown.
+  const { data: jpDivisions = [] } = useQuery({
+    queryKey: ["jp-divisions"],
+    queryFn: () => base44.entities.JPDivision.list("position"),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // The CRM job's trades pre-fill the Trade field when the form is opened from the queue.
+  const { data: crmJobs = [] } = useQuery({
+    queryKey: ["jp-job-for", prefillAppt?.crm_job_id],
+    queryFn: () => base44.entities.JPJob.filter({ jp_job_id: String(prefillAppt.crm_job_id) }),
+    enabled: !!prefillAppt?.crm_job_id,
+  });
+  const crmJobTrades = crmJobs[0]?.trades || "";
+  useEffect(() => {
+    if (crmJobTrades && !form.trade) set("trade", crmJobTrades);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crmJobTrades]);
 
   // The CRM result form for this appointment, if the rep already answered
   // "Was it 2-Legs?" there. Pre-fills the question below; the rep can change it.
@@ -128,6 +150,17 @@ export default function SubmitDebrief() {
   const isResetNeeded = RESET_OUTCOMES.includes(outcome);
   const isResetDemo = form.appointment_type === "Reset Demo";
   const isInsurance = form.product === "Insurance" || form.business_division === "Insurance";
+  // Trades on offer: the chosen division's, else every trade any division has,
+  // else the old fixed list — plus whatever is already selected (a CRM job may
+  // carry a trade its division does not list).
+  const selectedDivision = jpDivisions.find((d) => d.name === form.product);
+  const tradeOptions = (() => {
+    const base = selectedDivision?.trades?.length ? selectedDivision.trades
+      : jpDivisions.length ? [...new Set(jpDivisions.flatMap((d) => d.trades || []))]
+      : TRADES;
+    const current = String(form.trade || "").split(", ").filter(Boolean);
+    return [...new Set([...base, ...current, "OTHER"])];
+  })();
   const showResetSection = (isResetNeeded || isResetDemo) && !isInsurance;
   const showOneLegReason = form.decision_maker_status === "One-Leg";
   // Two-Leg / One-Leg is asked for every appointment that actually happened
@@ -329,21 +362,24 @@ export default function SubmitDebrief() {
         <Field label="Appointment Setter *" required>
           <ComboSelect category="appointment_setter" value={form.appointment_setter} onChange={(v) => set("appointment_setter", v)} placeholder="Select or add setter" />
         </Field>
-        <Field label="Division">
-          <ComboSelect category="product" value={form.product} onChange={(v) => {
-            set("product", v);
-            if (v === "Insurance") set("business_division", "Insurance");
-            else if (form.business_division === "Insurance") set("business_division", "");
-          }} placeholder="Select or add division" />
-        </Field>
-        {isInsurance && (
-          <Field label="Trade *" required hint="Insurance trade for this job">
-            <select className={inputCls} value={form.trade} onChange={(e) => set("trade", e.target.value)}>
-              <option value="">Select…</option>
-              {TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
+        <Field label="Division" hint="The JobProgress division the job belongs to.">
+          {jpDivisions.length > 0 ? (
+            <select className={inputCls} value={form.product} onChange={(e) => { set("product", e.target.value); set("trade", ""); }}>
+              <option value="">Select division…</option>
+              {form.product && !jpDivisions.some((d) => d.name === form.product) && <option value={form.product}>{form.product}</option>}
+              {jpDivisions.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
             </select>
-          </Field>
-        )}
+          ) : (
+            <ComboSelect category="product" value={form.product} onChange={(v) => set("product", v)} placeholder="Select division" />
+          )}
+        </Field>
+        <Field label={`Trade${isInsurance ? " *" : ""}`} required={isInsurance}
+          hint={selectedDivision ? `Trades JobProgress lists for ${selectedDivision.name}. Pick every trade this appointment covered.` : "Pick every trade this appointment covered."}>
+          <CheckboxGroup options={tradeOptions} value={form.trade} onChange={(v) => set("trade", v)} />
+        </Field>
+        <Field label="Insurance claim?" hint="Insurance jobs are reported on the Insurance dashboard, not in the retail numbers.">
+          <YesNoRadio value={isInsurance} onChange={(v) => set("business_division", v ? "Insurance" : "")} />
+        </Field>
       </Section>
 
       <Section title="Appointment Details">

@@ -49,7 +49,10 @@ function stubApi(appointments: unknown[], signedJobs: unknown[] = [], extra: Stu
       }
       data = record ? [record] : [];
     } else if (u.includes("/divisions")) {
-      data = [{ id: 7, name: "ACR Roofing Division" }];
+      data = [
+        { id: 7, name: "ACR Roofing Division", trades: { data: [{ id: 1, name: "ROOFING" }, { id: 2, name: "GUTTERS" }] }, work_types: { data: [{ id: 9, name: "Full Replacement" }] } },
+        { id: 8, name: "ACR Siding Only Division", trades: { data: [{ id: 3, name: "SIDING" }] } },
+      ];
     } else if (u.includes("/appointments") && u.includes("duration=date") && extra.upcoming) {
       data = extra.upcoming;
     } else if (u.includes("/appointments")) {
@@ -235,6 +238,15 @@ describe.skipIf(!reachable)("runJobProgressSync", () => {
     expect(rows[0]!.status).toBe("completed");
     expect(rows[0]!.finished_at, "finished_at drives the status bar").not.toBeNull();
     expect(rows[0]!.counts.created).toBe(2);
+  });
+
+  it("keeps the division list with its trades for the debrief form", async () => {
+    const { rows } = await db.owner.query<{ jp_division_id: string; name: string; trades: string[]; work_types: string[]; position: number }>(
+      `SELECT jp_division_id, name, trades, work_types, position FROM jp_division ORDER BY position`);
+    expect(rows).toEqual([
+      { jp_division_id: "7", name: "ACR Roofing Division", trades: ["ROOFING", "GUTTERS"], work_types: ["Full Replacement"], position: 0 },
+      { jp_division_id: "8", name: "ACR Siding Only Division", trades: ["SIDING"], work_types: [], position: 1 },
+    ]);
   });
 
   it("creates the appointments it examined", async () => {

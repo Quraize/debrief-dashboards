@@ -146,6 +146,12 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     create: null, update: null, remove: null,
     defaultSort: "position",
   },
+  // Divisions + their trades: the debrief form's Division / Trade choices.
+  JPDivision: {
+    table: "jp_division", read: [...ROLES] as Role[],
+    create: null, update: null, remove: null,
+    defaultSort: "name",
+  },
   // Debrief reminder emails: who gets them (admin-kept list keyed by the rep's
   // CRM name — deliberately NOT login accounts) and what went out.
   DebriefReminderRecipient: {

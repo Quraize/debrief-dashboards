@@ -311,6 +311,23 @@ export function mapJpAppointment(
   };
 }
 
+/** Maps an API division (with its trades / work_types includes) to a `jp_division` row. */
+export function mapJpDivision(apiDivision: Record<string, unknown>, position: number): Record<string, unknown> | null {
+  const id = apiDivision["id"];
+  const name = String(apiDivision["name"] ?? "").trim();
+  if (id == null || !name) return null;
+  const names = (value: unknown) => unwrapMany<Record<string, unknown>>(value)
+    .map((t) => String(t["name"] ?? "").trim()).filter(Boolean);
+  return {
+    jp_division_id: String(id),
+    name,
+    trades: names(apiDivision["trades"]),
+    work_types: names(apiDivision["work_types"]),
+    position,
+    last_seen_at: new Date(),
+  };
+}
+
 /** Maps an API job (from the signed-jobs query) to a `jp_job` mirror row. */
 export function mapJpJob(
   apiJob: Record<string, unknown>, divisionNames: Map<string, string>,
@@ -405,7 +422,7 @@ async function reconcileDebriefStatus(): Promise<number> {
 
 /** Generic batched upsert for the jp mirror tables (natural-key conflict). */
 async function upsertJpRows(
-  table: "jp_appointment" | "jp_job", conflictColumn: string, rows: Record<string, unknown>[],
+  table: "jp_appointment" | "jp_job" | "jp_division", conflictColumn: string, rows: Record<string, unknown>[],
 ): Promise<number> {
   if (rows.length === 0) return 0;
   return withServiceRole(async (c) => {
@@ -470,6 +487,12 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
 
   try {
     const divisions = await client.listDivisions();
+    // Keep the division list (with trades) for the debrief form. Cheap: the
+    // call is made anyway; upserting ~10 rows is nothing.
+    if (options.mode === "commit") {
+      const divisionRows = divisions.map((d, i) => mapJpDivision(d, i)).filter((r): r is Record<string, unknown> => r !== null);
+      await upsertJpRows("jp_division", "jp_division_id", divisionRows);
+    }
     const divisionNames = new Map<string, string>();
     for (const d of divisions) {
       if (d["id"] != null) divisionNames.set(String(d["id"]), String(d["name"] ?? ""));
