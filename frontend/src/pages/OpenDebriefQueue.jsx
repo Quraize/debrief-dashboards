@@ -12,6 +12,7 @@ import {
 } from "@allied/shared/debriefQueue";
 import { useJpMirror, useJpCustomers } from "@/components/JpCrmSection";
 import DateRangeFilter from "@/components/DateRangeFilter";
+import { usDate, simpleTime } from "@/lib/format";
 
 // What to list. Combines with the date range and the people filters below.
 const VIEWS = ["Missing Debrief","Excluded by CRM","Needs Review","All Appointments","Estimates in Progress"];
@@ -231,7 +232,7 @@ export default function OpenDebriefQueue() {
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="min-w-0">
                       <div className="font-bold text-primary truncate">{d.customer_name}</div>
-                      <div className="text-xs text-muted-foreground">{d.appointment_date || "No date"}</div>
+                      <div className="text-xs text-muted-foreground">{usDate(d.appointment_date) || "No date"}</div>
                     </div>
                     <button
                       onClick={() => markEstimateSent(d)}
@@ -285,7 +286,6 @@ function ago(days) {
   if (days === 1) return "yesterday";
   return `${days} days ago`;
 }
-function shortDate(iso) { return iso ? String(iso).slice(0, 10) : null; }
 
 function crmResultBadge(crm) {
   if (!crm) return null;
@@ -310,7 +310,7 @@ function QueueCard({ item }) {
         <div className="min-w-0">
           <div className="font-bold text-primary truncate">{a.customer_name}</div>
           <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2">
-            <span>{a.appointment_date || "No date"}{a.appointment_time ? ` • ${a.appointment_time}` : ""}</span>
+            <span>{usDate(a.appointment_date) || "No date"}{a.appointment_time ? ` • ${simpleTime(a.appointment_time)}` : ""}</span>
             {ago(daysSince) && <span className={isImportant(item) ? "text-red-600 font-semibold" : ""}>{ago(daysSince)}</span>}
             {crm?.title && !crm.title.toLowerCase().startsWith(String(a.customer_name || "").toLowerCase()) && (
               <span className="truncate max-w-[16rem]" title={crm.title}>{crm.title}</span>
@@ -342,9 +342,9 @@ function QueueCard({ item }) {
         {a.email && <Info label="Email" value={<a href={`mailto:${a.email}`} className="text-sky-700 hover:underline inline-flex items-center gap-1"><Mail className="w-3 h-3" />{a.email}</a>} />}
         {lead && <Info label="Lead Source" value={lead.kind === "unknown" ? "—" : lead.source} />}
         {lead?.callCenterRep && <Info label="Call Center Rep" value={lead.callCenterRep} />}
-        {crm?.bookedAt && <Info label="Booked" value={`${shortDate(crm.bookedAt)}${crm.setter ? ` by ${crm.setter}` : ""}`} />}
+        {crm?.bookedAt && <Info label="Booked" value={`${usDate(crm.bookedAt)}${crm.setter ? ` by ${crm.setter}` : ""}`} />}
         {job?.stage && <Info label="CRM Stage" value={job.stage} />}
-        {job?.signedDate && <Info label="Signed" value={`${job.signedDate}${job.price ? ` • ${money(job.price)}` : ""}`} />}
+        {job?.signedDate && <Info label="Signed" value={`${usDate(job.signedDate)}${job.price ? ` • ${money(job.price)}` : ""}`} />}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-2">
