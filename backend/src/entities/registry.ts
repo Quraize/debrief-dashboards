@@ -146,6 +146,18 @@ export const ENTITIES: Record<string, EntityPolicy> = {
     create: null, update: null, remove: null,
     defaultSort: "position",
   },
+  // Debrief reminder emails: who gets them (admin-kept list keyed by the rep's
+  // CRM name — deliberately NOT login accounts) and what went out.
+  DebriefReminderRecipient: {
+    table: "debrief_reminder_recipient", read: MANAGERS,
+    create: MANAGERS, update: MANAGERS, remove: MANAGERS,
+    defaultSort: "rep_name",
+  },
+  DebriefReminder: {
+    table: "debrief_reminder", read: MANAGERS,
+    create: null, update: null, remove: null,
+    defaultSort: "-created_at",
+  },
   User: {
     table: "app_user",
     read: STAFF,   // RLS narrows this to "own row, or everything if admin"

@@ -4,7 +4,7 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing
 } from "lucide-react";
 import { PRODUCTION_ROLES, isProductionOnly } from "@allied/shared/constants";
 
@@ -32,6 +32,7 @@ const OPERATIONS = [
 const ADMIN_OPERATIONS = [
   { to: "/jobprogress-sync", label: "JobProgress Sync", icon: RefreshCw },
   { to: "/price-review", label: "Price Review", icon: BadgeDollarSign },
+  { to: "/debrief-reminders", label: "Debrief Reminders", icon: BellRing },
   { to: "/users", label: "Users", icon: UsersIcon },
 ];
 

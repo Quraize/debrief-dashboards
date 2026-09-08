@@ -173,6 +173,25 @@ In the app as admin, on the JobProgress Sync page:
    in `deploy/.env.production`, then `deploy/deploy.sh up` to recreate the
    backend. The schedule line on the sync page flips to Active.
 
+### 8.1 Debrief reminder emails
+
+Two hours after a sales appointment starts with no debrief filed, the rep gets
+one email (Admin → Debrief Reminders). Rollout order:
+
+1. In Google Workspace, use a dedicated mailbox (e.g. notifications@…): turn on
+   2-step verification, generate an **App Password** for Mail. Put the address
+   and app password in `deploy/.env.production` as `SMTP_USER` / `SMTP_PASSWORD`
+   (via the password manager — never chat), then `deploy/deploy.sh up`.
+2. On the Debrief Reminders page: **Send test** to yourself. The log at the
+   bottom shows the attempt; a failure shows the SMTP server's reason.
+3. Fill in **Recipients**: one row per rep as JobProgress names them, email from
+   HR, switch On. Rows highlighted amber have a reminder due and no email.
+4. **Preview what is due** — this is exactly what the first scheduled run would
+   send (capped at 30 per run; the rest follow on later runs). If the backlog
+   is unwanted, lower `DEBRIEF_REMINDER_LOOKBACK_DAYS` before enabling.
+5. Set `DEBRIEF_REMINDERS_ENABLED=true`, `deploy/deploy.sh up`. The page's
+   Schedule line flips to Active — every 15 min, quiet 9 PM–7 AM Eastern.
+
 ## 9. Troubleshooting
 
 | Symptom | Likely cause |

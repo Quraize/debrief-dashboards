@@ -25,6 +25,7 @@ import { scanContractPrices, type ScanResult } from "./contractPrices.js";
 import { runScheduleSync, type ScheduleSyncCounts } from "../production/syncSchedules.js";
 import { runJobStageSync } from "../production/syncJobStages.js";
 import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
+import { runDebriefReminders, reminderSchedule, type ReminderRunResult } from "../reminders/debriefReminders.js";
 
 export const SYNC_QUEUE = "leap-sync";
 /** Production calendar mirror: short window, frequent, independent of the
@@ -43,6 +44,12 @@ const CUSTOMER_SYNC_JOB_OPTS: PgBoss.SendOptions = {
   retryLimit: 1,
   retryDelay: 600,
   expireInSeconds: 1800,
+};
+/** Debrief reminder emails: every 15 min, independent of the syncs. */
+export const DEBRIEF_REMINDER_QUEUE = "debrief-reminders";
+const DEBRIEF_REMINDER_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 0,          // the next tick is the retry; a re-run cannot double-send
+  expireInSeconds: 600,
 };
 /** Separate queue: the contract scan neither conflicts with the sync nor
  *  should ever wait behind a long backfill. */
@@ -229,6 +236,22 @@ export async function handleCustomerSyncJob(
   return result.counts;
 }
 
+/** The reminder worker. Sends are logged per appointment; nothing to throw for. */
+export async function handleDebriefReminderJob(
+  deps: { run?: typeof runDebriefReminders } = {},
+): Promise<ReminderRunResult> {
+  const run = deps.run ?? runDebriefReminders;
+  const result = await run({ startedBy: "scheduler" });
+  if (result.status === "completed") {
+    console.info(
+      `[scheduler] debrief reminders: ${result.due} due, ${result.sent} sent, ${result.failed} failed, `
+      + `${result.noRecipient} without a recipient${result.deferred ? `, ${result.deferred} deferred` : ""}`);
+  } else {
+    console.info(`[scheduler] debrief reminders: skipped (${result.status})`);
+  }
+  return result;
+}
+
 /** The schedule-sync worker. Failure is a value from the sync (its telemetry
  *  row is always written); it becomes a throw here so pg-boss retries. */
 export async function handleProductionScheduleJob(
@@ -398,6 +421,28 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
     );
   }
 
+  // ── Debrief reminder emails ──
+  const remQueue = await instance.getQueue(DEBRIEF_REMINDER_QUEUE);
+  if (!remQueue) {
+    await instance.createQueue(DEBRIEF_REMINDER_QUEUE, { name: DEBRIEF_REMINDER_QUEUE, policy: "singleton" });
+  }
+  const rem = reminderSchedule();
+  if (rem.enabled) {
+    await instance.schedule(DEBRIEF_REMINDER_QUEUE, rem.cron, { startedBy: "scheduler" },
+      { ...DEBRIEF_REMINDER_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${DEBRIEF_REMINDER_QUEUE} scheduled: "${rem.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(DEBRIEF_REMINDER_QUEUE);
+    console.info(`[scheduler] debrief reminders disabled (${rem.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      DEBRIEF_REMINDER_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handleDebriefReminderJob(),
+    );
+  }
+
   // Liveness watchdog: checked through OUR pool, not pg-boss's, so it works
   // precisely when pg-boss's own plumbing is what died. unref() keeps it from
   // holding the process open.
@@ -532,6 +577,19 @@ export interface SyncStatus {
   };
 }
 
+/** When a queue's job last finished, from pg-boss's history (live + archive). */
+export async function lastQueueRun(queue: string): Promise<{ completed_on: string; state: string } | null> {
+  if (!boss) return null;
+  const { rows } = await dbJobs().query<{ completed_on: Date; state: string }>(
+    `SELECT completed_on, state FROM (
+       SELECT completed_on, state FROM pgboss.job WHERE name = $1 AND completed_on IS NOT NULL
+       UNION ALL
+       SELECT completed_on, state FROM pgboss.archive WHERE name = $1 AND completed_on IS NOT NULL
+     ) runs ORDER BY completed_on DESC LIMIT 1`, [queue]);
+  const run = rows[0];
+  return run ? { completed_on: run.completed_on.toISOString(), state: run.state } : null;
+}
+
 /** What the admin page's status bar shows instead of hardcoded text. */
 export async function syncStatus(): Promise<SyncStatus> {
   const lastRunOf = (kind: "appointments" | "schedules" | "customers", startedBy?: string) => withServiceRole(async (c) => {
@@ -577,17 +635,7 @@ export async function syncStatus(): Promise<SyncStatus> {
 
   // The scan writes no run table of its own; pg-boss's job history (live +
   // archive) is the record of when it last ran.
-  let lastScanRun: SyncStatus["priceScan"]["lastRun"] = null;
-  if (boss) {
-    const { rows } = await dbJobs().query<{ completed_on: Date; state: string }>(
-      `SELECT completed_on, state FROM (
-         SELECT completed_on, state FROM pgboss.job WHERE name = $1 AND completed_on IS NOT NULL
-         UNION ALL
-         SELECT completed_on, state FROM pgboss.archive WHERE name = $1 AND completed_on IS NOT NULL
-       ) runs ORDER BY completed_on DESC LIMIT 1`, [PRICE_SCAN_QUEUE]);
-    const run = rows[0];
-    if (run) lastScanRun = { completed_on: run.completed_on.toISOString(), state: run.state };
-  }
+  const lastScanRun = await lastQueueRun(PRICE_SCAN_QUEUE);
 
   return {
     schedule: {

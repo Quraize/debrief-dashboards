@@ -24,6 +24,7 @@ import ResultsReview from '@/pages/ResultsReview';
 import ManagerReport from '@/pages/ManagerReport';
 import JobProgressSync from '@/pages/JobProgressSync';
 import PriceReview from '@/pages/PriceReview';
+import DebriefReminders from '@/pages/DebriefReminders';
 import Account from '@/pages/Account';
 import Users from '@/pages/Users';
 import MarketingDashboard from '@/pages/MarketingDashboard';
@@ -92,6 +93,7 @@ const AuthenticatedApp = () => {
           <Route path="/manager-report" element={<ManagerReport />} />
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
           <Route path="/price-review" element={<PriceReview />} />
+          <Route path="/debrief-reminders" element={<DebriefReminders />} />
           <Route path="/production/schedule" element={<ProductionSchedule />} />
           <Route path="/production/jobs" element={<ProductionJobs />} />
           <Route path="/account" element={<Account />} />

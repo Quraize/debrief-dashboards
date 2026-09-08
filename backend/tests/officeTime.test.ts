@@ -13,9 +13,16 @@ describe.skipIf(!reachable)("0016_office_time data repair", () => {
   let db: TestDb;
   const ids: Record<string, string> = {};
 
+  // Steps from the current head back to 0015 — the world before the repair —
+  // so later migrations do not change what "one step down" means.
+  const downTo15 = async () => {
+    const { rows } = await db.owner.query<{ v: number }>(`SELECT max(version)::int AS v FROM schema_migrations`);
+    if (rows[0]!.v > 15) await migrateDown(db.owner, rows[0]!.v - 15, () => {});
+  };
+
   beforeAll(async () => {
     db = await createTestDb("officetime");
-    await migrateDown(db.owner, 1, () => {}); // back to 0015: the world before the repair
+    await downTo15();
 
     const insert = async (key: string, row: Record<string, unknown>) => {
       const cols = Object.keys(row);
@@ -77,7 +84,7 @@ describe.skipIf(!reachable)("0016_office_time data repair", () => {
   });
 
   it("puts the times back on UTC when reverted", async () => {
-    await migrateDown(db.owner, 1, () => {});
+    await downTo15();
     expect(await appt(ids.a!)).toMatchObject({ d: "2026-09-08", t: "21:30" });
     expect(await appt(ids.b!)).toMatchObject({ d: "2026-09-09", t: "00:30" });
     expect(await appt(ids.e!)).toMatchObject({ d: "2026-09-08", t: "09:00" });

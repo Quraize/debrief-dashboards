@@ -13,9 +13,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { requireAuth, requireCsrf, requireRole, clientIp, userAgent } from "../middleware/auth.js";
 import { runJobProgressSync, type SyncMode } from "../jobs/syncJobProgress.js";
 import { JobProgressClient } from "../integrations/jobprogress/client.js";
-import { runSyncExclusive, enqueueBackfill, syncStatus } from "../jobs/scheduler.js";
+import { runSyncExclusive, enqueueBackfill, syncStatus, lastQueueRun, DEBRIEF_REMINDER_QUEUE } from "../jobs/scheduler.js";
 import { scanContractPrices, approveCandidate, rejectCandidate } from "../jobs/contractPrices.js";
 import { runCustomerSync } from "../jobs/syncCustomers.js";
+import { runDebriefReminders, sendTestReminder, reminderStatus } from "../reminders/debriefReminders.js";
+import { EMAIL_RE } from "../reminders/mailer.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -100,6 +102,30 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
 
         case "getSyncStatus":
           return reply.send(await syncStatus());
+
+        // ── Debrief reminder emails ──
+        case "getReminderStatus":
+          return reply.send(await reminderStatus(await lastQueueRun(DEBRIEF_REMINDER_QUEUE)));
+
+        case "sendTestReminderEmail": {
+          const to = String(body["to"] ?? "").trim();
+          if (!EMAIL_RE.test(to)) return reply.code(400).send({ error: "Enter a valid email address to send the test to." });
+          console.info(`[functions] sendTestReminderEmail to=${to} by=${actor} ip=${ctx.ip}`);
+          try {
+            return reply.send(await sendTestReminder(to, actor));
+          } catch (err) {
+            const e = err as Error & { statusCode?: number };
+            return reply.code(e.statusCode ?? 502).send({ error: "The mail server did not accept the message.", detail: e.message });
+          }
+        }
+
+        case "runDebriefReminders": {
+          // dry_run lists what WOULD go out right now; a real run sends
+          // (outside quiet hours) exactly as the scheduler would.
+          const dryRun = body["dry_run"] !== false;
+          console.info(`[functions] runDebriefReminders dry_run=${dryRun} by=${actor} ip=${ctx.ip}`);
+          return reply.send(await runDebriefReminders({ dryRun, startedBy: dryRun ? actor : `manual:${actor}` }));
+        }
 
         case "syncCustomers": {
           if (!process.env.LEAP_API_TOKEN) {
