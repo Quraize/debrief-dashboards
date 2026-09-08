@@ -50,22 +50,25 @@ export function indexJpAppointments(jpRows) {
 
 /**
  * Every way a debrief can point at an appointment, indexed once:
- *   - Lead ID + date (the KPI engine's rule)
  *   - the appointment row's id (set when the form matched at submit time)
  *   - the JobProgress appointment id (the form's own duplicate check)
- * The queue, the reminder job and the sync's reconcile all use the same three,
- * so an appointment the form calls "already debriefed" never stays "missing".
+ *   - Lead ID + date (the KPI engine's rule) — ONLY for debriefs that carry
+ *     neither of the two exact links (spreadsheet imports, hand-typed forms).
+ * A lead often has several appointments (first visit, reset demo, sometimes
+ * two on one day). A debrief pinned to one visit must not cover its siblings,
+ * so the exact links win and the per-day rule is the fallback.
+ * The queue, the reminder job and the sync's reconcile all apply the same rule.
  */
 export function debriefIndex(debriefs) {
   const byLeadDate = new Set();
   const byAppointmentId = new Set();
   const byRecordId = new Set();
   for (const d of debriefs || []) {
-    const k = crmKey(d.crm_lead_id, d.appointment_date);
-    if (k) byLeadDate.add(k);
-    if (d.appointment_id) byAppointmentId.add(String(d.appointment_id));
     const rid = String(d.appointment_record_id ?? "").trim().toLowerCase();
+    const linked = !!d.appointment_id || !!rid;
+    if (d.appointment_id) byAppointmentId.add(String(d.appointment_id));
     if (rid) byRecordId.add(rid);
+    if (!linked) { const k = crmKey(d.crm_lead_id, d.appointment_date); if (k) byLeadDate.add(k); }
   }
   return { byLeadDate, byAppointmentId, byRecordId };
 }

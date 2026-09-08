@@ -414,16 +414,18 @@ async function reconcileDebriefStatus(): Promise<number> {
          FROM debrief d
         WHERE a.debrief_status IN ('Missing', 'Unmatched')
           AND (
-            -- Lead ID + date (the KPI engine's rule) …
-            (a.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
-              AND lower(trim(d.crm_lead_id)) = lower(trim(a.crm_lead_id))
-              AND d.appointment_date = a.appointment_date)
-            -- … or the debrief points straight at this appointment row …
-            OR d.appointment_id = a.id
-            -- … or at the same JobProgress appointment id (the form's own duplicate check).
+            -- The debrief points straight at this appointment row …
+            d.appointment_id = a.id
+            -- … or at the same JobProgress appointment id (the form's own duplicate check) …
             OR (a.appointment_record_id IS NOT NULL AND a.appointment_record_id <> ''
               AND d.appointment_record_id IS NOT NULL
               AND lower(trim(d.appointment_record_id)) = lower(trim(a.appointment_record_id)))
+            -- … or, for a debrief with NEITHER exact link (imports), Lead ID + date.
+            -- A lead has several visits; a debrief pinned to one must not cover the rest.
+            OR (d.appointment_id IS NULL AND coalesce(d.appointment_record_id, '') = ''
+              AND a.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
+              AND lower(trim(d.crm_lead_id)) = lower(trim(a.crm_lead_id))
+              AND d.appointment_date = a.appointment_date)
           )`);
     return rowCount ?? 0;
   }, "sync:reconcile-debrief-status", { quiet: true });

@@ -131,25 +131,32 @@ describe.skipIf(!reachable)("runDebriefReminders", () => {
        VALUES ('t','x','2026-01-01','Jason','Ashley','Demo Completed — Sale','debriefed-by-record-id','t')`);
     // Result form filled (Demo No Sale) but no debrief → still owed.
     await jp("result-no-debrief", { has_result: true, result_option_name: "Demo No Sale" });
+    // Same lead, same day, two visits: the 4 PM one is debriefed (pinned by JP id); the 10 AM one is not.
+    await jp("twin-am", { crm_lead_id: "L-twin", starts_at: hoursAgo(6) });
+    await jp("twin-pm", { crm_lead_id: "L-twin", starts_at: hoursAgo(3) });
+    await db.owner.query(
+      `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_outcome, crm_lead_id, appointment_record_id, created_by)
+       VALUES ('t','x',$1,'Jason','Ashley','Demo Completed — Sale','L-twin','twin-pm','t')`, [hoursAgo(3).toISOString().slice(0, 10)]);
 
     const due = await findDueReminders(NOW, { delayHours: 2, lookbackDays: 14 });
-    expect(due.map((d) => d.jp_appointment_id).sort()).toEqual(["due", "no-email-rep", "result-no-debrief", "unknown-rep"]);
+    expect(due.map((d) => d.jp_appointment_id).sort()).toEqual(["due", "no-email-rep", "result-no-debrief", "twin-am", "unknown-rep"]);
 
     const mailer = fakeMailer();
     const r = await runDebriefReminders({ now: NOW, mailer, startedBy: "test" });
-    expect(r).toMatchObject({ status: "completed", due: 4, sent: 2, failed: 0, noRecipient: 2, unmatchedReps: ["Pema Sherpa", "Somebody New"] });
-    expect(mailer.sent.map((m) => m.to)).toEqual(["jason@example.com", "jason@example.com"]);
-    expect(mailer.sent[0]!.subject).toContain("Customer due");
+    expect(r).toMatchObject({ status: "completed", due: 5, sent: 3, failed: 0, noRecipient: 2, unmatchedReps: ["Pema Sherpa", "Somebody New"] });
+    expect(mailer.sent.map((m) => m.to)).toEqual(["jason@example.com", "jason@example.com", "jason@example.com"]);
+    expect(mailer.sent.map((m) => m.subject).some((s) => s.includes("Customer due"))).toBe(true);
 
     // Second run: nothing new to send, the two without recipients are still reported.
     const again = await runDebriefReminders({ now: NOW, mailer, startedBy: "test" });
     expect(again).toMatchObject({ due: 2, sent: 0, noRecipient: 2 });
-    expect(mailer.sent).toHaveLength(2);
+    expect(mailer.sent).toHaveLength(3);
 
     const { rows } = await db.owner.query(`SELECT jp_appointment_id, status, recipient_email, sent_by FROM debrief_reminder ORDER BY 1`);
     expect(rows).toEqual([
       { jp_appointment_id: "due", status: "sent", recipient_email: "jason@example.com", sent_by: "test" },
       { jp_appointment_id: "result-no-debrief", status: "sent", recipient_email: "jason@example.com", sent_by: "test" },
+      { jp_appointment_id: "twin-am", status: "sent", recipient_email: "jason@example.com", sent_by: "test" },
     ]);
   });
 

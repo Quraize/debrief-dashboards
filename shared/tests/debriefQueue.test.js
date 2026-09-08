@@ -113,6 +113,18 @@ describe("debriefIndex / hasDebriefFor", () => {
     expect(hasDebriefFor({ id: "row-7", crm_lead_id: "J-999", appointment_date: "2026-09-05" }, index)).toBe(true);
     expect(hasDebriefFor({ id: "row-8", appointment_record_id: "31937935", crm_lead_id: "J-999", appointment_date: "2026-09-05" }, index)).toBe(true);
   });
+  it("does not let a debrief pinned to one visit cover a same-day sibling", () => {
+    // 10 AM visit (row-1, JP 111) and a 4 PM rebook (row-2, JP 222), same lead, same day.
+    const idx = debriefIndex([{ crm_lead_id: "J-100", appointment_date: "2026-09-03", appointment_id: "row-2", appointment_record_id: "222" }]);
+    const morning = { id: "row-1", appointment_record_id: "111", crm_lead_id: "J-100", appointment_date: "2026-09-03" };
+    const afternoon = { id: "row-2", appointment_record_id: "222", crm_lead_id: "J-100", appointment_date: "2026-09-03" };
+    expect(hasDebriefFor(afternoon, idx)).toBe(true);
+    expect(hasDebriefFor(morning, idx)).toBe(false);
+    // An unlinked import for the same lead and day covers both — the best it can do.
+    const loose = debriefIndex([{ crm_lead_id: "J-100", appointment_date: "2026-09-03" }]);
+    expect(hasDebriefFor(morning, loose)).toBe(true);
+    expect(hasDebriefFor(afternoon, loose)).toBe(true);
+  });
   it("otherwise trusts only a Submitted / Approved status", () => {
     expect(hasDebriefFor({ id: "row-9", crm_lead_id: "J-999", appointment_date: "2026-09-05", debrief_status: "Missing" }, index)).toBe(false);
     expect(hasDebriefFor({ id: "row-9", debrief_status: "Submitted" }, null)).toBe(true);
