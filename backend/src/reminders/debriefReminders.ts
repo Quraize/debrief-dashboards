@@ -36,6 +36,9 @@ export function reminderSettings(env: NodeJS.ProcessEnv = process.env) {
     quietStartHour: Number(env.DEBRIEF_REMINDER_QUIET_START || 21),
     quietEndHour: Number(env.DEBRIEF_REMINDER_QUIET_END || 7),
     perRunLimit: Number(env.DEBRIEF_REMINDER_PER_RUN_LIMIT || DEFAULT_PER_RUN_LIMIT),
+    // Appointments that START before this office-clock date are never reminded —
+    // the line between "the office is catching up by hand" and "reps own it".
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(env.DEBRIEF_REMINDER_START_DATE ?? "") ? env.DEBRIEF_REMINDER_START_DATE! : null,
     baseUrl: (env.APP_BASE_URL || "https://debrief.alliedroofingusa.com").replace(/\/+$/, ""),
     supportContact: env.DEBRIEF_REMINDER_SUPPORT_CONTACT || "IT / Automation Support",
     cron: env.DEBRIEF_REMINDER_CRON || REMINDER_DEFAULT_CRON,
@@ -80,7 +83,7 @@ export interface DueReminder {
 }
 
 /** Appointments that owe a reminder right now, with their recipient (if any). */
-export async function findDueReminders(now: Date, opts: { delayHours: number; lookbackDays: number }): Promise<DueReminder[]> {
+export async function findDueReminders(now: Date, opts: { delayHours: number; lookbackDays: number; startDate?: string | null }): Promise<DueReminder[]> {
   return withServiceRole(async (c) => {
     const { rows } = await c.query<DueReminder>(
       `SELECT ja.jp_appointment_id, ja.starts_at, ja.customer_name, ja.location, ja.title, ja.sales_rep,
@@ -100,6 +103,7 @@ export async function findDueReminders(now: Date, opts: { delayHours: number; lo
           AND ja.starts_at IS NOT NULL
           AND ja.starts_at <= $1::timestamptz - make_interval(hours => $2)
           AND ja.starts_at >= $1::timestamptz - make_interval(days => $3)
+          AND ($5::date IS NULL OR ja.appointment_date >= $5::date)
           AND coalesce(ja.sales_rep, '') <> ''
           AND NOT (ja.has_result AND coalesce(ja.result_option_name, '') ~* 'no\\s*see|no\\s*show|cancel')
           AND coalesce(ja.title, '') !~* 'cancel'
@@ -118,7 +122,7 @@ export async function findDueReminders(now: Date, opts: { delayHours: number; lo
           AND NOT EXISTS (SELECT 1 FROM debrief_reminder r WHERE r.jp_appointment_id = ja.jp_appointment_id AND r.status = 'sent')
           AND (SELECT count(*) FROM debrief_reminder r WHERE r.jp_appointment_id = ja.jp_appointment_id AND r.status = 'failed') < $4
         ORDER BY ja.starts_at`,
-      [now, opts.delayHours, opts.lookbackDays, MAX_ATTEMPTS]);
+      [now, opts.delayHours, opts.lookbackDays, MAX_ATTEMPTS, opts.startDate ?? null]);
     return rows;
   }, "reminders:find-due", { quiet: true });
 }
@@ -268,7 +272,7 @@ export async function sendTestReminder(to: string, sentBy: string, mailer: Maile
 export interface ReminderStatus {
   enabled: boolean; cron: string; reason: string;
   mail: { configured: boolean; reason: string; host: string; port: number; user: string; from: string };
-  settings: { delayHours: number; lookbackDays: number; quietStartHour: number; quietEndHour: number; perRunLimit: number; baseUrl: string; supportContact: string };
+  settings: { delayHours: number; lookbackDays: number; quietStartHour: number; quietEndHour: number; perRunLimit: number; baseUrl: string; supportContact: string; startDate: string | null };
   quietHoursNow: boolean;
   dueNow: number;
   dueWithoutRecipient: number;
@@ -302,7 +306,7 @@ export async function reminderStatus(lastRun: ReminderStatus["lastRun"], env = p
   return {
     ...reminderSchedule(env),
     mail: { configured: mail.configured, reason: mail.reason, host: mail.host, port: mail.port, user: mail.user, from: mail.from },
-    settings: { delayHours: s.delayHours, lookbackDays: s.lookbackDays, quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, perRunLimit: s.perRunLimit, baseUrl: s.baseUrl, supportContact: s.supportContact },
+    settings: { delayHours: s.delayHours, lookbackDays: s.lookbackDays, quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, perRunLimit: s.perRunLimit, baseUrl: s.baseUrl, supportContact: s.supportContact, startDate: s.startDate },
     quietHoursNow: isQuietHours(now, s.quietStartHour, s.quietEndHour),
     dueNow: due.length,
     dueWithoutRecipient: due.filter((d) => !(d.recipient_active && d.recipient_email)).length,

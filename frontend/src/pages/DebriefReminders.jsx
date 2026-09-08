@@ -139,7 +139,11 @@ export default function DebriefReminders() {
                 {s.dueWithoutRecipient > 0 && <span className="text-amber-700"> ({s.dueWithoutRecipient} without a recipient)</span>}
               </div>
               <div><span className="font-semibold">Last 7 days:</span> {s.last7Days.sent} sent{s.last7Days.failed ? <span className="text-red-600">, {s.last7Days.failed} failed</span> : ""}</div>
-              <div className="text-xs text-muted-foreground">Rule: {s.settings.delayHours}h after start · looks back {s.settings.lookbackDays} days · max {s.settings.perRunLimit} per run · links to {s.settings.baseUrl}</div>
+              <div className="text-xs text-muted-foreground">
+                Rule: {s.settings.delayHours}h after start · looks back {s.settings.lookbackDays} days
+                {s.settings.startDate ? <> · <span className="font-semibold text-foreground">appointments from {usDate(s.settings.startDate)} onward only</span></> : ""}
+                {" "}· max {s.settings.perRunLimit} per run · links to {s.settings.baseUrl}
+              </div>
             </div>
             {!s.enabled && s.mail.configured && (
               <p className="text-xs text-muted-foreground">To turn the schedule on, set <code>DEBRIEF_REMINDERS_ENABLED=true</code> in the server's env file and release. Until then you can still send a test and run manually below.</p>

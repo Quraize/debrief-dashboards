@@ -196,6 +196,18 @@ describe.skipIf(!reachable)("runDebriefReminders", () => {
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM debrief_reminder`)).rows[0]!.n).toBe(0);
   });
 
+  it("never reminds about appointments before the start date", async () => {
+    await recipient("Jason Malarchak", "jason@example.com");
+    await jp("yesterday", { starts_at: hoursAgo(30) });   // 2026-09-07
+    await jp("today", { starts_at: hoursAgo(3) });        // 2026-09-08
+    const mailer = fakeMailer();
+    const r = await runDebriefReminders({ now: NOW, mailer, env: { DEBRIEF_REMINDER_START_DATE: "2026-09-08" } });
+    expect(r).toMatchObject({ due: 1, sent: 1 });
+    expect(r.items[0]!.jp_appointment_id).toBe("today");
+    // A malformed value is ignored rather than silently blocking everything.
+    expect(await runDebriefReminders({ now: NOW, mailer, dryRun: true, env: { DEBRIEF_REMINDER_START_DATE: "tomorrow" } })).toMatchObject({ due: 1 });
+  });
+
   it("caps a run and defers the rest to the next one", async () => {
     await recipient("Jason Malarchak", "jason@example.com");
     for (let i = 0; i < 4; i++) await jp(`a${i}`, { starts_at: hoursAgo(3 + i) });
