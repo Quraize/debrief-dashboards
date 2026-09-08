@@ -225,6 +225,7 @@ export const jpAppointment = pgTable("jp_appointment", {
   title: text("title"),
   appointmentDate: date("appointment_date"),
   appointmentTime: text("appointment_time"),
+  startsAt: timestamp("starts_at", { withTimezone: true }),
   customerName: text("customer_name"),
   location: text("location"),
   crmLeadId: text("crm_lead_id"),

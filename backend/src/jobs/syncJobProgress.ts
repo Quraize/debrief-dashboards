@@ -31,6 +31,7 @@
  */
 import { withServiceRole } from "../db/client.js";
 import { JobProgressClient, unwrap, unwrapMany, hasResult } from "../integrations/jobprogress/client.js";
+import { apiTimestampToOffice } from "../integrations/jobprogress/time.js";
 import { isNonSalesTitle } from "@allied/shared/nonSalesActivity";
 import { parseTwoLegAnswer, findTwoLegField, resultGroupName } from "@allied/shared/jpResult";
 
@@ -197,7 +198,8 @@ export function mapAppointment(
   const user = unwrap<Record<string, unknown>>(apiAppointment["user"]) ?? {};
   const createdBy = unwrap<Record<string, unknown>>(apiAppointment["created_by"]) ?? {};
 
-  const startsAt = String(apiAppointment["start_date_time"] ?? "").replace("T", " ");
+  // The API's start is UTC; the office books and reads appointments in Eastern.
+  const startsAt = apiTimestampToOffice(apiAppointment["start_date_time"]);
   const title = String(apiAppointment["title"] ?? "");
 
   const name = (obj: Record<string, unknown>): string => {
@@ -219,8 +221,8 @@ export function mapAppointment(
     email: (customer["email"] as string) ?? null,
     address: (apiAppointment["location"] as string) ?? (customer["address"] as string) ?? null,
     city: (customer["city"] as string) ?? null,
-    appointment_date: startsAt.slice(0, 10) || null,
-    appointment_time: startsAt.slice(11, 16) || null,
+    appointment_date: startsAt?.date ?? null,
+    appointment_time: startsAt?.time ?? null,
     original_sales_rep: name(user) || null,
     original_appointment_setter: name(createdBy) || null,
     product: division || null,
@@ -258,7 +260,7 @@ export function mapJpAppointment(
   const createdBy = unwrap<Record<string, unknown>>(apiAppointment["created_by"]) ?? {};
   const resultOption = unwrap<Record<string, unknown>>(apiAppointment["result_option"]);
 
-  const startsAt = String(apiAppointment["start_date_time"] ?? "").replace("T", " ");
+  const startsAt = apiTimestampToOffice(apiAppointment["start_date_time"]);
   const title = String(apiAppointment["title"] ?? "");
 
   const name = (obj: Record<string, unknown>): string => {
@@ -282,8 +284,10 @@ export function mapJpAppointment(
   return {
     jp_appointment_id: String(apiAppointment["id"] ?? ""),
     title: title || null,
-    appointment_date: startsAt.slice(0, 10) || null,
-    appointment_time: startsAt.slice(11, 16) || null,
+    appointment_date: startsAt?.date ?? null,
+    appointment_time: startsAt?.time ?? null,
+    // The exact instant, for anything that measures elapsed time (reminders).
+    starts_at: startsAt?.at ?? null,
     customer_name: (job?.["name"] as string) || name(customer) || null,
     location: (apiAppointment["location"] as string) ?? null,
     crm_lead_id: job?.["number"] != null ? String(job["number"]) : null,

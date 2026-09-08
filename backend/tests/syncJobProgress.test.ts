@@ -109,10 +109,15 @@ describe.skipIf(!reachable)("mapAppointment", () => {
     expect(row.original_appointment_setter).toBe("Ashley Pasquale");
   });
 
-  it("splits the start timestamp into a date and a time", () => {
+  it("converts the UTC start into an office-clock date and time", () => {
+    // 09:30 UTC in July is 05:30 Eastern. The old code stored 09:30.
     const row = mapAppointment(appointment(1), divisions);
     expect(row.appointment_date).toBe("2026-07-15");
-    expect(row.appointment_time).toBe("09:30");
+    expect(row.appointment_time).toBe("05:30");
+    // An evening estimate stored by the API as the next UTC day stays on its real day.
+    const late = mapAppointment(appointment(1, { start_date_time: "2026-07-16T00:30:00" }), divisions);
+    expect(late.appointment_date).toBe("2026-07-15");
+    expect(late.appointment_time).toBe("20:30");
   });
 
   it("resolves the division name from its id", () => {
