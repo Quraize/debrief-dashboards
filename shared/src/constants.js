@@ -135,6 +135,10 @@ export const STAFF_ROLES = ROLES.filter((r) => r !== "production");
 export const isProductionOnly = (role) => role === "production";
 
 export const DATE_FILTERS = ["Today","Yesterday","This Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
+// The Open Debrief Queue is a to-do list, so its default is everything still open;
+// the short ranges are for working a day or a week at a time. Weeks start Monday.
+export const ALL_TIME_FILTER = "All Time";
+export const QUEUE_DATE_FILTERS = [ALL_TIME_FILTER,"Today","Yesterday","Last 7 Days","This Week","Last Week","This Month","Last Month","Custom Range"];
 
 // Admin Settings list manager categories
 export const LIST_CATEGORIES = [
@@ -197,6 +201,8 @@ export function inDateRange(dateStr, filter, customStart, customEnd) {
     case "Today": return d.getTime() >= startToday && d.getTime() < endToday;
     case "Yesterday": { const s = startToday - 86400000; return d.getTime() >= s && d.getTime() < startToday; }
     case "This Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000; return d.getTime() >= ws && d.getTime() < ws + 7 * 86400000; }
+    case "Last Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000; return d.getTime() >= ws - 7 * 86400000 && d.getTime() < ws; }
+    case "Last 7 Days": return d.getTime() >= startToday - 6 * 86400000 && d.getTime() < endToday;
     case "This Month": return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
     case "Last Month": { const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1); return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth(); }
     case "This Quarter": { const qs = new Date(today.getFullYear(), qIdx * 3, 1).getTime(); return d.getTime() >= qs && d.getTime() < endToday; }
@@ -227,6 +233,13 @@ export function getDateRangeBounds(filter, customStart, customEnd) {
     case "Today": return { start: fmt(today), end: fmt(today) };
     case "Yesterday": { const y = new Date(today); y.setDate(today.getDate() - 1); return { start: fmt(y), end: fmt(y) }; }
     case "This Week": { const day = (today.getDay() + 6) % 7; const ws = new Date(today); ws.setDate(today.getDate() - day); return { start: fmt(ws), end: fmt(today) }; }
+    case "Last Week": {
+      const day = (today.getDay() + 6) % 7;
+      const ws = new Date(today); ws.setDate(today.getDate() - day - 7);
+      const we = new Date(ws); we.setDate(ws.getDate() + 6);
+      return { start: fmt(ws), end: fmt(we) };
+    }
+    case "Last 7 Days": { const s = new Date(today); s.setDate(today.getDate() - 6); return { start: fmt(s), end: fmt(today) }; }
     case "This Month": return { start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), end: fmt(today) };
     case "Last Month": { const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1); const lme = new Date(today.getFullYear(), today.getMonth(), 0); return { start: fmt(lm), end: fmt(lme) }; }
     case "This Quarter": return { start: fmt(new Date(today.getFullYear(), qIdx * 3, 1)), end: fmt(today) };

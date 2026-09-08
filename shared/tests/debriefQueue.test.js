@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   crmKey, indexJpAppointments, indexById, jobProgressJobUrl, crmStatus, enrichQueueItem,
-  daysSince, queueDisposition, localDay, EXCLUDED_CRM_STATUSES,
+  daysSince, queueDisposition, localDay, EXCLUDED_CRM_STATUSES, isImportant, OVERDUE_DAYS,
 } from "../src/debriefQueue.js";
 
 const NOW = new Date("2026-09-08T10:00:00");
@@ -97,6 +97,20 @@ describe("daysSince / localDay", () => {
     expect(daysSince("2026-09-01T00:00:00", NOW)).toBe(7);
     expect(daysSince("2026-09-09", NOW)).toBeNull();
     expect(daysSince(null, NOW)).toBeNull();
+  });
+});
+
+describe("isImportant", () => {
+  it("flags missing debriefs behind a CRM sale or a week or more old", () => {
+    expect(isImportant({ disposition: "missing", crm: { isSale: true }, daysSince: 0 })).toBe(true);
+    expect(isImportant({ disposition: "missing", crm: { isSale: false }, daysSince: OVERDUE_DAYS })).toBe(true);
+    expect(isImportant({ disposition: "missing", crm: null, daysSince: OVERDUE_DAYS - 1 })).toBe(false);
+    expect(isImportant({ disposition: "missing", crm: null, daysSince: null })).toBe(false);
+  });
+  it("never flags anything that is not a missing debrief", () => {
+    expect(isImportant({ disposition: "excluded", crm: { isSale: true }, daysSince: 30 })).toBe(false);
+    expect(isImportant({ disposition: "debriefed", crm: { isSale: true }, daysSince: 30 })).toBe(false);
+    expect(isImportant(null)).toBe(false);
   });
 });
 

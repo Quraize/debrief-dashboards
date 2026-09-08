@@ -2,16 +2,18 @@ import { DATE_FILTERS, getDateRangeBounds } from "@allied/shared/constants";
 
 /**
  * @param {{ filter: string, setFilter: Function, customStart: string, setCustomStart: Function,
- *           customEnd: string, setCustomEnd: Function, title?: string }} props
+ *           customEnd: string, setCustomEnd: Function, title?: string, filters?: string[],
+ *           className?: string }} props
+ * `filters` defaults to the dashboards' list; pages with their own ranges pass theirs.
  */
-export default function DateRangeFilter({ filter, setFilter, customStart, setCustomStart, customEnd, setCustomEnd, title }) {
+export default function DateRangeFilter({ filter, setFilter, customStart, setCustomStart, customEnd, setCustomEnd, title, filters = DATE_FILTERS, className = "mb-4" }) {
   const bounds = getDateRangeBounds(filter, customStart, customEnd);
   return (
-    <div className="bg-white rounded-xl border border-border p-3 mb-4 shadow-sm">
+    <div className={`bg-white rounded-xl border border-border p-3 shadow-sm ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
         {title && <span className="font-heading font-bold text-sm mr-2">{title}</span>}
         <div className="flex flex-wrap gap-1.5 flex-1">
-          {DATE_FILTERS.map((f) => (
+          {filters.map((f) => (
             <button key={f} onClick={() => setFilter(f)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                 filter === f ? "bg-accent text-white" : "bg-secondary text-secondary-foreground hover:bg-secondary/70"

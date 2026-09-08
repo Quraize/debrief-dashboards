@@ -2,26 +2,35 @@ import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
-import { ClipboardList, Loader2, Filter, Plus, Send, Phone, Mail, ExternalLink, Database } from "lucide-react";
-import { ESTIMATING_IN_PROGRESS_OUTCOME, DEMO_NO_SALE_OUTCOME } from "@allied/shared/constants";
+import { ClipboardList, Loader2, Filter, Plus, Send, Phone, Mail, ExternalLink, Database, AlertTriangle } from "lucide-react";
+import { ESTIMATING_IN_PROGRESS_OUTCOME, DEMO_NO_SALE_OUTCOME, QUEUE_DATE_FILTERS, ALL_TIME_FILTER } from "@allied/shared/constants";
+import { filterByDate } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { isInsuranceAppointment } from "@allied/shared/insurance";
 import {
-  crmKey, indexJpAppointments, indexById, enrichQueueItem, queueDisposition, localDay, CRM_STATUS_LABELS,
+  crmKey, indexJpAppointments, indexById, enrichQueueItem, queueDisposition, localDay, CRM_STATUS_LABELS, isImportant, OVERDUE_DAYS,
 } from "@allied/shared/debriefQueue";
 import { useJpMirror, useJpCustomers } from "@/components/JpCrmSection";
+import DateRangeFilter from "@/components/DateRangeFilter";
 
-const FILTERS = ["Today","Yesterday","This Week","Missing Debrief","Excluded by CRM","Needs Review","Estimates in Progress","By Sales Rep","By Appointment Setter"];
+// What to list. Combines with the date range and the people filters below.
+const VIEWS = ["Missing Debrief","Excluded by CRM","Needs Review","All Appointments","Estimates in Progress"];
 
-const FILTER_HELP = {
+const VIEW_HELP = {
   "Missing Debrief": "Sales appointments that have happened and have no debrief yet. Appointments the CRM marked No See, cancelled, or that never got a CRM result are not counted — see Excluded by CRM.",
   "Excluded by CRM": "Past appointments without a debrief that the CRM says were not run: No See, cancelled, or no result form after 14 days. Nothing to debrief, listed so nothing disappears silently.",
   "Needs Review": "Appointments a manager flagged for a second look.",
+  "All Appointments": "Every sales appointment in the date range, debriefed or not, so a manager can review a day or a week.",
   "Estimates in Progress": "Debriefs left as Estimating in Progress. Mark the estimate sent when it goes out.",
 };
+const IMPORTANT_HELP = `Only the missing debriefs that matter most: the CRM recorded a Sale with no debrief behind it, or the appointment is ${OVERDUE_DAYS}+ days old and still not debriefed.`;
 
 export default function OpenDebriefQueue() {
-  const [filter, setFilter] = useState("Missing Debrief");
+  const [view, setView] = useState("Missing Debrief");
+  const [range, setRange] = useState(ALL_TIME_FILTER);
+  const [cs, setCs] = useState("");
+  const [ce, setCe] = useState("");
+  const [importantOnly, setImportantOnly] = useState(false);
   const qc = useQueryClient();
   const [markingId, setMarkingId] = useState(null);
 
@@ -52,8 +61,6 @@ export default function OpenDebriefQueue() {
 
   const now = new Date();
   const todayStr = localDay(now);
-  const yesterdayStr = localDay(new Date(now.getTime() - 86400000));
-  const weekStart = new Date(now); weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
 
   // Debriefs that exist, keyed the way the KPI engine matches them (Lead ID +
   // date). The appointment's own debrief_status can lag — imported debriefs
@@ -74,36 +81,44 @@ export default function OpenDebriefQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [salesAppts, crmCtx, debriefKeys, todayStr]);
 
-  const counts = useMemo(() => ({
-    "Missing Debrief": items.filter((i) => i.disposition === "missing").length,
-    "Excluded by CRM": items.filter((i) => i.disposition === "excluded").length,
-    "Needs Review": items.filter((i) => i.a.debrief_status === "Needs Review").length,
-  }), [items]);
+  // Date range and people filters apply to every view; the view picks the status.
+  const scoped = useMemo(() => {
+    const dated = items.map((i) => ({ ...i, appointment_date: i.a.appointment_date }));
+    return filterByDate(dated, "appointment_date", range, cs, ce).filter(({ a }) =>
+      (!rep || a.original_sales_rep === rep || a.rehash_sales_rep === rep) &&
+      (!setter || a.original_appointment_setter === setter || a.rehash_appointment_setter === setter));
+  }, [items, range, cs, ce, rep, setter]);
+
+  const inView = (item, v) => {
+    switch (v) {
+      case "Missing Debrief": return item.disposition === "missing";
+      case "Excluded by CRM": return item.disposition === "excluded";
+      case "Needs Review": return item.a.debrief_status === "Needs Review";
+      case "All Appointments": return true;
+      default: return false;
+    }
+  };
+
+  const counts = useMemo(() => {
+    const c = {};
+    for (const v of VIEWS) if (v !== "Estimates in Progress") c[v] = scoped.filter((i) => inView(i, v)).length;
+    c.important = scoped.filter(isImportant).length;
+    return c;
+  }, [scoped]);
 
   const queue = useMemo(() => {
-    return items.filter(({ a, disposition }) => {
-      const ad = a.appointment_date;
-      switch (filter) {
-        case "Today": return ad === todayStr;
-        case "Yesterday": return ad === yesterdayStr;
-        case "This Week": return ad && new Date(ad + "T00:00:00") >= weekStart;
-        case "Missing Debrief": return disposition === "missing";
-        case "Excluded by CRM": return disposition === "excluded";
-        case "Needs Review": return a.debrief_status === "Needs Review";
-        case "Estimates in Progress": return false;
-        case "By Sales Rep": return rep && (a.original_sales_rep === rep || a.rehash_sales_rep === rep);
-        case "By Appointment Setter": return setter && (a.original_appointment_setter === setter || a.rehash_appointment_setter === setter);
-        default: return true;
-      }
-    }).sort((x, y) => (y.a.appointment_date || "").localeCompare(x.a.appointment_date || ""));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, filter, rep, setter, todayStr, yesterdayStr, weekStart]);
+    return scoped
+      .filter((i) => inView(i, view) && (!importantOnly || isImportant(i)))
+      .sort((x, y) => (y.a.appointment_date || "").localeCompare(x.a.appointment_date || ""));
+  }, [scoped, view, importantOnly]);
 
   const estimatesInProgress = useMemo(() => {
-    return debriefs
-      .filter((d) => d.appointment_outcome === ESTIMATING_IN_PROGRESS_OUTCOME)
+    const rows = debriefs.filter((d) => d.appointment_outcome === ESTIMATING_IN_PROGRESS_OUTCOME);
+    return filterByDate(rows, "appointment_date", range, cs, ce)
+      .filter((d) => !rep || d.sales_rep === rep)
+      .filter((d) => !setter || d.appointment_setter === setter)
       .sort((a, b) => (b.appointment_date || "").localeCompare(a.appointment_date || ""));
-  }, [debriefs]);
+  }, [debriefs, range, cs, ce, rep, setter]);
 
   async function markEstimateSent(debrief) {
     setMarkingId(debrief.id);
@@ -127,7 +142,7 @@ export default function OpenDebriefQueue() {
     return diff >= 0 ? `${diff} day${diff === 1 ? "" : "s"}` : "—";
   }
 
-  const showEstimates = filter === "Estimates in Progress";
+  const showEstimates = view === "Estimates in Progress";
   // Wait for the CRM mirror too: without it a No See would flash into the
   // Missing view and out again as the join arrives.
   const loading = isLoading || jpLoading;
@@ -145,38 +160,57 @@ export default function OpenDebriefQueue() {
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
-        {FILTERS.map((f) => (
-          <button key={f} onClick={() => setFilter(f)} title={FILTER_HELP[f]}
+        {VIEWS.map((v) => (
+          <button key={v} onClick={() => setView(v)} title={VIEW_HELP[v]}
             className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              filter === f ? "bg-accent text-white" : "bg-white border border-border text-secondary-foreground"
+              view === v ? "bg-accent text-white" : "bg-white border border-border text-secondary-foreground"
             }`}>
-            {f}
-            {counts[f] != null && !loading && (
-              <span className={`text-[10px] px-1.5 rounded-full ${filter === f ? "bg-white/25" : "bg-secondary text-muted-foreground"}`}>{counts[f]}</span>
+            {v}
+            {counts[v] != null && !loading && (
+              <span className={`text-[10px] px-1.5 rounded-full ${view === v ? "bg-white/25" : "bg-secondary text-muted-foreground"}`}>{counts[v]}</span>
             )}
           </button>
         ))}
+        {!showEstimates && (
+          <button onClick={() => setImportantOnly((v) => !v)} title={IMPORTANT_HELP}
+            className={`ml-auto px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              importantOnly ? "bg-red-600 text-white" : "bg-white border border-red-200 text-red-700"
+            }`}>
+            <AlertTriangle className="w-3.5 h-3.5" /> Important only
+            {!loading && <span className={`text-[10px] px-1.5 rounded-full ${importantOnly ? "bg-white/25" : "bg-red-50"}`}>{counts.important}</span>}
+          </button>
+        )}
       </div>
 
-      {FILTER_HELP[filter] && (
-        <p className="text-xs text-muted-foreground -mt-2">{FILTER_HELP[filter]}</p>
-      )}
+      <p className="text-xs text-muted-foreground -mt-2">
+        {VIEW_HELP[view]}{importantOnly && !showEstimates ? ` ${IMPORTANT_HELP}` : ""}
+      </p>
+
+      <DateRangeFilter filter={range} setFilter={setRange} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe}
+        filters={QUEUE_DATE_FILTERS} className="" />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select className="border border-input rounded-lg px-3 py-2 text-sm font-medium bg-white" value={rep} onChange={(e) => setRep(e.target.value)}>
+          <option value="">All sales reps</option>
+          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select className="border border-input rounded-lg px-3 py-2 text-sm font-medium bg-white" value={setter} onChange={(e) => setSetter(e.target.value)}>
+          <option value="">All setters</option>
+          {setters.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        {(rep || setter || range !== ALL_TIME_FILTER || importantOnly) && (
+          <button onClick={() => { setRep(""); setSetter(""); setRange(ALL_TIME_FILTER); setCs(""); setCe(""); setImportantOnly(false); }}
+            className="text-xs font-semibold text-muted-foreground hover:text-foreground underline">
+            Clear filters
+          </button>
+        )}
+      </div>
 
       {crmMissing && !showEstimates && (
         <div className="text-xs text-muted-foreground bg-secondary/50 border border-border rounded-lg px-3 py-2 flex items-center gap-2">
           <Database className="w-3.5 h-3.5 shrink-0" />
           No JobProgress data synced yet, so cards show debrief-app fields only and the CRM rule cannot exclude No Sees or cancellations.
         </div>
-      )}
-
-      {(filter === "By Sales Rep" || filter === "By Appointment Setter") && (
-        <select
-          className="border border-input rounded-lg px-3 py-2 text-sm font-medium bg-white"
-          value={filter === "By Sales Rep" ? rep : setter}
-          onChange={(e) => filter === "By Sales Rep" ? setRep(e.target.value) : setSetter(e.target.value)}>
-          <option value="">Select…</option>
-          {(filter === "By Sales Rep" ? reps : setters).map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
       )}
 
       {showEstimates ? (
@@ -224,7 +258,7 @@ export default function OpenDebriefQueue() {
       ) : queue.length === 0 ? (
         <div className="bg-white rounded-xl border border-border p-8 text-center text-muted-foreground">
           <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-40" />
-          All caught up — no items in this view.
+          {importantOnly ? "Nothing important outstanding in this range." : "All caught up — no items in this view."}
         </div>
       ) : (
         <div className="space-y-2">
@@ -277,7 +311,7 @@ function QueueCard({ item }) {
           <div className="font-bold text-primary truncate">{a.customer_name}</div>
           <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2">
             <span>{a.appointment_date || "No date"}{a.appointment_time ? ` • ${a.appointment_time}` : ""}</span>
-            {ago(daysSince) && <span className={daysSince >= 7 && missing ? "text-red-600 font-semibold" : ""}>{ago(daysSince)}</span>}
+            {ago(daysSince) && <span className={isImportant(item) ? "text-red-600 font-semibold" : ""}>{ago(daysSince)}</span>}
             {crm?.title && !crm.title.toLowerCase().startsWith(String(a.customer_name || "").toLowerCase()) && (
               <span className="truncate max-w-[16rem]" title={crm.title}>{crm.title}</span>
             )}

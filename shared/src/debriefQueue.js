@@ -156,5 +156,19 @@ export function queueDisposition(appt, crm, hasDebrief, now = new Date()) {
   return status === "Missing" || status === "Unmatched" ? "missing" : "other";
 }
 
+/** A missing debrief is overdue once the appointment is this many days old. */
+export const OVERDUE_DAYS = 7;
+
+/**
+ * "Important" = the debriefs that cost the most if they stay missing: the CRM
+ * recorded a SALE (revenue with no debrief behind it), or the appointment is a
+ * week old or more and still has no debrief. Only applies to missing items.
+ */
+export function isImportant(item) {
+  if (!item || item.disposition !== "missing") return false;
+  if (item.crm?.isSale) return true;
+  return item.daysSince != null && item.daysSince >= OVERDUE_DAYS;
+}
+
 // Re-exported so the page needs one import for the rules it applies.
 export { isRunAppointment, isCancelledTitle };
