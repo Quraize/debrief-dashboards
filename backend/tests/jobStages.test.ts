@@ -28,13 +28,21 @@ const job = (id: number, stage: typeof STAGES[number], over: Record<string, unkn
   ...over,
 });
 
-interface Stub { stages: Record<string, unknown>[]; inStages: Record<string, unknown>[]; byId: Record<string, Record<string, unknown>>; calls: string[] }
+interface Stub {
+  stages: Record<string, unknown>[]; inStages: Record<string, unknown>[]; byId: Record<string, Record<string, unknown>>;
+  summaries: Record<string, Record<string, unknown>>; calls: string[];
+}
 function stubClient(stub: Stub) {
   const impl = (async (url: string) => {
     const u = String(url);
     let data: unknown = [];
     if (u.includes("/workflow/stages")) { stub.calls.push("stages"); data = stub.stages; }
     else if (u.includes("/divisions")) { data = [{ id: 1, name: "ACR Roofing Division" }]; }
+    else if (u.includes("/financial_summary")) {
+      const id = /jobs\/(\d+)\/financial_summary/.exec(u)![1]!;
+      stub.calls.push(`summary:${id}`);
+      data = stub.summaries[id] ? [stub.summaries[id]] : [];
+    }
     else if (u.includes("job_ids")) {
       stub.calls.push("by-ids");
       const ids = new URL(u).searchParams.getAll("job_ids[]");
@@ -65,8 +73,21 @@ async function seedUser(email: string, role: string) {
   sessions.set(email, { cookie: cookieFrom(res, "allied_session"), csrf: cookieFrom(res, "allied_csrf") });
 }
 
+// Job 1 arrives with everything the Weekly Job Sheet needs on the listing
+// itself (rep, sub, complete financial_details). Job 2 carries none of it, so
+// its money must come from the per-job financial summary.
+const SHEET_JOB_1 = {
+  reps: { data: [{ id: 501, first_name: "Jason", last_name: "Malarchak" }] },
+  sub_contractors: { data: [{ id: 601, first_name: "Lucy", last_name: "", company_name: "Lucy Construction" }] },
+  financial_details: { data: { total_job_price: 13999, total_change_order_amount: 0, total_job_revenue: 13999, total_payment_received: 2276, total_amount_owed: 11723 } },
+  completion_date: "2026-09-02 15:00:00",
+};
+
 describe.skipIf(!reachable)("jobs by stage", () => {
-  const stub: Stub = { stages: STAGES, inStages: [job(1, STAGES[0]!), job(2, STAGES[1]!)], byId: {}, calls: [] };
+  const stub: Stub = {
+    stages: STAGES, inStages: [job(1, STAGES[0]!, SHEET_JOB_1), job(2, STAGES[1]!)], byId: {}, calls: [],
+    summaries: { "2": { total_job_price: 4552, total_change_order_amount: "150.50", total_payment_received: 2276, total_amount_owed: 2426.5 } },
+  };
 
   beforeAll(async () => {
     db = await createTestDb("stages");
@@ -91,7 +112,12 @@ describe.skipIf(!reachable)("jobs by stage", () => {
   it("mirrors the stage list and the jobs in tracked stages, with locations", async () => {
     const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
     expect(r.status).toBe("completed");
-    expect(r.counts).toMatchObject({ stages_examined: 4, stages_tracked: 2, jobs_examined: 2, jobs_upserted: 2, jobs_moved_out: 0, locations_fetched: 2 });
+    expect(r.counts).toMatchObject({
+      stages_examined: 4, stages_tracked: 2, jobs_examined: 2, jobs_upserted: 2, jobs_moved_out: 0, locations_fetched: 2,
+      financials_from_listing: 1, financial_summaries_fetched: 1, financial_summary_errors: 0,
+    });
+    expect(stub.calls).toContain("summary:2");
+    expect(stub.calls).not.toContain("summary:1");
     const stages = await db.owner.query(`SELECT code, name, jobs_count FROM jp_workflow_stage ORDER BY position`);
     expect(stages.rows.map((s) => s.code)).toEqual(["S-LEAD", "S-PROD-START", "S-COMPLETE", "S-PAID"]);
     const jobs = await db.owner.query(`SELECT jp_job_id, current_stage, stage_code, jp_customer_id, division, stage_seen_at IS NOT NULL AS tracked FROM jp_job ORDER BY jp_job_id`);
@@ -100,6 +126,66 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       { jp_job_id: "2", current_stage: "COMPLETED NEED FINAL PAYMENT!!", stage_code: "S-COMPLETE", jp_customer_id: "9002", division: "ACR Roofing Division", tracked: true },
     ]);
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM jp_job_location`)).rows[0].n).toBe(2);
+  });
+
+  it("fills the Weekly Job Sheet columns: people from the includes, money from the include or the summary", async () => {
+    const rows = (await db.owner.query(
+      `SELECT jp_job_id, rep_names, sub_contractor_names, completion_date::text, total_job_price::text AS price,
+              total_change_order_amount::text AS co, total_job_revenue::text AS rev, total_payment_received::text AS paid,
+              total_amount_owed::text AS owed, financials_fetched_at IS NOT NULL AS fetched
+         FROM jp_job ORDER BY jp_job_id`)).rows;
+    expect(rows).toEqual([
+      { jp_job_id: "1", rep_names: "Jason Malarchak", sub_contractor_names: "Lucy", completion_date: "2026-09-02",
+        price: "13999.00", co: "0.00", rev: "13999.00", paid: "2276.00", owed: "11723.00", fetched: true },
+      // No include on the listing: the summary was read; revenue derived as price + change orders.
+      { jp_job_id: "2", rep_names: null, sub_contractor_names: null, completion_date: null,
+        price: "4552.00", co: "150.50", rev: "4702.50", paid: "2276.00", owed: "2426.50", fetched: true },
+    ]);
+  });
+
+  it("does not re-read fresh money, and leaves names alone when a sweep did not ask for them", async () => {
+    stub.calls.length = 0;
+    // Same listing again, but job 1 now comes WITHOUT the people includes (a
+    // different sweep shape) — its rep and sub must survive the upsert.
+    const bare = job(1, STAGES[0]!, { financial_details: SHEET_JOB_1.financial_details, completion_date: SHEET_JOB_1.completion_date });
+    stub.inStages = [bare, job(2, STAGES[1]!)];
+    const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
+    expect(r.counts).toMatchObject({ financials_from_listing: 1, financial_summaries_fetched: 0 });
+    expect(stub.calls.filter((c) => c.startsWith("summary:"))).toEqual([]);
+    const row = (await db.owner.query(`SELECT rep_names, sub_contractor_names FROM jp_job WHERE jp_job_id = '1'`)).rows[0];
+    expect(row).toEqual({ rep_names: "Jason Malarchak", sub_contractor_names: "Lucy" });
+    stub.inStages = [job(1, STAGES[0]!, SHEET_JOB_1), job(2, STAGES[1]!)];
+  });
+
+  it("serves the sheet rows in the tab's vocabulary, with install date and crew fallback from the schedule", async () => {
+    await db.owner.query(
+      `INSERT INTO jp_schedule (jp_schedule_id, jp_job_id, title, start_at, end_at, crew_names)
+       VALUES ('S1', '1', 'RR: Wayne/1 Main St/George Golab', '2026-08-28 12:00+00', '2026-08-28 20:00+00', '{Lucy}'),
+              ('S2', '1', 'RR: day 2', '2026-08-29 12:00+00', '2026-08-29 20:00+00', '{Lucy}'),
+              ('S3', '2', 'RR: Wayne/2 Main St/Joseph Lorent', '2026-09-03 12:00+00', '2026-09-03 20:00+00', '{DNC,Manny}'),
+              ('S4', '2', 'RR: cancelled visit', '2026-08-20 12:00+00', '2026-08-20 20:00+00', '{Ghost}')`);
+    await db.owner.query(`UPDATE jp_schedule SET deleted_at = now() WHERE jp_schedule_id = 'S4'`);
+
+    const res = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("prod@allied.test") });
+    expect(res.statusCode).toBe(200);
+    const sheet = res.json();
+    expect(sheet.rows).toHaveLength(2);
+    expect(sheet.sync?.status).toBe("completed");
+    const [one, two] = sheet.rows as Record<string, unknown>[];
+    expect(one).toMatchObject({
+      jobId: "1", customerId: "9001", jobNumber: "2609-1-01", customer: "George Golab", city: "Wayne", label: "Wayne/1 Main St/George Golab",
+      division: "ACR Roofing Division", stage: "Production Started", stageGroup: "production",
+      salesRep: "Jason Malarchak", sub: "Lucy", scheduledInstallDate: "2026-08-28", saleDate: "2026-08-01", completionDate: "2026-09-02",
+      gross: 13999, changeOrders: 0, totalRev: 13999, totalPayments: 2276, balanceOwed: 11723,
+      paymentMethod: null, deposit: null, progressPayments: null,
+    });
+    expect(one!["jpUrl"]).toContain("/customer-jobs/9001/job/1");
+    // No sub on the job: the crews on its live schedules stand in; the retired visit's crew does not.
+    expect(two).toMatchObject({
+      jobId: "2", salesRep: null, sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
+      gross: 4552, changeOrders: 150.5, totalRev: 4702.5, totalPayments: 2276, balanceOwed: 2426.5,
+    });
+    expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
 
   it("serves the board grouped like the Jobs screen, with days in stage and customer names", async () => {

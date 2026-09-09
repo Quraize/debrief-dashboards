@@ -294,14 +294,16 @@ export class JobProgressClient {
 
   /**
    * Jobs currently in any of the given stages (by stage CODE), with the
-   * fields the jobs board shows. A page holds 100; the tracked stages are a
-   * few hundred jobs in total.
+   * fields the jobs board and the Weekly Job Sheet show. A page holds 100;
+   * the tracked stages are a few hundred jobs in total. `sub_contractors`
+   * and `financial_details` ride along so the sheet's Sub and money columns
+   * cost no extra calls when the listing carries them.
    */
   async listJobsInStages(stageCodes: string[]): Promise<Record<string, unknown>[]> {
     if (stageCodes.length === 0) return [];
     return this.collect<Record<string, unknown>>("/jobs", {
       "stages[]": stageCodes,
-      "includes[]": ["division", "trades", "address", "reps", "insurance_details"],
+      "includes[]": ["division", "trades", "address", "reps", "sub_contractors", "insurance_details", "financial_details"],
     }, "jobs:by-stage");
   }
 

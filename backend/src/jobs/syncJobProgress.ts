@@ -350,7 +350,16 @@ export function mapJpJob(
 
   const { customer: _customer, ...rawRest } = apiJob;
 
+  // People columns are written ONLY when the listing asked for the include.
+  // The upsert overwrites every key present, so a sweep that did not request
+  // `reps` must not blank a name another sweep filled in.
+  const people: Record<string, string | null> = {};
+  if ("reps" in apiJob) people["rep_names"] = personNames(unwrapMany(apiJob["reps"]));
+  if ("sub_contractors" in apiJob) people["sub_contractor_names"] = personNames(unwrapMany(apiJob["sub_contractors"]));
+
   return {
+    ...people,
+    completion_date: apiJob["completion_date"] ? String(apiJob["completion_date"]).slice(0, 10) : null,
     jp_job_id: String(apiJob["id"] ?? ""),
     jp_customer_id: apiJob["customer_id"] != null ? String(apiJob["customer_id"]) : null,
     job_number: apiJob["number"] != null ? String(apiJob["number"]) : null,
@@ -371,6 +380,15 @@ export function mapJpJob(
     jp_updated_at: (apiJob["updated_at"] as string) ?? null,
     raw: JSON.stringify(rawRest),
   };
+}
+
+/** "First Last" per person (else company or email), comma-joined; null when nobody. */
+export function personNames(people: Record<string, unknown>[]): string | null {
+  const names = people.map((p) => {
+    const full = [p["first_name"], p["last_name"]].map((x) => (x == null ? "" : String(x).trim())).join(" ").trim();
+    return full || (p["company_name"] ? String(p["company_name"]) : "") || (p["name"] ? String(p["name"]) : "") || (p["email"] ? String(p["email"]) : "");
+  }).filter(Boolean);
+  return names.length ? [...new Set(names)].join(", ") : null;
 }
 
 /** Exported for the job-stage sweep, which upserts the same mirror rows. */
@@ -524,17 +542,41 @@ async function upsertJpRows(
   }, `sync:upsert-${table}`);
 }
 
-async function updateJpJobFinancials(
-  jpJobId: string,
-  fin: { revenue: number | null; price: number | null; changeOrders: number | null },
-): Promise<void> {
+export interface JobFinancials {
+  revenue: number | null; price: number | null; changeOrders: number | null;
+  paymentReceived: number | null; amountOwed: number | null;
+}
+
+/**
+ * The figures a financial record carries, whether it came from the per-job
+ * financial_summary endpoint or a listing's `financial_details` include (same
+ * field names). Revenue falls back to price + change orders when absent.
+ */
+export function financialsFromRecord(record: Record<string, unknown> | null | undefined): JobFinancials {
+  const price = money(record?.["total_job_price"]);
+  const changeOrders = money(record?.["total_change_order_amount"]);
+  const revenue = money(record?.["total_job_revenue"])
+    ?? (price === null ? null : price + (changeOrders ?? 0));
+  return {
+    revenue, price, changeOrders,
+    paymentReceived: money(record?.["total_payment_received"]),
+    amountOwed: money(record?.["total_amount_owed"]),
+  };
+}
+
+/** True when a listing include carries the whole summary, so no call is needed. */
+export function isCompleteFinancialRecord(record: Record<string, unknown> | null | undefined): boolean {
+  return !!record && record["total_job_price"] != null && record["total_payment_received"] != null;
+}
+
+export async function updateJpJobFinancials(jpJobId: string, fin: JobFinancials): Promise<void> {
   await withServiceRole(async (c) => {
     await c.query(
       `UPDATE jp_job
-          SET total_job_revenue = $2, total_job_price = $3,
-              total_change_order_amount = $4, financials_fetched_at = now()
+          SET total_job_revenue = $2, total_job_price = $3, total_change_order_amount = $4,
+              total_payment_received = $5, total_amount_owed = $6, financials_fetched_at = now()
         WHERE jp_job_id = $1`,
-      [jpJobId, fin.revenue, fin.price, fin.changeOrders]);
+      [jpJobId, fin.revenue, fin.price, fin.changeOrders, fin.paymentReceived, fin.amountOwed]);
   }, "sync:update-jp-financials", { quiet: true });
 }
 
@@ -719,14 +761,9 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
             counts.financial_summaries_fetched++;
             record = await client.financialSummary(id);
           }
-          const revenue = money(record?.["total_job_revenue"])
-            ?? ((money(record?.["total_job_price"]) ?? 0) + (money(record?.["total_change_order_amount"]) ?? 0) || null);
-          await updateJpJobFinancials(id, {
-            revenue,
-            price: money(record?.["total_job_price"]),
-            changeOrders: money(record?.["total_change_order_amount"]),
-          });
-          counts.revenue_total += revenue ?? 0;
+          const fin = financialsFromRecord(record);
+          await updateJpJobFinancials(id, fin);
+          counts.revenue_total += fin.revenue ?? 0;
         } catch (err) {
           counts.financial_summary_errors++;
           if (conflicts.length < 20) {

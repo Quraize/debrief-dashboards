@@ -31,6 +31,7 @@ import MarketingDashboard from '@/pages/MarketingDashboard';
 import InsuranceDashboard from '@/pages/InsuranceDashboard';
 import ProductionSchedule from '@/production/ProductionSchedule';
 import ProductionJobs from '@/production/ProductionJobs';
+import WeeklyJobSheet from '@/production/WeeklyJobSheet';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -96,6 +97,7 @@ const AuthenticatedApp = () => {
           <Route path="/debrief-reminders" element={<DebriefReminders />} />
           <Route path="/production/schedule" element={<ProductionSchedule />} />
           <Route path="/production/jobs" element={<ProductionJobs />} />
+          <Route path="/production/weekly-job-sheet" element={<WeeklyJobSheet />} />
           <Route path="/account" element={<Account />} />
           <Route path="/users" element={<Users />} />
         </Route>

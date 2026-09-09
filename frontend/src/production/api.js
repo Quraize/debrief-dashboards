@@ -9,4 +9,6 @@ export const productionApi = {
   refresh: () => post("/api/production/sync"),
   /** Every job in a tracked workflow stage, grouped like the JobProgress Jobs screen. */
   jobs: () => get("/api/production/jobs"),
+  /** The same jobs as rows of the production master sheet's WEEKLY JOB SHEET tab. */
+  weeklyJobSheet: () => get("/api/production/weekly-job-sheet"),
 };

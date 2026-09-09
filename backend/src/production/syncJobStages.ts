@@ -12,7 +12,9 @@
  */
 import { withServiceRole } from "../db/client.js";
 import { JobProgressClient, unwrap } from "../integrations/jobprogress/client.js";
-import { mapJpJob, upsertJpRows } from "../jobs/syncJobProgress.js";
+import {
+  mapJpJob, upsertJpRows, financialsFromRecord, isCompleteFinancialRecord, updateJpJobFinancials,
+} from "../jobs/syncJobProgress.js";
 import { parseApiTimestamp } from "./syncSchedules.js";
 import { isTrackedStage } from "@allied/shared/jobStages";
 
@@ -23,11 +25,26 @@ export interface StageSyncCounts {
   jobs_upserted: number;
   jobs_moved_out: number;
   locations_fetched: number;
+  /** Money columns filled straight from the listing's financial_details include. */
+  financials_from_listing: number;
+  /** Per-job financial_summary calls this run (stale rows only, capped). */
+  financial_summaries_fetched: number;
+  financial_summary_errors: number;
   api_requests: number;
   retries: number;
   rate_limit_hits: number;
   errors: number;
 }
+
+/**
+ * Money is refreshed for at most this many tracked jobs per ten-minute run
+ * when the listing did not carry it — one API call each, so the cap keeps the
+ * sweep well inside the shared 55/min budget. A job's figures are re-read when
+ * JobProgress reports the job changed since the last read, and at least twice
+ * a day regardless (payments are recorded without touching the job record).
+ */
+export const FINANCIALS_PER_RUN_DEFAULT = 40;
+export const FINANCIALS_MAX_AGE_HOURS = 12;
 
 export interface StageSyncOptions { startedBy?: string; client?: JobProgressClient }
 export interface StageSyncResult {
@@ -36,7 +53,8 @@ export interface StageSyncResult {
 
 const emptyCounts = (): StageSyncCounts => ({
   stages_examined: 0, stages_tracked: 0, jobs_examined: 0, jobs_upserted: 0, jobs_moved_out: 0,
-  locations_fetched: 0, api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
+  locations_fetched: 0, financials_from_listing: 0, financial_summaries_fetched: 0, financial_summary_errors: 0,
+  api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
 
 const str = (v: unknown): string | null => (v === null || v === undefined || v === "" ? null : String(v));
@@ -105,6 +123,53 @@ async function upsertLocations(jobs: Record<string, unknown>[], counts: StageSyn
   }, "job-stages:locations", { quiet: true });
 }
 
+/**
+ * Fills the Weekly Job Sheet's money columns for the tracked jobs. Two paths:
+ * a listing whose `financial_details` include is complete costs nothing; the
+ * rest are read from /jobs/{id}/financial_summary, stalest first, up to the
+ * per-run cap. A failed read is counted and skipped — the row keeps its last
+ * figures and its old `financials_fetched_at`, so it is retried next run.
+ */
+export async function refreshFinancials(
+  client: JobProgressClient, jobs: Record<string, unknown>[], counts: StageSyncCounts,
+  perRun = Number(process.env.PRODUCTION_FINANCIALS_PER_RUN ?? FINANCIALS_PER_RUN_DEFAULT),
+): Promise<void> {
+  const fromListing = new Set<string>();
+  for (const job of jobs) {
+    const id = str(job["id"]);
+    const record = unwrap(job["financial_details"]);
+    if (!id || !isCompleteFinancialRecord(record)) continue;
+    await updateJpJobFinancials(id, financialsFromRecord(record));
+    fromListing.add(id);
+    counts.financials_from_listing++;
+  }
+
+  if (perRun <= 0) return;
+  const stale = await withServiceRole(async (c) => {
+    const { rows } = await c.query<{ jp_job_id: string }>(
+      `SELECT jp_job_id FROM jp_job
+        WHERE stage_seen_at IS NOT NULL
+          AND NOT (jp_job_id = ANY($1::text[]))
+          AND (financials_fetched_at IS NULL
+               OR financials_fetched_at < jp_updated_at
+               OR financials_fetched_at < now() - make_interval(hours => $2))
+        ORDER BY financials_fetched_at NULLS FIRST, jp_job_id
+        LIMIT $3`,
+      [[...fromListing], FINANCIALS_MAX_AGE_HOURS, perRun]);
+    return rows.map((r) => r.jp_job_id);
+  }, "job-stages:financials-stale", { quiet: true });
+
+  for (const id of stale) {
+    try {
+      counts.financial_summaries_fetched++;
+      await updateJpJobFinancials(id, financialsFromRecord(await client.financialSummary(id)));
+    } catch (err) {
+      counts.financial_summary_errors++;
+      console.warn(`[job-stages] financial summary failed for job ${id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** A jp_job row from a job payload, with the stage sweep's own extras. */
 export function mapStageJob(api: Record<string, unknown>, divisionNames: Map<string, string>, seen: boolean): Record<string, unknown> {
   const row = mapJpJob(api, divisionNames);
@@ -143,6 +208,7 @@ export async function runJobStageSync(options: StageSyncOptions = {}): Promise<S
     const rows = jobs.map((j) => mapStageJob(j, divisionNames, true)).filter((r) => r["jp_job_id"]);
     counts.jobs_upserted = await upsertJpRows("jp_job", "jp_job_id", rows);
     await upsertLocations(jobs, counts);
+    await refreshFinancials(client, jobs, counts);
 
     // Sweep 2: jobs we last saw in a tracked stage that were not returned now.
     const seenIds = new Set(rows.map((r) => String(r["jp_job_id"])));

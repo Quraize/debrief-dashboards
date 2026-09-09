@@ -9,6 +9,7 @@ import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { boardForRange, validateRange, todayInBoardZone } from "./board.js";
 import { refreshSchedules } from "./syncSchedules.js";
 import { jobsBoard } from "./jobsBoard.js";
+import { weeklyJobSheet } from "./weeklyJobSheet.js";
 import { runJobStageSync } from "./syncJobStages.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
@@ -34,6 +35,16 @@ export function registerProductionRoutes(app: FastifyInstance): void {
     { preHandler: [requireAuth, productionOnly] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       return reply.send(await jobsBoard({ email: req.user!.email, role: req.user!.role }));
+    },
+  );
+
+  // The production master sheet's WEEKLY JOB SHEET tab, one row per tracked
+  // job, in the tab's own column vocabulary (shared/src/weeklyJobSheet.js).
+  app.get(
+    "/api/production/weekly-job-sheet",
+    { preHandler: [requireAuth, productionOnly] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      return reply.send(await weeklyJobSheet({ email: req.user!.email, role: req.user!.role }));
     },
   );
 
