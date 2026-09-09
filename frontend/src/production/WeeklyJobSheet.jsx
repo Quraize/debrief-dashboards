@@ -7,6 +7,7 @@ import { STAGE_GROUPS } from "@allied/shared/jobStages";
 import { SHEET_COLUMNS, PENDING_COLUMNS, toSheetCsv, sheetDate } from "@allied/shared/weeklyJobSheet";
 import { Download, RefreshCw, Loader2, ExternalLink, Search, Info } from "lucide-react";
 import { productionApi } from "./api";
+import { qs } from "@/api/http";
 
 function relative(iso) {
   if (!iso) return "";
@@ -50,8 +51,11 @@ export default function WeeklyJobSheet() {
 
   const [group, setGroup] = useState("");
   const [search, setSearch] = useState("");
-  const [soldFrom, setSoldFrom] = useState("");
   const [onlyGaps, setOnlyGaps] = useState(false);
+  // The sheet's weekly blocks: a job belongs to a week by the chosen basis.
+  const [weekFrom, setWeekFrom] = useState("");
+  const [weekTo, setWeekTo] = useState("");
+  const [basis, setBasis] = useState("install");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["weekly-job-sheet"], queryFn: productionApi.weeklyJobSheet, enabled: allowed, staleTime: 60_000, refetchInterval: 5 * 60_000,
@@ -71,17 +75,29 @@ export default function WeeklyJobSheet() {
     onError: (err) => toast({ title: "Refresh failed", description: err.message, variant: "destructive" }),
   });
 
+  const inWeek = (day) => !!day && (!weekFrom || day >= weekFrom) && (!weekTo || day <= weekTo);
+  const officeDay = (iso) => (iso ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso)) : null);
+  const weekMatch = (r) => {
+    if (!weekFrom && !weekTo) return true;
+    const byInstall = (r.installDates ?? []).some(inWeek);
+    const bySale = inWeek(r.saleDate);
+    const byStage = inWeek(officeDay(r.stageSince));
+    return basis === "install" ? byInstall : basis === "sale" ? bySale : basis === "stage" ? byStage : byInstall || bySale || byStage;
+  };
+
   const rows = useMemo(() => {
     const all = data?.rows ?? [];
     const q = search.trim().toLowerCase();
     return all
       .filter((r) => !group || r.stageGroup === group)
-      .filter((r) => !soldFrom || (r.saleDate && r.saleDate >= soldFrom))
+      .filter(weekMatch)
       .filter((r) => !onlyGaps || r.gross == null || r.totalPayments == null || !r.salesRep || !r.saleDate
         || (Number(r.totalPayments) > 0 && r.paymentsCount === 0))
       .filter((r) => !q || [r.jobNumber, r.customer, r.city, r.address, r.division, r.salesRep, r.sub, r.stage]
         .some((v) => String(v ?? "").toLowerCase().includes(q)));
-  }, [data, group, search, soldFrom, onlyGaps]);
+  }, [data, group, search, weekFrom, weekTo, basis, onlyGaps]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const excelUrl = `/api/production/weekly-job-sheet.xlsx${qs({ from: weekFrom, to: weekTo, basis: weekFrom || weekTo ? basis : "" })}`;
 
   const gaps = useMemo(() => (data?.rows ?? []).filter((r) => r.gross == null).length, [data]);
 
@@ -125,9 +141,13 @@ export default function WeeklyJobSheet() {
             {refresh.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Refresh from JobProgress
           </button>
           <button onClick={downloadCsv} disabled={rows.length === 0}
-            className="flex items-center gap-2 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 text-sm font-semibold px-3 py-2 rounded-lg">
-            <Download className="w-4 h-4" /> Download CSV (A–AB)
+            className="flex items-center gap-2 bg-white border border-border hover:bg-secondary disabled:opacity-50 text-sm font-semibold px-3 py-2 rounded-lg">
+            <Download className="w-4 h-4" /> CSV
           </button>
+          <a href={excelUrl} title="Excel workbook in the master sheet's layout, with the week filter applied"
+            className="flex items-center gap-2 bg-primary text-primary-foreground hover:opacity-90 text-sm font-semibold px-3 py-2 rounded-lg">
+            <Download className="w-4 h-4" /> Download Excel
+          </a>
         </div>
       </div>
 
@@ -151,9 +171,19 @@ export default function WeeklyJobSheet() {
           {STAGE_GROUPS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
         </select>
         <label className="flex items-center gap-1.5 text-sm">
-          <span className="text-muted-foreground">Sold on/after</span>
-          <input type="date" value={soldFrom} onChange={(e) => setSoldFrom(e.target.value)} className="border border-input rounded-lg px-2 py-1 text-sm bg-white" />
+          <span className="text-muted-foreground">Week</span>
+          <input type="date" value={weekFrom} onChange={(e) => setWeekFrom(e.target.value)} className="border border-input rounded-lg px-2 py-1 text-sm bg-white" />
+          <span className="text-muted-foreground">to</span>
+          <input type="date" value={weekTo} onChange={(e) => setWeekTo(e.target.value)} className="border border-input rounded-lg px-2 py-1 text-sm bg-white" />
         </label>
+        <select value={basis} onChange={(e) => setBasis(e.target.value)} disabled={!weekFrom && !weekTo}
+          title="What puts a job in the week" className="border border-input rounded-lg px-2 py-1 text-sm bg-white disabled:opacity-50">
+          <option value="install">Install scheduled in week</option>
+          <option value="sale">Sold in week</option>
+          <option value="stage">Stage changed in week</option>
+          <option value="any">Any of those</option>
+        </select>
+        {(weekFrom || weekTo) && <button onClick={() => { setWeekFrom(""); setWeekTo(""); }} className="text-xs text-accent font-semibold">Clear week</button>}
         <label className="flex items-center gap-1.5 text-sm cursor-pointer">
           <input type="checkbox" checked={onlyGaps} onChange={(e) => setOnlyGaps(e.target.checked)} />
           Only rows with gaps

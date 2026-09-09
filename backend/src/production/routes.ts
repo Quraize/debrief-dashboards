@@ -9,10 +9,12 @@ import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { boardForRange, validateRange, todayInBoardZone } from "./board.js";
 import { refreshSchedules } from "./syncSchedules.js";
 import { jobsBoard } from "./jobsBoard.js";
-import { weeklyJobSheet } from "./weeklyJobSheet.js";
+import { weeklyJobSheet, parseWeekFilter, filterSheetRows } from "./weeklyJobSheet.js";
+import { buildWeeklySheetWorkbook } from "./weeklyJobSheetXlsx.js";
 import { runJobStageSync } from "./syncJobStages.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
+interface WeekQuery { from?: string; to?: string; basis?: string }
 
 export function registerProductionRoutes(app: FastifyInstance): void {
   const productionOnly = requireRole(...PRODUCTION_ROLES);
@@ -45,6 +47,28 @@ export function registerProductionRoutes(app: FastifyInstance): void {
     { preHandler: [requireAuth, productionOnly] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       return reply.send(await weeklyJobSheet({ email: req.user!.email, role: req.user!.role }));
+    },
+  );
+
+  // The same rows as an Excel workbook in the tab's layout, optionally one
+  // week's worth: ?from=YYYY-MM-DD&to=YYYY-MM-DD&basis=install|sale|stage|any.
+  app.get<{ Querystring: WeekQuery }>(
+    "/api/production/weekly-job-sheet.xlsx",
+    { preHandler: [requireAuth, productionOnly] },
+    async (req: FastifyRequest<{ Querystring: WeekQuery }>, reply: FastifyReply) => {
+      const filter = parseWeekFilter(req.query ?? {});
+      if ("error" in filter) return reply.code(400).send({ error: filter.error });
+      const sheet = await weeklyJobSheet({ email: req.user!.email, role: req.user!.role });
+      const rows = filterSheetRows(sheet.rows, filter);
+      const buffer = await buildWeeklySheetWorkbook(rows, {
+        filter, generatedAt: sheet.generatedAt, syncedAt: sheet.sync?.finishedAt ?? sheet.sync?.startedAt ?? null, total: sheet.rows.length,
+      });
+      const span = filter.from || filter.to ? `-${filter.from ?? "start"}-to-${filter.to ?? "now"}` : "";
+      console.info(`[production] weekly job sheet export by=${req.user!.email} rows=${rows.length}${span}`);
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="weekly-job-sheet${span}.xlsx"`)
+        .send(buffer);
     },
   );
 

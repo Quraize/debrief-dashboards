@@ -222,6 +222,38 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
 
+  it("exports the week as an Excel workbook in the tab's layout", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    // Job 1's visits are 8/28–8/29, job 2's live visit is 9/3: the week of 9/1–9/7 holds job 2 only.
+    const res = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx?from=2026-09-01&to=2026-09-07", ...as("prod@allied.test") });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("spreadsheetml");
+    expect(res.headers["content-disposition"]).toContain("weekly-job-sheet-2026-09-01-to-2026-09-07.xlsx");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.rawPayload);
+    const ws = wb.getWorksheet("WEEKLY JOB SHEET")!;
+    const header = (ws.getRow(1).values as unknown[]).slice(1, 29);
+    expect(header[0]).toBe("Job #");
+    expect(header[12]).toBe("Job Stage");
+    expect(header[27]).toBe("Balance Owed");
+    expect(ws.getRow(2).getCell("A").value).toBe("2609-2-01");
+    expect(ws.getRow(2).getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");
+    expect(ws.getRow(2).getCell("R").value).toBe(4552);
+    expect(ws.getRow(2).getCell("R").numFmt).toBe('"$"#,##0.00');
+    expect((ws.getRow(2).getCell("Q").value as Date).toISOString().slice(0, 10)).toBe("2026-08-01");
+    expect(ws.getRow(3).getCell("A").value).toBe("Weekly Total");
+    expect((ws.getRow(3).getCell("R").value as { formula: string }).formula).toBe("SUM(R2:R2)");
+    expect(wb.getWorksheet("About")).toBeTruthy();
+
+    // No week → every tracked job; a malformed week → 400; a sales rep → 403.
+    const all = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("prod@allied.test") });
+    const wbAll = new ExcelJS.Workbook();
+    await wbAll.xlsx.load(all.rawPayload);
+    expect(wbAll.getWorksheet("WEEKLY JOB SHEET")!.rowCount).toBe(4); // header + 2 jobs + total
+    expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx?from=9/1/2026", ...as("prod@allied.test") })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("rep@allied.test") })).statusCode).toBe(403);
+  });
+
   it("re-reads a job's payments only when its payment total changes, retiring ones that vanished", async () => {
     // A second check clears the balance on job 2; the office also deleted the card payment.
     stub.summaries["2"] = { total_job_price: 4552, total_change_order_amount: "150.50", total_payment_received: 4702.5, total_amount_owed: 0 };

@@ -34,6 +34,8 @@ export interface SheetRow {
   stage: string | null; stageGroup: string | null; stageSince: string | null;
   salesRep: string | null; sub: string | null;
   scheduledInstallDate: string | null; saleDate: string | null; completionDate: string | null;
+  /** Every live production-schedule day on the job (office time), ascending; the next one on/after today. */
+  installDates: string[]; nextInstallDate: string | null;
   gross: number | null; changeOrders: number | null; totalRev: number | null;
   paymentMethod: string | null; deposit: number | null; progressPayments: number | null; paymentsCount: number;
   totalPayments: number | null; balanceOwed: number | null;
@@ -55,6 +57,7 @@ interface Row {
   current_stage: string | null; stage_last_modified: Date | null;
   rep_names: string | null; sub_contractor_names: string | null;
   contract_signed_date: string | null; completion_date: string | null; first_install_day: string | null;
+  install_days: string[] | null; today: string;
   crews: string[] | null;
   total_job_price: string | null; total_change_order_amount: string | null; total_job_revenue: string | null;
   total_payment_received: string | null; total_amount_owed: string | null;
@@ -64,6 +67,47 @@ interface Row {
 
 const money = (v: string | null): number | null => (v === null ? null : Number(v));
 
+/** What "the week's jobs" means: which date must fall inside the range. */
+export type WeekBasis = "install" | "sale" | "stage" | "any";
+export const WEEK_BASES: WeekBasis[] = ["install", "sale", "stage", "any"];
+
+export interface WeekFilter { from?: string | null; to?: string | null; basis?: WeekBasis }
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Validates a week filter from query parameters; returns an error message when it is malformed. */
+export function parseWeekFilter(q: { from?: string; to?: string; basis?: string }): WeekFilter | { error: string } {
+  const from = q.from || null;
+  const to = q.to || null;
+  if ((from && !ISO_DAY.test(from)) || (to && !ISO_DAY.test(to))) return { error: "from/to must be YYYY-MM-DD" };
+  if (from && to && from > to) return { error: "from must not be after to" };
+  const basis = (q.basis || "install") as WeekBasis;
+  if (!WEEK_BASES.includes(basis)) return { error: `basis must be one of ${WEEK_BASES.join(", ")}` };
+  return { from, to, basis };
+}
+
+const inRange = (day: string | null | undefined, f: WeekFilter): boolean =>
+  !!day && (!f.from || day >= f.from) && (!f.to || day <= f.to);
+
+/**
+ * The rows that belong to a week. `install`: a production visit is scheduled
+ * inside it (the sheet's weekly blocks are the crews' week); `sale`: sold
+ * inside it; `stage`: the job's stage changed inside it; `any`: any of those.
+ * No range = every row.
+ */
+export function filterSheetRows(rows: SheetRow[], f: WeekFilter): SheetRow[] {
+  if (!f.from && !f.to) return rows;
+  const byInstall = (r: SheetRow) => r.installDates.some((d) => inRange(d, f));
+  const bySale = (r: SheetRow) => inRange(r.saleDate, f);
+  const byStage = (r: SheetRow) => inRange(r.stageSince ? officeDay(r.stageSince) : null, f);
+  const pick = { install: byInstall, sale: bySale, stage: byStage,
+    any: (r: SheetRow) => byInstall(r) || bySale(r) || byStage(r) }[f.basis ?? "install"];
+  return rows.filter(pick);
+}
+
+const officeDay = (iso: string): string =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: BOARD_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+
 export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobSheet> {
   const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<Row>(
     `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, j.job_name, cu.customer_name, l.address, l.city,
@@ -71,6 +115,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
             j.rep_names, j.sub_contractor_names,
             j.contract_signed_date::text, j.completion_date::text,
             (sch.first_start AT TIME ZONE $1)::date::text AS first_install_day,
+            sch.days AS install_days, (now() AT TIME ZONE $1)::date::text AS today,
             crew.names AS crews,
             j.total_job_price::text, j.total_change_order_amount::text, j.total_job_revenue::text,
             j.total_payment_received::text, j.total_amount_owed::text, j.financials_fetched_at, j.payments_fetched_at,
@@ -79,7 +124,9 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
        LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
        LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
        LEFT JOIN LATERAL (
-         SELECT min(s.start_at) AS first_start FROM jp_schedule s
+         SELECT min(s.start_at) AS first_start,
+                array_agg(DISTINCT (s.start_at AT TIME ZONE $1)::date::text ORDER BY (s.start_at AT TIME ZONE $1)::date::text) AS days
+           FROM jp_schedule s
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
        LEFT JOIN LATERAL (
          SELECT array_agg(DISTINCT n ORDER BY n) AS names
@@ -115,6 +162,8 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
       salesRep: r.rep_names,
       sub: r.sub_contractor_names ?? (r.crews && r.crews.length ? r.crews.join(", ") : null),
       scheduledInstallDate: r.first_install_day, saleDate: r.contract_signed_date, completionDate: r.completion_date,
+      installDates: r.install_days ?? [],
+      nextInstallDate: (r.install_days ?? []).find((d) => d >= r.today) ?? null,
       gross, changeOrders, totalRev,
       paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,
       totalPayments,
