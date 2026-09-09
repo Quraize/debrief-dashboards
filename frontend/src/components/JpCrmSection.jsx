@@ -33,7 +33,9 @@ const JP_STALE_MS = 5 * 60 * 1000;
 export function useJpMirror() {
   const { data: jpAppointments = [], isLoading: apptsLoading } = useQuery({
     queryKey: ["jp-appointments"],
-    queryFn: () => base44.entities.JPAppointment.list("-appointment_date"),
+    // Appointments deleted in the CRM are retired (deleted_at), never erased;
+    // the dashboards and the queue only ever see live ones.
+    queryFn: () => base44.entities.JPAppointment.list("-appointment_date").then((rows) => rows.filter((r) => !r.deleted_at)),
     staleTime: JP_STALE_MS,
   });
   const { data: jpJobs = [], isLoading: jobsLoading } = useQuery({

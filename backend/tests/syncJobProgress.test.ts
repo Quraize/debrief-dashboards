@@ -469,6 +469,43 @@ describe.skipIf(!reachable)("runJobProgressSync", () => {
     expect(rows, "the never-updated future appointment is mirrored").toHaveLength(1);
   });
 
+  it("retires the old row of a rescheduled appointment and rows deleted in the CRM", async () => {
+    // Dates inside the incremental sweep window (a week back to two weeks ahead).
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const at = (offset: number, hhmm: string) => `${day(offset)}T${hhmm}:00`;
+    const appts = async () => (await db.owner.query<{ appointment_record_id: string; appointment_date: string; debrief_status: string; retired_reason: string | null }>(
+      `SELECT appointment_record_id, appointment_date::text, debrief_status, retired_reason FROM appointment
+        WHERE appointment_record_id IN ('70','71','72') ORDER BY appointment_record_id, appointment_date`)).rows;
+
+    // Run 1: three appointments, one already debriefed (72).
+    await runJobProgressSync({ mode: "commit", client: stubApi([], [], {
+      upcoming: [appointment(70, { start_date_time: at(-1, "21:30") }), appointment(71, { start_date_time: at(1, "14:00") }), appointment(72, { start_date_time: at(-2, "18:00") })],
+    }) });
+    await db.owner.query(`UPDATE appointment SET debrief_status = 'Submitted' WHERE appointment_record_id = '72'`);
+    expect((await appts()).map((r) => r.retired_reason)).toEqual([null, null, null]);
+
+    // Run 2: 70 was rescheduled to the next day (Annie Li's case); 71 was deleted; 72 was deleted but is debriefed.
+    const r2 = await runJobProgressSync({ mode: "commit", client: stubApi([], [], {
+      upcoming: [appointment(70, { start_date_time: at(0, "21:30") })],
+    }) });
+    expect(r2.counts.appointments_retired_moved).toBe(1);
+    expect(r2.counts.appointments_retired_missing).toBe(1);
+    const rows = await appts();
+    expect(rows.filter((r) => r.appointment_record_id === "70").map((r) => [r.debrief_status, r.retired_reason]))
+      .toEqual([["Superseded", "moved"], ["Missing", null]]);
+    expect(rows.find((r) => r.appointment_record_id === "71")).toMatchObject({ debrief_status: "Superseded", retired_reason: "missing_from_crm" });
+    expect(rows.find((r) => r.appointment_record_id === "72"), "debriefed rows are history, never retired").toMatchObject({ debrief_status: "Submitted", retired_reason: null });
+    const mirror = await db.owner.query(`SELECT jp_appointment_id, deleted_at IS NOT NULL AS gone FROM jp_appointment WHERE jp_appointment_id IN ('70','71','72') ORDER BY 1`);
+    expect(mirror.rows).toEqual([{ jp_appointment_id: "70", gone: false }, { jp_appointment_id: "71", gone: true }, { jp_appointment_id: "72", gone: true }]);
+
+    // Run 3: 71 reappears → live again, back to Missing.
+    await runJobProgressSync({ mode: "commit", client: stubApi([], [], {
+      upcoming: [appointment(70, { start_date_time: at(0, "21:30") }), appointment(71, { start_date_time: at(1, "14:00") })],
+    }) });
+    expect((await appts()).find((r) => r.appointment_record_id === "71")).toMatchObject({ debrief_status: "Missing", retired_reason: null });
+    expect((await db.owner.query(`SELECT deleted_at FROM jp_appointment WHERE jp_appointment_id = '71'`)).rows[0]!.deleted_at).toBeNull();
+  });
+
   it("counts signed sales from the direct query", async () => {
     const result = await runJobProgressSync({
       mode: "dry_run", dateFrom: "2026-08-01", dateTo: "2026-08-31", fullBackfill: true,

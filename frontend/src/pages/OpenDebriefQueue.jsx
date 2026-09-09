@@ -55,7 +55,8 @@ export default function OpenDebriefQueue() {
     jobsById: indexById(jpJobs, "jp_job_id"),
   }), [jpAppointments, customers, jpJobs]);
 
-  const salesAppts = useMemo(() => salesAppointmentsOnly(appointments), [appointments]);
+  // Retired rows (rescheduled or deleted in the CRM) are history, not work.
+  const salesAppts = useMemo(() => salesAppointmentsOnly(appointments).filter((a) => !a.retired_at), [appointments]);
   const reps = useMemo(() => [...new Set(salesAppts.map((a) => a.original_sales_rep).filter(Boolean))], [salesAppts]);
   const setters = useMemo(() => [...new Set(salesAppts.map((a) => a.original_appointment_setter).filter(Boolean))], [salesAppts]);
   const [rep, setRep] = useState("");

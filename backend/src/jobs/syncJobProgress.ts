@@ -60,6 +60,11 @@ export interface SyncCounts {
   non_sales_exclusions: number;
   signed_sales_found: number;
   jp_appointments_upserted: number;
+  /** Old rows of rescheduled appointments, marked Superseded. */
+  appointments_retired_moved: number;
+  /** Rows whose CRM appointment vanished from the swept window. */
+  appointments_retired_missing: number;
+  jp_appointments_retired: number;
   debrief_status_reconciled: number;
   jp_results_fetched: number;
   jp_two_leg_answers: number;
@@ -104,6 +109,9 @@ const emptyCounts = (): SyncCounts => ({
   non_sales_exclusions: 0,
   signed_sales_found: 0,
   jp_appointments_upserted: 0,
+  appointments_retired_moved: 0,
+  appointments_retired_missing: 0,
+  jp_appointments_retired: 0,
   debrief_status_reconciled: 0,
   jp_results_fetched: 0,
   jp_two_leg_answers: 0,
@@ -308,6 +316,9 @@ export function mapJpAppointment(
     jp_created_at: (apiAppointment["created_at"] as string) ?? null,
     jp_updated_at: (apiAppointment["updated_at"] as string) ?? null,
     raw: JSON.stringify(rawRest),
+    // Seen in this run: un-retires a row that had vanished and come back.
+    last_seen_at: new Date(),
+    deleted_at: null,
   };
 }
 
@@ -386,10 +397,14 @@ async function upsertAppointments(
         .filter((col) => !["created_at", "created_by"].includes(col))
         .map((col) => `"${col}" = EXCLUDED."${col}"`)
         .join(", ");
+      // A row the CRM shows again is live again: clear a retirement, and put a
+      // Superseded debrief status back to Missing (never touch Submitted etc.).
       const { rows: result } = await c.query<{ created: boolean }>(
         `INSERT INTO appointment (${columns.map((col) => `"${col}"`).join(", ")}, created_by)
          VALUES (${placeholders}, 'jobprogress-sync')
-         ON CONFLICT (identity_key) DO UPDATE SET ${updates}, updated_at = now()
+         ON CONFLICT (identity_key) DO UPDATE SET ${updates}, updated_at = now(),
+           retired_at = NULL, retired_reason = NULL,
+           debrief_status = CASE WHEN appointment.debrief_status = 'Superseded' THEN 'Missing' ELSE appointment.debrief_status END
          RETURNING (xmax = 0) AS created`,
         columns.map((col) => row[col]));
       if (result[0]!.created) created++;
@@ -397,6 +412,61 @@ async function upsertAppointments(
     }
     return { created, updated };
   }, "sync:upsert-appointments");
+}
+
+/**
+ * Retires the OLD row of a rescheduled appointment. The CRM appointment id is
+ * stable across a reschedule; the identity (lead + date + time) is not, so the
+ * upsert created a fresh row and the previous one would otherwise sit in the
+ * queue forever. Only rows still awaiting a debrief are retired — a debriefed
+ * row is history and stays as it is.
+ */
+async function retireMovedAppointments(rows: Record<string, unknown>[]): Promise<number> {
+  const withIds = rows.filter((r) => r["appointment_record_id"] && r["appointment_date"]);
+  if (withIds.length === 0) return 0;
+  return withServiceRole(async (c) => {
+    let retired = 0;
+    for (const r of withIds) {
+      const { rowCount } = await c.query(
+        `UPDATE appointment
+            SET retired_at = now(), retired_reason = 'moved', debrief_status = 'Superseded', updated_at = now()
+          WHERE retired_at IS NULL
+            AND appointment_record_id = $1
+            AND debrief_status IN ('Missing', 'Unmatched')
+            AND NOT (allied_norm(crm_lead_id) = allied_norm($2::text)
+                     AND appointment_date = $3::date
+                     AND allied_norm(appointment_time) = allied_norm($4::text))`,
+        [String(r["appointment_record_id"]), (r["crm_lead_id"] as string) ?? "", r["appointment_date"], (r["appointment_time"] as string) ?? ""]);
+      retired += rowCount ?? 0;
+    }
+    return retired;
+  }, "sync:retire-moved", { quiet: true });
+}
+
+/**
+ * Retires rows inside the swept date window whose CRM appointment did not come
+ * back — deleted in JobProgress. Bounded to the window the API was actually
+ * asked for, so a partial fetch can never retire live appointments outside it.
+ */
+async function retireMissingAppointments(from: string, to: string, seenIds: string[]): Promise<{ appointments: number; mirror: number }> {
+  return withServiceRole(async (c) => {
+    const a = await c.query(
+      `UPDATE appointment
+          SET retired_at = now(), retired_reason = 'missing_from_crm', debrief_status = 'Superseded', updated_at = now()
+        WHERE retired_at IS NULL
+          AND appointment_record_id IS NOT NULL AND appointment_record_id <> ''
+          AND appointment_date BETWEEN $1::date AND $2::date
+          AND debrief_status IN ('Missing', 'Unmatched')
+          AND NOT (appointment_record_id = ANY($3::text[]))`,
+      [from, to, seenIds]);
+    const m = await c.query(
+      `UPDATE jp_appointment SET deleted_at = now()
+        WHERE deleted_at IS NULL
+          AND appointment_date BETWEEN $1::date AND $2::date
+          AND NOT (jp_appointment_id = ANY($3::text[]))`,
+      [from, to, seenIds]);
+    return { appointments: a.rowCount ?? 0, mirror: m.rowCount ?? 0 };
+  }, "sync:retire-missing", { quiet: true });
 }
 
 /**
@@ -517,12 +587,21 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
     // untouched since, was invisible to both. The forward window closes that
     // gap; the upserts make the overlap free.
     let appointments: Record<string, unknown>[];
+    // The by-date window this run listed COMPLETELY — the only range in which
+    // "the CRM did not return it" can safely mean "it is gone".
+    let sweep: { from: string; to: string } | null = null;
     if (watermark) {
+      // The sweep also reaches BACK a few days: a reschedule or deletion of a
+      // recent appointment must retire our copy, and the updated-since filter
+      // does not report deletions at all.
       const forwardDays = Number(process.env.SYNC_FORWARD_DAYS ?? 14);
+      const backDays = Number(process.env.SYNC_BACK_DAYS ?? 7);
+      const sweepFrom = apiTimestamp(new Date(now.getTime() - backDays * 86_400_000)).slice(0, 10);
       const forwardTo = apiTimestamp(new Date(now.getTime() + forwardDays * 86_400_000)).slice(0, 10);
+      sweep = { from: sweepFrom, to: forwardTo };
       const [updated, upcoming] = [
         await client.listAppointmentsUpdatedSince(apiTimestamp(watermark), apiTimestamp(now)),
-        await client.listAppointmentsByDate(apiTimestamp(now).slice(0, 10), forwardTo),
+        await client.listAppointmentsByDate(sweepFrom, forwardTo),
       ];
       const byId = new Map<string, Record<string, unknown>>();
       for (const a of [...updated, ...upcoming]) {
@@ -602,6 +681,16 @@ export async function runJobProgressSync(options: SyncOptions): Promise<SyncResu
       const outcome = await upsertAppointments(salesRows);
       counts.created = outcome.created;
       counts.updated = outcome.updated;
+      // Rescheduled: same CRM id, new time → the old row is superseded.
+      counts.appointments_retired_moved = await retireMovedAppointments(salesRows);
+      // Deleted in the CRM: only judged inside the window this run listed in
+      // full, and never when the listing came back empty (nothing to compare to).
+      if (sweep && jpRows.length > 0) {
+        const seen = jpRows.map((r) => String(r["jp_appointment_id"]));
+        const gone = await retireMissingAppointments(sweep.from, sweep.to, seen);
+        counts.appointments_retired_missing = gone.appointments;
+        counts.jp_appointments_retired = gone.mirror;
+      }
       counts.debrief_status_reconciled = await reconcileDebriefStatus();
     }
 
