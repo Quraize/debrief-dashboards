@@ -35,6 +35,9 @@ const VISIBLE = [
   { key: "gross", label: "Gross $", col: "R", type: "money" },
   { key: "changeOrders", label: "C.O.s", col: "S", type: "money" },
   { key: "totalRev", label: "Total Rev", col: "T", type: "money" },
+  { key: "paymentMethod", label: "Payment Method", col: "U" },
+  { key: "deposit", label: "Deposit", col: "Y", type: "money" },
+  { key: "progressPayments", label: "Progress Pmts", col: "Z", type: "money" },
   { key: "totalPayments", label: "Payments", col: "AA", type: "money" },
   { key: "balanceOwed", label: "Balance", col: "AB", type: "money" },
 ];
@@ -74,7 +77,8 @@ export default function WeeklyJobSheet() {
     return all
       .filter((r) => !group || r.stageGroup === group)
       .filter((r) => !soldFrom || (r.saleDate && r.saleDate >= soldFrom))
-      .filter((r) => !onlyGaps || r.gross == null || r.totalPayments == null || !r.salesRep || !r.saleDate)
+      .filter((r) => !onlyGaps || r.gross == null || r.totalPayments == null || !r.salesRep || !r.saleDate
+        || (Number(r.totalPayments) > 0 && r.paymentsCount === 0))
       .filter((r) => !q || [r.jobNumber, r.customer, r.city, r.address, r.division, r.salesRep, r.sub, r.stage]
         .some((v) => String(v ?? "").toLowerCase().includes(q)));
   }, [data, group, search, soldFrom, onlyGaps]);
@@ -215,9 +219,13 @@ export default function WeeklyJobSheet() {
             Sub falls back to the crews on the job's production schedules when no sub-contractor is set on the job itself.
           </div>
           <div>
-            <strong>Not yet available from JobProgress:</strong> {PENDING_COLUMNS.map((c) => `${c.col} ${c.header}`).join(" · ")} — its financial
-            summary reports payment totals only, not each deposit or progress payment or how it was paid. These export blank.
+            <strong>Payments</strong> come from the job's Payment History in JobProgress: Deposit is the first payment recorded, Progress
+            Payments are every later one, Payment Method lists the methods used (Cash/Check…). Canceled payments are ignored.
+            A job whose payment total changed is re-read within ~10 minutes.
           </div>
+          {PENDING_COLUMNS.length > 0 && (
+            <div><strong>Not yet available from JobProgress:</strong> {PENDING_COLUMNS.map((c) => `${c.col} ${c.header}`).join(" · ")}. These export blank.</div>
+          )}
           <div><strong>Still filled by hand:</strong> the checkbox columns B–J, Lender (V–X), SQs and Material Vendor.</div>
         </div>
       </div>

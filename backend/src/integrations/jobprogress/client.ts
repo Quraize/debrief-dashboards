@@ -353,6 +353,19 @@ export class JobProgressClient {
     }, "jobs:signed");
   }
 
+  /**
+   * Every payment recorded on a job (the office's Payment History tab):
+   * amount, method code, date, status, canceled. Verified live 2026-09-10.
+   */
+  async listJobPayments(jobId: string | number): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>(`/jobs/${jobId}/payment_history`, {}, "payment_history");
+  }
+
+  /** The company's payment methods: method code → the office's label ("echeque" → "Check"). */
+  async listPaymentTypes(): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/company/payment_types", {}, "payment_types");
+  }
+
   /** Financial summary for one job. Note the underscore in the path. */
   async financialSummary(jobId: string | number): Promise<Record<string, unknown> | null> {
     const body = await this.request<{ data?: unknown }>(

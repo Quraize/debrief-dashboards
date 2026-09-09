@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SHEET_COLUMNS, LINK_COLUMNS, AUTOMATED_COLUMNS, PENDING_COLUMNS,
-  totalRevenue, balanceOwed, sheetDate, sheetCell, sheetTable, toSheetCsv, rowLabel,
+  totalRevenue, balanceOwed, sheetDate, sheetCell, sheetTable, toSheetCsv, rowLabel, paymentBreakdown,
 } from "../src/weeklyJobSheet.js";
 
 const row = (over = {}) => ({
@@ -19,9 +19,34 @@ describe("column map", () => {
     expect(letters).toEqual(["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA","AB"]);
     expect(SHEET_COLUMNS).toHaveLength(28);
   });
-  it("automates the columns the office asked for and leaves payment detail pending", () => {
-    expect(AUTOMATED_COLUMNS.map((c) => c.col)).toEqual(["A","K","L","M","N","O","P","Q","R","S","T","AA","AB"]);
-    expect(PENDING_COLUMNS.map((c) => c.header)).toEqual(["Payment Method", "Deposit", "Progress Payment Amounts"]);
+  it("automates every column the office asked for; nothing is pending", () => {
+    expect(AUTOMATED_COLUMNS.map((c) => c.col)).toEqual(["A","K","L","M","N","O","P","Q","R","S","T","U","Y","Z","AA","AB"]);
+    expect(PENDING_COLUMNS).toEqual([]);
+  });
+});
+
+describe("paymentBreakdown", () => {
+  const pay = (id, amount, date, method, over = {}) => ({ id, amount, date, method, methodLabel: null, status: "applied", canceled: false, ...over });
+  it("deposit is the first payment, progress the rest, methods joined the way the sheet writes them", () => {
+    const r = paymentBreakdown([
+      pay("3", "1276.00", "2026-08-20", "echeque", { methodLabel: "Check" }),
+      pay("1", 1000, "2026-08-01", "cash", { methodLabel: "Cash" }),
+      pay("2", 500, "2026-08-01", "cash", { methodLabel: "Cash" }),
+    ]);
+    expect(r).toEqual({ deposit: 1000, progressPayments: 1776, paymentMethod: "Cash/Check", count: 3 });
+  });
+  it("ignores canceled, voided and non-positive entries; falls back to the method code", () => {
+    const r = paymentBreakdown([
+      pay("1", 2276, "2026-08-14", "cc"),
+      pay("2", 900, "2026-08-15", "cash", { canceled: "2026-08-16 10:00:00" }),
+      pay("3", 900, "2026-08-15", "cash", { status: "cancelled" }),
+      pay("4", -50, "2026-08-17", "cash"),
+    ]);
+    expect(r).toEqual({ deposit: 2276, progressPayments: null, paymentMethod: "cc", count: 1 });
+  });
+  it("is blank with no payments", () => {
+    expect(paymentBreakdown([])).toEqual({ deposit: null, progressPayments: null, paymentMethod: null, count: 0 });
+    expect(paymentBreakdown(null).count).toBe(0);
   });
 });
 

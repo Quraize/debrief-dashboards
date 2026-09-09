@@ -521,7 +521,7 @@ async function reconcileDebriefStatus(): Promise<number> {
 
 /** Generic batched upsert for the jp mirror tables (natural-key conflict). */
 async function upsertJpRows(
-  table: "jp_appointment" | "jp_job" | "jp_division", conflictColumn: string, rows: Record<string, unknown>[],
+  table: "jp_appointment" | "jp_job" | "jp_division" | "jp_job_payment", conflictColumn: string, rows: Record<string, unknown>[],
 ): Promise<number> {
   if (rows.length === 0) return 0;
   return withServiceRole(async (c) => {

@@ -30,13 +30,22 @@ const job = (id: number, stage: typeof STAGES[number], over: Record<string, unkn
 
 interface Stub {
   stages: Record<string, unknown>[]; inStages: Record<string, unknown>[]; byId: Record<string, Record<string, unknown>>;
-  summaries: Record<string, Record<string, unknown>>; calls: string[];
+  summaries: Record<string, Record<string, unknown>>; payments: Record<string, Record<string, unknown>[]>; calls: string[];
 }
+const PAYMENT_TYPES = [
+  { id: 122, label: "Cash", method: "cash" }, { id: 123, label: "Check", method: "echeque" }, { id: 124, label: "Credit Card", method: "cc" },
+];
 function stubClient(stub: Stub) {
   const impl = (async (url: string) => {
     const u = String(url);
     let data: unknown = [];
     if (u.includes("/workflow/stages")) { stub.calls.push("stages"); data = stub.stages; }
+    else if (u.includes("/company/payment_types")) { stub.calls.push("payment-types"); data = PAYMENT_TYPES; }
+    else if (u.includes("/payment_history")) {
+      const id = /jobs\/(\d+)\/payment_history/.exec(u)![1]!;
+      stub.calls.push(`payments:${id}`);
+      data = stub.payments[id] ?? [];
+    }
     else if (u.includes("/divisions")) { data = [{ id: 1, name: "ACR Roofing Division" }]; }
     else if (u.includes("/financial_summary")) {
       const id = /jobs\/(\d+)\/financial_summary/.exec(u)![1]!;
@@ -87,6 +96,16 @@ describe.skipIf(!reachable)("jobs by stage", () => {
   const stub: Stub = {
     stages: STAGES, inStages: [job(1, STAGES[0]!, SHEET_JOB_1), job(2, STAGES[1]!)], byId: {}, calls: [],
     summaries: { "2": { total_job_price: 4552, total_change_order_amount: "150.50", total_payment_received: 2276, total_amount_owed: 2426.5 } },
+    // Shaped like the API's record_payment response. Job 1: a cash deposit, a
+    // check, and a canceled duplicate. Job 2: one card payment.
+    payments: {
+      "1": [
+        { id: 7001, customer_id: 9001, job_id: 1, canceled: null, method: "cash", payment: "1000.00", status: "applied", date: "2026-08-01", reference_number: null },
+        { id: 7002, customer_id: 9001, job_id: 1, canceled: null, method: "echeque", payment: "1276.00", status: "applied", date: "2026-08-20", reference_number: "CHK 2211" },
+        { id: 7003, customer_id: 9001, job_id: 1, canceled: "2026-08-21 10:00:00", method: "echeque", payment: "1276.00", status: "cancelled", date: "2026-08-20", cancel_note: "dup" },
+      ],
+      "2": [{ id: 7010, customer_id: 9002, job_id: 2, canceled: null, method: "cc", payment: 2276, status: "unapplied", date: "2026-09-01" }],
+    },
   };
 
   beforeAll(async () => {
@@ -115,9 +134,11 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(r.counts).toMatchObject({
       stages_examined: 4, stages_tracked: 2, jobs_examined: 2, jobs_upserted: 2, jobs_moved_out: 0, locations_fetched: 2,
       financials_from_listing: 1, financial_summaries_fetched: 1, financial_summary_errors: 0,
+      payments_jobs_fetched: 2, payments_upserted: 4, payments_retired: 0, payment_errors: 0,
     });
     expect(stub.calls).toContain("summary:2");
     expect(stub.calls).not.toContain("summary:1");
+    expect(stub.calls.filter((c) => c === "payment-types")).toHaveLength(1);
     const stages = await db.owner.query(`SELECT code, name, jobs_count FROM jp_workflow_stage ORDER BY position`);
     expect(stages.rows.map((s) => s.code)).toEqual(["S-LEAD", "S-PROD-START", "S-COMPLETE", "S-PAID"]);
     const jobs = await db.owner.query(`SELECT jp_job_id, current_stage, stage_code, jp_customer_id, division, stage_seen_at IS NOT NULL AS tracked FROM jp_job ORDER BY jp_job_id`);
@@ -141,6 +162,17 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       { jp_job_id: "2", rep_names: null, sub_contractor_names: null, completion_date: null,
         price: "4552.00", co: "150.50", rev: "4702.50", paid: "2276.00", owed: "2426.50", fetched: true },
     ]);
+    const payments = (await db.owner.query(
+      `SELECT jp_payment_id, jp_job_id, amount::text, method, method_label, payment_date::text, canceled, reference_number
+         FROM jp_job_payment ORDER BY jp_payment_id`)).rows;
+    expect(payments).toEqual([
+      { jp_payment_id: "7001", jp_job_id: "1", amount: "1000.00", method: "cash", method_label: "Cash", payment_date: "2026-08-01", canceled: false, reference_number: null },
+      { jp_payment_id: "7002", jp_job_id: "1", amount: "1276.00", method: "echeque", method_label: "Check", payment_date: "2026-08-20", canceled: false, reference_number: "CHK 2211" },
+      { jp_payment_id: "7003", jp_job_id: "1", amount: "1276.00", method: "echeque", method_label: "Check", payment_date: "2026-08-20", canceled: true, reference_number: null },
+      { jp_payment_id: "7010", jp_job_id: "2", amount: "2276.00", method: "cc", method_label: "Credit Card", payment_date: "2026-09-01", canceled: false, reference_number: null },
+    ]);
+    const marks = (await db.owner.query(`SELECT jp_job_id, payments_fetched_total::text AS t, payments_fetched_at IS NOT NULL AS f FROM jp_job ORDER BY jp_job_id`)).rows;
+    expect(marks).toEqual([{ jp_job_id: "1", t: "2276.00", f: true }, { jp_job_id: "2", t: "2276.00", f: true }]);
   });
 
   it("does not re-read fresh money, and leaves names alone when a sweep did not ask for them", async () => {
@@ -150,8 +182,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const bare = job(1, STAGES[0]!, { financial_details: SHEET_JOB_1.financial_details, completion_date: SHEET_JOB_1.completion_date });
     stub.inStages = [bare, job(2, STAGES[1]!)];
     const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
-    expect(r.counts).toMatchObject({ financials_from_listing: 1, financial_summaries_fetched: 0 });
-    expect(stub.calls.filter((c) => c.startsWith("summary:"))).toEqual([]);
+    expect(r.counts).toMatchObject({ financials_from_listing: 1, financial_summaries_fetched: 0, payments_jobs_fetched: 0 });
+    expect(stub.calls.filter((c) => c.startsWith("summary:") || c.startsWith("payments:"))).toEqual([]);
     const row = (await db.owner.query(`SELECT rep_names, sub_contractor_names FROM jp_job WHERE jp_job_id = '1'`)).rows[0];
     expect(row).toEqual({ rep_names: "Jason Malarchak", sub_contractor_names: "Lucy" });
     stub.inStages = [job(1, STAGES[0]!, SHEET_JOB_1), job(2, STAGES[1]!)];
@@ -177,15 +209,34 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       division: "ACR Roofing Division", stage: "Production Started", stageGroup: "production",
       salesRep: "Jason Malarchak", sub: "Lucy", scheduledInstallDate: "2026-08-28", saleDate: "2026-08-01", completionDate: "2026-09-02",
       gross: 13999, changeOrders: 0, totalRev: 13999, totalPayments: 2276, balanceOwed: 11723,
-      paymentMethod: null, deposit: null, progressPayments: null,
+      // Deposit = first payment, progress = the rest, the canceled duplicate ignored.
+      paymentMethod: "Cash/Check", deposit: 1000, progressPayments: 1276, paymentsCount: 2,
     });
     expect(one!["jpUrl"]).toContain("/customer-jobs/9001/job/1");
     // No sub on the job: the crews on its live schedules stand in; the retired visit's crew does not.
     expect(two).toMatchObject({
       jobId: "2", salesRep: null, sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
       gross: 4552, changeOrders: 150.5, totalRev: 4702.5, totalPayments: 2276, balanceOwed: 2426.5,
+      paymentMethod: "Credit Card", deposit: 2276, progressPayments: null, paymentsCount: 1,
     });
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
+  });
+
+  it("re-reads a job's payments only when its payment total changes, retiring ones that vanished", async () => {
+    // A second check clears the balance on job 2; the office also deleted the card payment.
+    stub.summaries["2"] = { total_job_price: 4552, total_change_order_amount: "150.50", total_payment_received: 4702.5, total_amount_owed: 0 };
+    stub.payments["2"] = [
+      { id: 7011, customer_id: 9002, job_id: 2, canceled: null, method: "echeque", payment: 2276, status: "applied", date: "2026-09-01" },
+      { id: 7012, customer_id: 9002, job_id: 2, canceled: null, method: "echeque", payment: 2426.5, status: "applied", date: "2026-09-08" },
+    ];
+    await db.owner.query(`UPDATE jp_job SET financials_fetched_at = now() - interval '13 hours' WHERE jp_job_id = '2'`);
+    stub.calls.length = 0;
+    const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
+    expect(r.counts).toMatchObject({ financial_summaries_fetched: 1, payments_jobs_fetched: 1, payments_upserted: 2, payments_retired: 1 });
+    expect(stub.calls.filter((c) => c.startsWith("payments:"))).toEqual(["payments:2"]);
+    const two = (await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("prod@allied.test") })).json()
+      .rows.find((x: { jobId: string }) => x.jobId === "2");
+    expect(two).toMatchObject({ paymentMethod: "Check", deposit: 2276, progressPayments: 2426.5, totalPayments: 4702.5, balanceOwed: 0, paymentsCount: 2 });
   });
 
   it("serves the board grouped like the Jobs screen, with days in stage and customer names", async () => {

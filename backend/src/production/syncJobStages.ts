@@ -30,6 +30,11 @@ export interface StageSyncCounts {
   /** Per-job financial_summary calls this run (stale rows only, capped). */
   financial_summaries_fetched: number;
   financial_summary_errors: number;
+  /** Jobs whose payment history was (re)read this run, and the payments written. */
+  payments_jobs_fetched: number;
+  payments_upserted: number;
+  payments_retired: number;
+  payment_errors: number;
   api_requests: number;
   retries: number;
   rate_limit_hits: number;
@@ -54,6 +59,7 @@ export interface StageSyncResult {
 const emptyCounts = (): StageSyncCounts => ({
   stages_examined: 0, stages_tracked: 0, jobs_examined: 0, jobs_upserted: 0, jobs_moved_out: 0,
   locations_fetched: 0, financials_from_listing: 0, financial_summaries_fetched: 0, financial_summary_errors: 0,
+  payments_jobs_fetched: 0, payments_upserted: 0, payments_retired: 0, payment_errors: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
 
@@ -170,6 +176,99 @@ export async function refreshFinancials(
   }
 }
 
+const bool = (v: unknown): boolean => v === true || v === 1 || v === "1" || v === "true";
+
+/** One payment_history entry → a jp_job_payment row; null when it has no id or amount. */
+export function mapPayment(
+  api: Record<string, unknown>, jpJobId: string, labels: Map<string, string>,
+): Record<string, unknown> | null {
+  const id = str(api["id"]);
+  const amount = num(api["payment"]) ?? num(api["amount"]);
+  if (!id || amount === null) return null;
+  const method = str(api["method"]) ?? str(api["payment_method"]);
+  const status = str(api["status"]);
+  const canceledRaw = api["canceled"] ?? api["cancelled"];
+  const canceled = (canceledRaw != null && canceledRaw !== false && canceledRaw !== 0 && canceledRaw !== "0" && canceledRaw !== "")
+    || /cancel|void/i.test(status ?? "");
+  const date = str(api["date"]) ?? str(api["payment_date"]) ?? str(api["created_at"]);
+  return {
+    jp_payment_id: id,
+    jp_job_id: str(api["job_id"]) ?? jpJobId,
+    jp_customer_id: str(api["customer_id"]),
+    amount,
+    method,
+    method_label: method ? labels.get(method.toLowerCase()) ?? null : null,
+    payment_date: date ? date.slice(0, 10) : null,
+    status,
+    canceled,
+    reference_number: str(api["reference_number"]) ?? str(api["echeque_number"]),
+    raw: JSON.stringify(api),
+    last_seen_at: new Date(),
+    deleted_at: null,
+  };
+}
+
+/**
+ * Mirrors the payment list for tracked jobs whose payment TOTAL changed since
+ * the list was last read (or was never read, or is a week old): one call per
+ * job, capped per run like the money refresh. Payments that JobProgress no
+ * longer returns for the job are retired, never erased.
+ */
+export async function refreshPayments(
+  client: JobProgressClient, counts: StageSyncCounts,
+  perRun = Number(process.env.PRODUCTION_FINANCIALS_PER_RUN ?? FINANCIALS_PER_RUN_DEFAULT),
+): Promise<void> {
+  if (perRun <= 0) return;
+  const stale = await withServiceRole(async (c) => {
+    const { rows } = await c.query<{ jp_job_id: string; total: string | null }>(
+      `SELECT jp_job_id, total_payment_received::text AS total FROM jp_job
+        WHERE stage_seen_at IS NOT NULL
+          AND (coalesce(total_payment_received, 0) > 0 OR coalesce(payments_fetched_total, 0) > 0)
+          AND (payments_fetched_at IS NULL
+               OR payments_fetched_total IS DISTINCT FROM total_payment_received
+               OR payments_fetched_at < now() - interval '7 days')
+        ORDER BY payments_fetched_at NULLS FIRST, jp_job_id
+        LIMIT $1`,
+      [perRun]);
+    return rows;
+  }, "job-stages:payments-stale", { quiet: true });
+  if (stale.length === 0) return;
+
+  const labels = new Map<string, string>();
+  try {
+    for (const t of await client.listPaymentTypes()) {
+      const method = str(t["method"]);
+      const label = str(t["label"]);
+      if (method && label && !labels.has(method.toLowerCase())) labels.set(method.toLowerCase(), label);
+    }
+  } catch (err) {
+    console.warn(`[job-stages] payment types unavailable, keeping method codes: ${(err as Error).message}`);
+  }
+
+  for (const { jp_job_id: id, total } of stale) {
+    try {
+      counts.payments_jobs_fetched++;
+      const rows = (await client.listJobPayments(id))
+        .map((p) => mapPayment(p, id, labels))
+        .filter((r): r is Record<string, unknown> => r !== null);
+      counts.payments_upserted += await upsertJpRows("jp_job_payment", "jp_payment_id", rows);
+      await withServiceRole(async (c) => {
+        const gone = await c.query(
+          `UPDATE jp_job_payment SET deleted_at = now()
+            WHERE jp_job_id = $1 AND deleted_at IS NULL AND NOT (jp_payment_id = ANY($2::text[]))`,
+          [id, rows.map((r) => String(r["jp_payment_id"]))]);
+        counts.payments_retired += gone.rowCount ?? 0;
+        await c.query(
+          `UPDATE jp_job SET payments_fetched_at = now(), payments_fetched_total = $2 WHERE jp_job_id = $1`,
+          [id, total]);
+      }, "job-stages:payments-mark", { quiet: true });
+    } catch (err) {
+      counts.payment_errors++;
+      console.warn(`[job-stages] payment history failed for job ${id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** A jp_job row from a job payload, with the stage sweep's own extras. */
 export function mapStageJob(api: Record<string, unknown>, divisionNames: Map<string, string>, seen: boolean): Record<string, unknown> {
   const row = mapJpJob(api, divisionNames);
@@ -209,6 +308,7 @@ export async function runJobStageSync(options: StageSyncOptions = {}): Promise<S
     counts.jobs_upserted = await upsertJpRows("jp_job", "jp_job_id", rows);
     await upsertLocations(jobs, counts);
     await refreshFinancials(client, jobs, counts);
+    await refreshPayments(client, counts);
 
     // Sweep 2: jobs we last saw in a tracked stage that were not returned now.
     const seenIds = new Set(rows.map((r) => String(r["jp_job_id"])));

@@ -16,12 +16,15 @@
  *   R  gross                 jp_job.total_job_price       (financial summary)
  *   S  change orders         jp_job.total_change_order_amount
  *   T  total revenue         jp_job.total_job_revenue, else R + S
+ *   U  payment method        methods used across the job's payments (jp_job_payment)
+ *   Y  deposit               the first payment recorded on the job
+ *   Z  progress payments     every later payment, summed
  *   AA total payments        jp_job.total_payment_received
  *   AB balance owed          jp_job.total_amount_owed, else T − AA
  */
 import { dbApp, withUser, withServiceRole, type SessionContext } from "../db/client.js";
 import { stageGroup } from "@allied/shared/jobStages";
-import { totalRevenue, balanceOwed, rowLabel } from "@allied/shared/weeklyJobSheet";
+import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown } from "@allied/shared/weeklyJobSheet";
 import { BOARD_TIMEZONE, jobProgressUrl } from "./board.js";
 
 export interface SheetRow {
@@ -32,10 +35,12 @@ export interface SheetRow {
   salesRep: string | null; sub: string | null;
   scheduledInstallDate: string | null; saleDate: string | null; completionDate: string | null;
   gross: number | null; changeOrders: number | null; totalRev: number | null;
-  paymentMethod: null; deposit: null; progressPayments: null;
+  paymentMethod: string | null; deposit: number | null; progressPayments: number | null; paymentsCount: number;
   totalPayments: number | null; balanceOwed: number | null;
-  financialsFetchedAt: string | null; jpUrl: string | null;
+  financialsFetchedAt: string | null; paymentsFetchedAt: string | null; jpUrl: string | null;
 }
+
+interface PaymentJson { id: string; amount: number | string; date: string | null; method: string | null; methodLabel: string | null; status: string | null; canceled: boolean }
 
 export interface WeeklyJobSheet {
   rows: SheetRow[];
@@ -53,7 +58,8 @@ interface Row {
   crews: string[] | null;
   total_job_price: string | null; total_change_order_amount: string | null; total_job_revenue: string | null;
   total_payment_received: string | null; total_amount_owed: string | null;
-  financials_fetched_at: Date | null;
+  financials_fetched_at: Date | null; payments_fetched_at: Date | null;
+  payments: PaymentJson[];
 }
 
 const money = (v: string | null): number | null => (v === null ? null : Number(v));
@@ -67,7 +73,8 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
             (sch.first_start AT TIME ZONE $1)::date::text AS first_install_day,
             crew.names AS crews,
             j.total_job_price::text, j.total_change_order_amount::text, j.total_job_revenue::text,
-            j.total_payment_received::text, j.total_amount_owed::text, j.financials_fetched_at
+            j.total_payment_received::text, j.total_amount_owed::text, j.financials_fetched_at, j.payments_fetched_at,
+            pay.payments
        FROM jp_job j
        LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
        LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
@@ -78,6 +85,13 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
          SELECT array_agg(DISTINCT n ORDER BY n) AS names
            FROM jp_schedule s, unnest(s.crew_names) AS n
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) crew ON true
+       LEFT JOIN LATERAL (
+         SELECT coalesce(json_agg(json_build_object(
+                  'id', p.jp_payment_id, 'amount', p.amount, 'date', p.payment_date::text, 'method', p.method,
+                  'methodLabel', p.method_label, 'status', p.status, 'canceled', p.canceled)
+                ORDER BY p.payment_date, p.jp_payment_id), '[]'::json) AS payments
+           FROM jp_job_payment p
+          WHERE p.jp_job_id = j.jp_job_id AND p.deleted_at IS NULL) pay ON true
       WHERE j.stage_seen_at IS NOT NULL
       ORDER BY j.contract_signed_date DESC NULLS LAST, j.job_number`,
     [BOARD_TIMEZONE])).rows);
@@ -87,6 +101,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
     const changeOrders = money(r.total_change_order_amount);
     const totalRev = money(r.total_job_revenue) ?? totalRevenue(gross, changeOrders);
     const totalPayments = money(r.total_payment_received);
+    const pay = paymentBreakdown(r.payments ?? []);
     const base = {
       jobId: r.jp_job_id, customerId: r.jp_customer_id, jobNumber: r.job_number, jobName: r.job_name,
       customer: r.customer_name, address: r.address, city: r.city,
@@ -101,10 +116,11 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
       sub: r.sub_contractor_names ?? (r.crews && r.crews.length ? r.crews.join(", ") : null),
       scheduledInstallDate: r.first_install_day, saleDate: r.contract_signed_date, completionDate: r.completion_date,
       gross, changeOrders, totalRev,
-      paymentMethod: null, deposit: null, progressPayments: null,
+      paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,
       totalPayments,
       balanceOwed: money(r.total_amount_owed) ?? balanceOwed(totalRev, totalPayments, r.current_stage),
       financialsFetchedAt: r.financials_fetched_at ? r.financials_fetched_at.toISOString() : null,
+      paymentsFetchedAt: r.payments_fetched_at ? r.payments_fetched_at.toISOString() : null,
       jpUrl: jobProgressUrl(r.jp_customer_id, r.jp_job_id),
     };
   });

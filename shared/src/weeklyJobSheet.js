@@ -7,11 +7,10 @@
 // A..AB so a download can be pasted straight over the tab.
 //
 // Columns without a `key` are still filled by hand (checkboxes, lender notes,
-// material vendor). Columns marked `pending` have a home in the sheet and in
-// the row shape, but JobProgress does not expose the figure yet — its
-// financial summary carries payment TOTALS, not the individual deposit and
-// progress payments or how they were paid. They are exported blank rather than
-// guessed.
+// material vendor). A column marked `pending` would have a home in the sheet
+// and in the row shape but no source in JobProgress yet; it exports blank
+// rather than guessed. (None today: payment detail comes from the job's
+// payment history — see paymentBreakdown.)
 
 export const SHEET_COLUMNS = [
   { col: "A", header: "Job #", key: "jobNumber" },
@@ -34,12 +33,12 @@ export const SHEET_COLUMNS = [
   { col: "R", header: "Gross $", key: "gross", type: "money" },
   { col: "S", header: "Change Orders", key: "changeOrders", type: "money" },
   { col: "T", header: "Total Rev w/ C.O.s", key: "totalRev", type: "money" },
-  { col: "U", header: "Payment Method", key: "paymentMethod", pending: true },
+  { col: "U", header: "Payment Method", key: "paymentMethod" },
   { col: "V", header: "Lender" },
   { col: "W", header: "Payment Method/Lender/Plan#/ Dealr Fee/ Loan Docs/ Tier if App/ Signed" },
   { col: "X", header: "Invoice Created & Payments Applied Upon Job Start" },
-  { col: "Y", header: "Deposit", key: "deposit", type: "money", pending: true },
-  { col: "Z", header: "Progress Payment Amounts", key: "progressPayments", type: "money", pending: true },
+  { col: "Y", header: "Deposit", key: "deposit", type: "money" },
+  { col: "Z", header: "Progress Payment Amounts", key: "progressPayments", type: "money" },
   { col: "AA", header: "Total Payments Received", key: "totalPayments", type: "money" },
   { col: "AB", header: "Balance Owed", key: "balanceOwed", type: "money" },
 ];
@@ -84,6 +83,38 @@ export function balanceOwed(totalRev, totalPayments, stage) {
   const t = num(totalRev);
   if (t === null) return null;
   return Math.round((t - (num(totalPayments) ?? 0)) * 100) / 100;
+}
+
+/**
+ * The sheet's payment columns from a job's payment history.
+ *
+ *   Y  Deposit                  the first payment recorded on the job
+ *   Z  Progress Payment Amounts every later payment, summed
+ *   U  Payment Method           the methods used, in order, joined with "/"
+ *                               (the office writes "Check/Cash", "Credit Card")
+ *
+ * Canceled, voided or non-positive entries are ignored. Payments are ordered
+ * by date, then by id for two on the same day. Y + Z equals what the sheet's
+ * AA formula sums, and matches total_payment_received when JobProgress agrees
+ * with itself.
+ */
+export function paymentBreakdown(payments) {
+  const live = (payments ?? [])
+    .filter((p) => !p.canceled && !/cancel|void/i.test(String(p.status ?? "")))
+    .map((p) => ({ ...p, amount: num(p.amount) }))
+    .filter((p) => p.amount !== null && p.amount > 0)
+    .sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? ""))
+      || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true }));
+  if (live.length === 0) return { deposit: null, progressPayments: null, paymentMethod: null, count: 0 };
+  const deposit = live[0].amount;
+  const progress = live.slice(1).reduce((n, p) => n + p.amount, 0);
+  const methods = [...new Set(live.map((p) => p.methodLabel || p.method).filter(Boolean))];
+  return {
+    deposit,
+    progressPayments: live.length > 1 ? Math.round(progress * 100) / 100 : null,
+    paymentMethod: methods.length ? methods.join("/") : null,
+    count: live.length,
+  };
 }
 
 /** `YYYY-MM-DD` → `M/D/YYYY`, the format the sheet's date columns use. */
