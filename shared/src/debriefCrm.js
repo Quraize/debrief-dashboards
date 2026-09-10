@@ -20,6 +20,7 @@ export const AMOUNT_TOLERANCE_PCT = 0.05;
 
 export const DISCREPANCY_LABELS = {
   outcome_sale: "Sale recorded on one side only",
+  later_sale: "Sold after the visit — the CRM job confirms it",
   outcome_demo: "Demo on one side, no demo on the other",
   outcome_no_see: "CRM says No See, debrief says the customer was seen",
   outcome_cancelled: "CRM says cancelled, debrief says the appointment ran",
@@ -72,8 +73,14 @@ export function compareDebriefToCrm(debrief, ctx, now = new Date()) {
   const dNotRun = NON_COMPLETED_OUTCOMES.includes(outcome);
   const crmResult = crm.result || "—";
 
+  // A sale closed after the visit lives on the CRM JOB (contract signed), not
+  // on the appointment's result form, which still says "Demo No Sale". When
+  // the debrief carries the sale and the job is signed, the two sides agree.
+  const laterSale = dSale && !crm.isSale && !!job?.signedDate;
+
   if (crm.status === "run") {
-    if (dSale !== crm.isSale) add("outcome_sale", outcome || "—", crmResult);
+    if (laterSale) add("later_sale", `${outcome || "—"} + sale ${debrief.sale_signed_date || ""}`.trim(), `${crmResult}; job signed ${job.signedDate}`);
+    else if (dSale !== crm.isSale) add("outcome_sale", outcome || "—", crmResult);
     else if (dDemo !== crm.isDemo && !dNotRun) add("outcome_demo", outcome || "—", crmResult);
   } else if (crm.status === "no_see") {
     if (!dNoShow && !dNotRun) add("outcome_no_see", outcome || "—", crmResult);
@@ -83,7 +90,7 @@ export function compareDebriefToCrm(debrief, ctx, now = new Date()) {
     if (!dNotRun) add("crm_no_result", outcome || "—", "No result");
   }
 
-  if (dSale && crm.isSale && job?.price != null && amountsDiffer(debrief.sale_amount, job.price)) {
+  if (dSale && (crm.isSale || laterSale) && job?.price != null && amountsDiffer(debrief.sale_amount, job.price)) {
     add("amount", money(debrief.sale_amount), money(job.price));
   }
 

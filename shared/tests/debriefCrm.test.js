@@ -61,6 +61,21 @@ describe("compareDebriefToCrm", () => {
     expect(codes(b)).toEqual(["outcome_sale"]);
   });
 
+  it("treats a later sale as agreement when the CRM job is signed, and still checks the amount", () => {
+    const later = debrief({ appointment_outcome: "Demo Completed — Demo No Sale", sale_amount: "27500", sale_signed_date: "2026-09-03", sale_close_type: "Sale After Follow-Up" });
+    const signedJob = [{ jp_job_id: "7001", total_job_price: "27500", contract_signed_date: "2026-09-03" }];
+    const r = compareDebriefToCrm(later, ctx([jp({ result_option_name: "Demo No Sale" })], signedJob), NOW);
+    expect(codes(r)).toEqual(["later_sale"]);
+    expect(r.severity).toBe("info");
+    expect(HARD_DISCREPANCIES.has("later_sale")).toBe(false);
+    // Unsigned job: the sale really is on one side only.
+    const unsigned = compareDebriefToCrm(later, ctx([jp({ result_option_name: "Demo No Sale" })], [{ jp_job_id: "7001", total_job_price: null }]), NOW);
+    expect(codes(unsigned)).toEqual(["outcome_sale"]);
+    // Signed for a different amount: the amount check still fires.
+    const off = compareDebriefToCrm(later, ctx([jp({ result_option_name: "Demo No Sale" })], [{ jp_job_id: "7001", total_job_price: "31957", contract_signed_date: "2026-09-03" }]), NOW);
+    expect(codes(off)).toEqual(["later_sale", "amount"]);
+  });
+
   it("flags demo vs no-demo, No See, and cancelled disagreements", () => {
     const noDemoCrm = ctx([jp({ result_option_name: "No Demo" })]);
     expect(codes(compareDebriefToCrm(debrief({ appointment_outcome: "Demo Completed — Demo No Sale", sale_amount: null }), noDemoCrm, NOW))).toEqual(["outcome_demo"]);
