@@ -4,7 +4,7 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing, Table2
 } from "lucide-react";
 import { PRODUCTION_ROLES, isProductionOnly } from "@allied/shared/constants";
 
@@ -41,8 +41,7 @@ const ADMIN_OPERATIONS = [
 const PRODUCTION_NAV = [
   { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
   { to: "/production/jobs", label: "Jobs by Stage", icon: HardHat },
-  // Weekly Job Sheet (/production/weekly-job-sheet) is deliberately unlisted
-  // until the managers sign off on it; the page and API still exist.
+  { to: "/production/weekly-job-sheet", label: "Weekly Job Sheet", icon: Table2 },
 ];
 
 const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];
