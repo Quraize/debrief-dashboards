@@ -52,7 +52,7 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
   ws.columns = columns.map((c) => ({
     header: c.header,
     key: c.col,
-    width: c.type === "money" ? 14 : c.type === "date" ? 12 : c.key === "jobNumber" ? 18 : c.key ? 22 : 10,
+    width: c.type === "money" ? 14 : c.type === "date" ? 12 : c.key === "label" ? 44 : c.key === "jobNumber" ? 18 : c.key ? 22 : 10,
   }));
   const header = ws.getRow(1);
   header.font = { bold: true };
@@ -112,7 +112,8 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
     ["Gross / Change Orders / Total (R, S, T)", "JobProgress financial summary: job price, change orders, total revenue"],
     ["Payment Method / Deposit / Progress (U, Y, Z)", "the job's payment history: methods used; first payment; every later payment summed. Canceled payments ignored."],
     ["Total Payments / Balance Owed (AA, AB)", "JobProgress financial summary: payments received, amount owed"],
-    ["Still by hand", "B–J checkboxes, Lender (V–X), SQs (AC), Material Vendor (AD)"],
+    ["Column A / AC", "A is Town/Address/Customer built from the JobProgress job address and customer; AC is the JobProgress job number"],
+    ["Still by hand", "B–J checkboxes, Lender (V–X), Material Vendor (AD)"],
   ];
   for (const l of lines) about.addRow(l);
   about.getColumn(1).font = { bold: true };

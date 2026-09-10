@@ -232,11 +232,13 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(res.rawPayload);
     const ws = wb.getWorksheet("WEEKLY JOB SHEET")!;
-    const header = (ws.getRow(1).values as unknown[]).slice(1, 29);
-    expect(header[0]).toBe("Job #");
+    const header = (ws.getRow(1).values as unknown[]).slice(1, 30);
+    expect(header[0]).toBe("Town/Address/Customer");
     expect(header[12]).toBe("Job Stage");
     expect(header[27]).toBe("Balance Owed");
-    expect(ws.getRow(2).getCell("A").value).toBe("2609-2-01");
+    expect(header[28]).toBe("Job #");
+    expect(ws.getRow(2).getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
+    expect(ws.getRow(2).getCell("AC").value).toBe("2609-2-01");
     expect(ws.getRow(2).getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");
     expect(ws.getRow(2).getCell("R").value).toBe(4552);
     expect(ws.getRow(2).getCell("R").numFmt).toBe('"$"#,##0.00');

@@ -23,9 +23,8 @@ const sum = (rows, key) => rows.reduce((n, r) => n + (r[key] == null ? 0 : Numbe
 // The on-screen table shows the sheet's automated columns plus what the
 // office needs to recognise a row (customer, town). The CSV is the full A..AB.
 const VISIBLE = [
-  { key: "jobNumber", label: "Job #", col: "A" },
-  { key: "customer", label: "Customer" },
-  { key: "city", label: "Town" },
+  { key: "label", label: "Town/Address/Customer", col: "A" },
+  { key: "jobNumber", label: "Job #", col: "AC" },
   { key: "division", label: "Division", col: "K" },
   { key: "trades", label: "Trades", col: "L" },
   { key: "stage", label: "Job Stage", col: "M" },
@@ -221,9 +220,9 @@ export default function WeeklyJobSheet() {
                 {rows.map((r) => (
                   <tr key={r.jobId} className="border-b border-border/50 hover:bg-secondary/30">
                     {VISIBLE.map((c) => (
-                      <td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.type === "money" ? "text-right tabular-nums" : ""} ${c.key === "jobNumber" ? "font-semibold text-primary" : ""} ${c.key === "customer" ? "font-medium" : ""}`}>
+                      <td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.type === "money" ? "text-right tabular-nums" : ""} ${c.key === "label" ? "font-semibold text-primary" : ""} ${c.key === "jobNumber" ? "text-xs" : ""}`}>
                         {cell(c, r)}
-                        {c.key === "customer" && r.insurance && <span className="ml-1 text-[10px] font-bold px-1.5 rounded bg-indigo-100 text-indigo-700">INS</span>}
+                        {c.key === "label" && r.insurance && <span className="ml-1 text-[10px] font-bold px-1.5 rounded bg-indigo-100 text-indigo-700">INS</span>}
                       </td>
                     ))}
                     <td className="px-3 py-2">{r.jpUrl && <a href={r.jpUrl} target="_blank" rel="noreferrer" className="text-accent" title="Open in JobProgress"><ExternalLink className="w-4 h-4" /></a>}</td>
@@ -246,6 +245,7 @@ export default function WeeklyJobSheet() {
         <div className="space-y-1">
           <div>
             <strong>Filled from JobProgress:</strong> {SHEET_COLUMNS.filter((c) => c.key && !c.pending).map((c) => `${c.col} ${c.header}`).join(" · ")}.
+            Column A is built as Town/Address/Customer from the JobProgress job address and customer; the job number goes in AC.
             Sub falls back to the crews on the job's production schedules when no sub-contractor is set on the job itself.
           </div>
           <div>

@@ -16,11 +16,15 @@ const row = (over = {}) => ({
 describe("column map", () => {
   it("covers A..AB in order, so a CSV pastes over the tab", () => {
     const letters = SHEET_COLUMNS.map((c) => c.col);
-    expect(letters).toEqual(["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA","AB"]);
-    expect(SHEET_COLUMNS).toHaveLength(28);
+    expect(letters).toEqual(["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","AA","AB","AC"]);
+    expect(SHEET_COLUMNS).toHaveLength(29);
+  });
+  it("keeps the office's Town/Address/Customer key in A and puts the job number in AC", () => {
+    expect(SHEET_COLUMNS[0]).toMatchObject({ col: "A", key: "label" });
+    expect(SHEET_COLUMNS[28]).toMatchObject({ col: "AC", key: "jobNumber", header: "Job #" });
   });
   it("automates every column the office asked for; nothing is pending", () => {
-    expect(AUTOMATED_COLUMNS.map((c) => c.col)).toEqual(["A","K","L","M","N","O","P","Q","R","S","T","U","Y","Z","AA","AB"]);
+    expect(AUTOMATED_COLUMNS.map((c) => c.col)).toEqual(["A","K","L","M","N","O","P","Q","R","S","T","U","Y","Z","AA","AB","AC"]);
     expect(PENDING_COLUMNS).toEqual([]);
   });
 });
@@ -87,25 +91,26 @@ describe("cell formatting", () => {
 });
 
 describe("table and CSV", () => {
-  it("puts the job number in A, the stage in M and the balance in AB", () => {
+  it("puts the label in A, the stage in M, the balance in AB and the job number in AC", () => {
     const [header, first] = sheetTable([row()]);
-    expect(header[0]).toBe("Job #");
+    expect(header[0]).toBe("Town/Address/Customer");
     expect(header[12]).toBe("Job Stage");
     expect(header[27]).toBe("Balance Owed");
-    expect(first[0]).toBe("2608-9054-01");
+    expect(header[28]).toBe("Job #");
+    expect(first[0]).toBe("Paramus/320 Ivy Place/Sam Molano");
     expect(first[10]).toBe("ACR Roofing Division");
     expect(first[12]).toBe("COMPLETED NEED FINAL PAYMENT!!");
     expect(first[15]).toBe("8/28/2026");
     expect(first[17]).toBe("13999.00");
     expect(first[27]).toBe("11723.00");
-    expect(first[28]).toBe("Paramus/320 Ivy Place/Sam Molano");
+    expect(first[28]).toBe("2608-9054-01");
     expect(first[30]).toBe("5001");
   });
   it("escapes quotes and keeps one line per job", () => {
     const csv = toSheetCsv([row({ sub: 'Lucy "LC" Construction' })]);
     const lines = csv.split("\r\n");
     expect(lines).toHaveLength(2);
-    expect(lines[0].startsWith('"Job #","PIF"')).toBe(true);
+    expect(lines[0].startsWith('"Town/Address/Customer","PIF"')).toBe(true);
     expect(lines[1]).toContain('"Lucy ""LC"" Construction"');
     expect(lines[1].split('","')).toHaveLength(SHEET_COLUMNS.length + LINK_COLUMNS.length);
   });

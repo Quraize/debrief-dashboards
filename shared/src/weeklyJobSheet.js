@@ -13,7 +13,9 @@
 // payment history — see paymentBreakdown.)
 
 export const SHEET_COLUMNS = [
-  { col: "A", header: "Job #", key: "jobNumber" },
+  // Column A stays the office's own key, "Town/Address/Customer"; the job
+  // number lives in AC (managers' decision, 2026-09-09).
+  { col: "A", header: "Town/Address/Customer", key: "label" },
   { col: "B", header: "PIF" },
   { col: "C", header: "PIF Date" },
   { col: "D", header: "Job Complete" },
@@ -41,12 +43,12 @@ export const SHEET_COLUMNS = [
   { col: "Z", header: "Progress Payment Amounts", key: "progressPayments", type: "money" },
   { col: "AA", header: "Total Payments Received", key: "totalPayments", type: "money" },
   { col: "AB", header: "Balance Owed", key: "balanceOwed", type: "money" },
+  { col: "AC", header: "Job #", key: "jobNumber" },
 ];
 
-/** Extra columns after AB that tie a row back to JobProgress (the sheet keeps
+/** Extra columns after AC that tie a row back to JobProgress (the sheet keeps
  *  the same set far to the right, HT..HY). */
 export const LINK_COLUMNS = [
-  { header: "Town/Address/Customer", key: "label" },
   { header: "JP Customer ID", key: "customerId" },
   { header: "JP Job ID", key: "jobId" },
   { header: "JP Overview URL", key: "jpUrl" },
@@ -146,7 +148,7 @@ export function sheetTable(rows) {
 
 const csvEscape = (v) => `"${String(v).replace(/"/g, '""')}"`;
 
-/** CSV whose first 28 columns are the tab's A..AB, ready to paste over it. */
+/** CSV whose first 29 columns are the tab's A..AC, ready to paste over it. */
 export function toSheetCsv(rows) {
   return sheetTable(rows).map((cells) => cells.map(csvEscape).join(",")).join("\r\n");
 }
