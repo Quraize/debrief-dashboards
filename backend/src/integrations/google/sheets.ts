@@ -110,12 +110,18 @@ export class GoogleSheetsClient {
     return await res.json() as T;
   }
 
+  /** A tab by its title: its numeric id (the `gid`) and grid size; null when there is no such tab. */
+  async sheetByTitle(title: string): Promise<{ sheetId: number; rowCount: number; columnCount: number } | null> {
+    const body = await this.request<{ sheets?: { properties?: { sheetId?: number; title?: string; gridProperties?: { rowCount?: number; columnCount?: number } } }[] }>(
+      `${SHEETS}/${this.spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`, "spreadsheet");
+    const hit = (body.sheets ?? []).find((s) => s.properties?.title === title)?.properties;
+    if (!hit || hit.sheetId === undefined) return null;
+    return { sheetId: hit.sheetId, rowCount: hit.gridProperties?.rowCount ?? 1000, columnCount: hit.gridProperties?.columnCount ?? 26 };
+  }
+
   /** The numeric sheet id (the `gid`) of a tab, by its title; null when there is no such tab. */
   async sheetIdByTitle(title: string): Promise<number | null> {
-    const body = await this.request<{ sheets?: { properties?: { sheetId?: number; title?: string } }[] }>(
-      `${SHEETS}/${this.spreadsheetId}?fields=sheets.properties(sheetId,title)`, "spreadsheet");
-    const hit = (body.sheets ?? []).find((s) => s.properties?.title === title);
-    return hit?.properties?.sheetId ?? null;
+    return (await this.sheetByTitle(title))?.sheetId ?? null;
   }
 
   /** Every non-empty row of a tab as raw values (dates as serial numbers, checkboxes as booleans). */

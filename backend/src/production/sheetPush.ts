@@ -81,8 +81,9 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
   const syncRunId = await openRun(options.dryRun, options.startedBy);
   try {
-    const sheetId = await client.sheetIdByTitle(settings.tab);
-    if (sheetId === null) throw new Error(`Tab "${settings.tab}" not found in the spreadsheet (check the tab name and that the sheet is shared with the service account)`);
+    const tab = await client.sheetByTitle(settings.tab);
+    if (!tab) throw new Error(`Tab "${settings.tab}" not found in the spreadsheet (check the tab name and that the sheet is shared with the service account)`);
+    const sheetId = tab.sheetId;
 
     const feed = await (options.feed ?? weeklyJobSheetAsService)();
     const today = officeDay(now);
@@ -94,7 +95,7 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, { now, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null });
-    const requests = toRequests(plan, sheetId);
+    const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
     if (!options.dryRun && requests.length) await client.batchUpdate(requests);
 
     const weekLabels = plan.summary.weeks.map((w) => w.label);
@@ -133,9 +134,20 @@ function cellData(value: CellValue | { formula: string }): Record<string, unknow
   return { userEnteredValue: { stringValue: value } };
 }
 
-/** The tab's layout, applied once when the header is created. */
-export function setupRequests(sheetId: number): unknown[] {
+export interface GridSize { rowCount: number; columnCount: number }
+const NEEDED_COLUMNS = colIndex("HZ") + 1;
+
+/** Grows a tab that is smaller than the layout (a fresh tab is 26 × 1000). */
+export function growRequests(sheetId: number, grid: GridSize): unknown[] {
   const reqs: unknown[] = [];
+  if (grid.columnCount < NEEDED_COLUMNS) reqs.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: NEEDED_COLUMNS - grid.columnCount } });
+  if (grid.rowCount < FORMAT_ROWS) reqs.push({ appendDimension: { sheetId, dimension: "ROWS", length: FORMAT_ROWS - grid.rowCount } });
+  return reqs;
+}
+
+/** The tab's layout, applied once when the header is created. */
+export function setupRequests(sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
+  const reqs: unknown[] = growRequests(sheetId, grid);
   reqs.push({ updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: 1 } }, fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount" } });
   for (const c of COLS) {
     const col = colIndex(c.col);
@@ -163,9 +175,11 @@ export function setupRequests(sheetId: number): unknown[] {
 const LABEL_STYLE = { backgroundColor: rgb("FFFF00"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("34A853") } };
 const TOTAL_STYLE = { backgroundColor: rgb("D1F1DA"), textFormat: { bold: true, fontSize: 8 } };
 
-export function toRequests(plan: Plan, sheetId: number): unknown[] {
+export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
   const reqs: unknown[] = [];
-  if (plan.summary.headerCreated) reqs.push(...setupRequests(sheetId));
+  // A tab someone created by hand may be narrower than HZ even when it already has a header.
+  if (plan.summary.headerCreated) reqs.push(...setupRequests(sheetId, grid));
+  else reqs.push(...growRequests(sheetId, grid));
   const lastCol = colIndex("HZ") + 1;
   for (const op of plan.ops) opRequests(op, sheetId, lastCol, reqs);
   return reqs;

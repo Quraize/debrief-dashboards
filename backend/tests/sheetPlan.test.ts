@@ -149,9 +149,12 @@ describe("toRequests", () => {
     // No setup requests when the header already existed.
     expect(reqs.some((r) => r["setDataValidation"])).toBe(false);
   });
-  it("lays the tab out on first use: checkboxes, dropdowns, formats, frozen header", () => {
+  it("lays the tab out on first use: widens a fresh 26×1000 tab, then checkboxes, dropdowns, formats, frozen header", () => {
     const plan = planSheet([], [{ from: "2026-09-07", to: "2026-09-13", rows: [] }], { syncedAt: null });
-    const reqs = toRequests(plan, 7) as Record<string, unknown>[];
+    const reqs = toRequests(plan, 7, { rowCount: 1000, columnCount: 26 }) as Record<string, unknown>[];
+    expect(reqs[0]).toEqual({ appendDimension: { sheetId: 7, dimension: "COLUMNS", length: 234 - 26 } });
+    expect(reqs[1]).toEqual({ appendDimension: { sheetId: 7, dimension: "ROWS", length: 5000 - 1000 } });
+    expect(toRequests(plan, 7, { rowCount: 5000, columnCount: 234 }).some((r) => (r as Record<string, unknown>)["appendDimension"])).toBe(false);
     expect(reqs.filter((r) => r["setDataValidation"]).length).toBeGreaterThan(19);
     expect(reqs.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("ONE_OF_LIST"))).toBe(true);
