@@ -223,6 +223,10 @@ describe.skipIf(!reachable)("jobs by stage", () => {
               ('S4', '2', 'RR: cancelled visit', 'RR', '2026-08-20 12:00+00', '2026-08-20 20:00+00', '{Ghost}'),
               ('S5', '1', 'MS REPAIR: Wayne/1 Main St/George Golab', 'MS REPAIR', '2026-09-04 12:00+00', '2026-09-04 16:00+00', '{Matt}')`);
     await db.owner.query(`UPDATE jp_schedule SET deleted_at = now() WHERE jp_schedule_id = 'S4'`);
+    // Job 2's sale was run by Joe; the job's own Rep list (none here) would not know that.
+    await db.owner.query(
+      `INSERT INTO jp_appointment (jp_appointment_id, crm_job_id, appointment_date, sales_rep, is_sales_type, is_insurance, has_result, raw)
+       VALUES ('A2', '2', '2026-07-20', 'Joe Mittiga', true, false, true, '{}'::jsonb)`);
 
     const res = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("prod@allied.test") });
     expect(res.statusCode).toBe(200);
@@ -244,7 +248,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(one!["jpUrl"]).toContain("/customer-jobs/9001/job/1");
     // No sub on the job: the crews on its live schedules stand in; the retired visit's crew does not.
     expect(two).toMatchObject({
-      jobId: "2", salesRep: null, sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
+      jobId: "2", salesRep: "Joe Mittiga", sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
       gross: 4552, changeOrders: 150.5, totalRev: 4702.5, totalPayments: 2276, balanceOwed: 2426.5,
       paymentMethod: "Credit Card", deposit: 2276, progressPayments: null, paymentsCount: 1,
       materialVendor: null, containerScheduled: false, subScheduled: true, actualMaterial: null, billsCount: 0,

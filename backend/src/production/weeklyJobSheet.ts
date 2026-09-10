@@ -8,7 +8,9 @@
  *   K  division              jp_job.division
  *   L  trades                jp_job.trades
  *   M  stage                 jp_job.current_stage
- *   N  sales rep             jp_job.rep_names             (`reps` include)
+ *   N  sales rep             the rep on the job's sales appointment (jp_appointment.sales_rep,
+ *                            latest visit); else jp_job.rep_names — the Job Rep(s) list carries
+ *                            the production side too, so it is only the fallback
  *   O  sub                   jp_job.sub_contractor_names  (`sub_contractors` include),
  *                            else the crews on the job's production schedules
  *   P  scheduled install     first production schedule for the job (jp_schedule)
@@ -65,7 +67,7 @@ interface Row {
   customer_name: string | null; address: string | null; city: string | null;
   division: string | null; trades: string | null; is_insurance: boolean;
   current_stage: string | null; stage_last_modified: Date | null;
-  rep_names: string | null; sub_contractor_names: string | null;
+  rep_names: string | null; appointment_rep: string | null; sub_contractor_names: string | null;
   contract_signed_date: string | null; completion_date: string | null; first_install_day: string | null;
   install_days: string[] | null; today: string; visits: { day: string; code: string | null }[] | null;
   crews: string[] | null;
@@ -137,7 +139,7 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
   const rows = await query(
     `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, j.job_name, cu.customer_name, l.address, l.city,
             j.division, j.trades, j.is_insurance, j.current_stage, j.stage_last_modified,
-            j.rep_names, j.sub_contractor_names,
+            j.rep_names, NULL::text AS appointment_rep, j.sub_contractor_names,
             j.contract_signed_date::text, j.completion_date::text,
             (sch.first_start AT TIME ZONE $1)::date::text AS first_install_day,
             sch.days AS install_days, sch.visits, (now() AT TIME ZONE $1)::date::text AS today,
@@ -177,6 +179,19 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
       ORDER BY j.contract_signed_date DESC NULLS LAST, j.job_number`,
     [BOARD_TIMEZONE]);
 
+  // The salesperson is the rep on the job's sales appointment. Read as the
+  // service role: production-only accounts may not see sales appointments
+  // (customer PII), but a rep's name on a production sheet is not that.
+  const appointmentRep = await withServiceRole(async (c) => {
+    const { rows: reps } = await c.query<{ crm_job_id: string; sales_rep: string }>(
+      `SELECT DISTINCT ON (crm_job_id) crm_job_id, sales_rep FROM jp_appointment
+        WHERE crm_job_id = ANY($1::text[]) AND is_sales_type AND deleted_at IS NULL AND coalesce(sales_rep, '') <> ''
+        ORDER BY crm_job_id, appointment_date DESC NULLS LAST, starts_at DESC NULLS LAST`,
+      [rows.map((r) => r.jp_job_id)]);
+    return new Map(reps.map((r) => [r.crm_job_id, r.sales_rep]));
+  }, "production:sheet-reps", { quiet: true });
+  for (const r of rows) r.appointment_rep = appointmentRep.get(r.jp_job_id) ?? null;
+
   const items: SheetRow[] = rows.map((r) => {
     const gross = money(r.total_job_price);
     const changeOrders = money(r.total_change_order_amount);
@@ -194,7 +209,7 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
       division: r.division, trades: r.trades, insurance: r.is_insurance,
       stage: r.current_stage, stageGroup: stageGroup(r.current_stage)?.key ?? null,
       stageSince: r.stage_last_modified ? r.stage_last_modified.toISOString() : null,
-      salesRep: r.rep_names,
+      salesRep: r.appointment_rep ?? r.rep_names,
       sub: r.sub_contractor_names ?? (r.crews && r.crews.length ? r.crews.join(", ") : null),
       scheduledInstallDate: r.first_install_day, saleDate: r.contract_signed_date, completionDate: r.completion_date,
       installDates: r.install_days ?? [],
