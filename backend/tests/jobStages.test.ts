@@ -232,26 +232,44 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(res.rawPayload);
     const ws = wb.getWorksheet("WEEKLY JOB SHEET")!;
-    const header = (ws.getRow(1).values as unknown[]).slice(1, 30);
-    expect(header[0]).toBe("Town/Address/Customer");
-    expect(header[12]).toBe("Job Stage");
-    expect(header[27]).toBe("Balance Owed");
-    expect(header[28]).toBe("Job #");
-    expect(ws.getRow(2).getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
-    expect(ws.getRow(2).getCell("AC").value).toBe("2609-2-01");
-    expect(ws.getRow(2).getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");
-    expect(ws.getRow(2).getCell("R").value).toBe(4552);
-    expect(ws.getRow(2).getCell("R").numFmt).toBe('"$"#,##0.00');
-    expect((ws.getRow(2).getCell("Q").value as Date).toISOString().slice(0, 10)).toBe("2026-08-01");
-    expect(ws.getRow(3).getCell("A").value).toBe("Weekly Total");
-    expect((ws.getRow(3).getCell("R").value as { formula: string }).formula).toBe("SUM(R2:R2)");
+    // Row 1: the tab's headers at the tab's own letters, including the far-right JP columns.
+    expect(ws.getCell("A1").value).toBe("Town/Address/Customer");
+    expect(ws.getCell("B1").value).toBe("PIF");
+    expect(ws.getCell("M1").value).toBe("Job Stage");
+    expect(ws.getCell("AB1").value).toBe("Balance Owed");
+    expect(ws.getCell("AC1").value).toBe("Job #");
+    expect(ws.getCell("BS1").value).toBe("Actual Dealer Fee %");
+    expect(ws.getCell("HU1").value).toBe("JP Job ID");
+    expect(ws.getColumn("I").hidden).toBe(true);
+    // Row 2: the week label, as above each block on the tab. Row 3: the job. Row 4: the total.
+    expect(ws.getCell("A2").value).toBe("9/1/2026-9/7/2026");
+    const job = ws.getRow(3);
+    expect(job.getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
+    expect(job.getCell("B").value).toBe(false);                 // checkbox, unticked
+    expect(job.getCell("AC").value).toBe("2609-2-01");
+    expect(job.getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");
+    expect(job.getCell("R").value).toBe(4552);
+    expect(job.getCell("R").numFmt).toBe('"$"#,##0.00');
+    expect((job.getCell("Q").value as Date).toISOString().slice(0, 10)).toBe("2026-08-01");
+    expect(job.getCell("T").value).toMatchObject({ formula: "R3+S3", result: 4702.5 });
+    expect(job.getCell("AA").value).toMatchObject({ formula: "SUM(Y3:Z3)" });
+    expect(job.getCell("AB").value).toMatchObject({ formula: "T3-AA3" });
+    expect(job.getCell("U").value).toBe("Credit Card");
+    expect(job.getCell("U").dataValidation).toMatchObject({ type: "list" });
+    expect(job.getCell("HU").value).toBe("2");
+    expect(job.getCell("HY").value).toBe("Synced from JobProgress API");
+    expect(ws.getCell("A4").value).toBe("Weekly Total");
+    expect((ws.getCell("R4").value as { formula: string }).formula).toBe("SUM(R3:R3)");
+    expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("9/3/2026");
     expect(wb.getWorksheet("About")).toBeTruthy();
 
-    // No week → every tracked job; a malformed week → 400; a sales rep → 403.
+    // No week → every tracked job and no week row; a malformed week → 400; a sales rep → 403.
     const all = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("prod@allied.test") });
     const wbAll = new ExcelJS.Workbook();
     await wbAll.xlsx.load(all.rawPayload);
-    expect(wbAll.getWorksheet("WEEKLY JOB SHEET")!.rowCount).toBe(4); // header + 2 jobs + total
+    const wsAll = wbAll.getWorksheet("WEEKLY JOB SHEET")!;
+    expect(wsAll.getCell("A2").value).not.toBe("9/1/2026-9/7/2026");
+    expect(wsAll.getCell("A4").value).toBe("Weekly Total"); // header + 2 jobs + total
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx?from=9/1/2026", ...as("prod@allied.test") })).statusCode).toBe(400);
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
