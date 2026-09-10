@@ -24,6 +24,20 @@ export const JOB_TYPE_LABELS = {
   "SOLAR": "Solar",
 };
 
+/**
+ * The codes that mean an INSTALL is happening — the visits the production
+ * team's weekly job sheet is organised around. Service calls, callbacks,
+ * punch lists, site assessments ("SA"), check-ins and material runs are
+ * visits too, but they do not put a job on that week's sheet.
+ */
+export const INSTALL_CODES = ["RR", "SR", "RR+SR", "GUTTERS", "WR", "SOLAR", "SHED"];
+
+/** True when a schedule code marks an install visit (tolerant of "RR + SR", "RR/SR"). */
+export function isInstallCode(code) {
+  const c = norm(code).toUpperCase().replace(/\s+/g, "").replace("/", "+");
+  return INSTALL_CODES.includes(c);
+}
+
 /** Stable colours per job type, chosen to stay distinct on a map. */
 export const JOB_TYPE_COLORS = {
   "RR": "#1d4ed8",        // blue

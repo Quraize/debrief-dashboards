@@ -164,7 +164,7 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
       stageSince: row.stageSince ? sheetDate(officeDay(row.stageSince)) : "",
       scheduledInstallDate: row.scheduledInstallDate ? sheetDate(row.scheduledInstallDate) : "",
       nextInstallDate: row.nextInstallDate ? sheetDate(row.nextInstallDate) : "",
-      installDays: row.installDates.map(sheetDate).join(", "),
+      installDays: row.visits.map((v) => `${sheetDate(v.day)}${v.code ? ` ${v.code}` : ""}`).join(", "),
       paymentsCount: row.paymentsCount,
       billsText: row.bills.map((b) => `${b.vendorName ?? "?"} · ${b.category} · $${Number(b.amount).toFixed(2)}${b.date ? ` · ${sheetDate(b.date)}` : ""}`).join("\n"),
       financialsFetchedAt: row.financialsFetchedAt ? new Date(row.financialsFetchedAt) : null,
@@ -181,7 +181,8 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
   const about = wb.addWorksheet("About");
   about.columns = [{ width: 30 }, { width: 100 }];
   const basisLabel: Record<string, string> = {
-    install: "a production visit is scheduled inside the week",
+    install: "an install visit (RR, SR, RR+SR, gutters, windows, solar, shed) is scheduled inside the week — service calls, callbacks, punch lists and site assessments do not count",
+    visit: "any production visit is scheduled inside the week",
     sale: "the contract was signed inside the week",
     stage: "the job's stage changed inside the week",
     any: "any of: visit scheduled, sold, or stage changed inside the week",

@@ -216,11 +216,12 @@ describe.skipIf(!reachable)("jobs by stage", () => {
 
   it("serves the sheet rows in the tab's vocabulary, with install date and crew fallback from the schedule", async () => {
     await db.owner.query(
-      `INSERT INTO jp_schedule (jp_schedule_id, jp_job_id, title, start_at, end_at, crew_names)
-       VALUES ('S1', '1', 'RR: Wayne/1 Main St/George Golab', '2026-08-28 12:00+00', '2026-08-28 20:00+00', '{Lucy}'),
-              ('S2', '1', 'RR: day 2', '2026-08-29 12:00+00', '2026-08-29 20:00+00', '{Lucy}'),
-              ('S3', '2', 'RR: Wayne/2 Main St/Joseph Lorent', '2026-09-03 12:00+00', '2026-09-03 20:00+00', '{DNC,Manny}'),
-              ('S4', '2', 'RR: cancelled visit', '2026-08-20 12:00+00', '2026-08-20 20:00+00', '{Ghost}')`);
+      `INSERT INTO jp_schedule (jp_schedule_id, jp_job_id, title, job_type_code, start_at, end_at, crew_names)
+       VALUES ('S1', '1', 'RR: Wayne/1 Main St/George Golab', 'RR', '2026-08-28 12:00+00', '2026-08-28 20:00+00', '{Lucy}'),
+              ('S2', '1', 'RR: day 2', 'RR', '2026-08-29 12:00+00', '2026-08-29 20:00+00', '{Lucy}'),
+              ('S3', '2', 'RR: Wayne/2 Main St/Joseph Lorent', 'RR', '2026-09-03 12:00+00', '2026-09-03 20:00+00', '{DNC,Manny}'),
+              ('S4', '2', 'RR: cancelled visit', 'RR', '2026-08-20 12:00+00', '2026-08-20 20:00+00', '{Ghost}'),
+              ('S5', '1', 'MS REPAIR: Wayne/1 Main St/George Golab', 'MS REPAIR', '2026-09-04 12:00+00', '2026-09-04 16:00+00', '{Matt}')`);
     await db.owner.query(`UPDATE jp_schedule SET deleted_at = now() WHERE jp_schedule_id = 'S4'`);
 
     const res = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("prod@allied.test") });
@@ -253,8 +254,14 @@ describe.skipIf(!reachable)("jobs by stage", () => {
 
   it("exports the week as an Excel workbook in the tab's layout", async () => {
     const ExcelJS = (await import("exceljs")).default;
-    // Job 1's visits are 8/28–8/29, job 2's live visit is 9/3: the week of 9/1–9/7 holds job 2 only.
+    // Job 1's installs are 8/28–8/29 (its 9/4 visit is a service call); job 2's install is 9/3:
+    // the week of 9/1–9/7 holds job 2 only under the install rule…
     const res = await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx?from=2026-09-01&to=2026-09-07", ...as("prod@allied.test") });
+    // …and both jobs when any visit counts.
+    const anyVisit = (await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet?from=2026-09-01&to=2026-09-07", ...as("prod@allied.test") })).json();
+    const { filterSheetRows } = await import("../src/production/weeklyJobSheet.js");
+    expect(filterSheetRows(anyVisit.rows, { from: "2026-09-01", to: "2026-09-07", basis: "visit" }).map((r: { jobId: string }) => r.jobId)).toEqual(["1", "2"]);
+    expect(filterSheetRows(anyVisit.rows, { from: "2026-09-01", to: "2026-09-07", basis: "install" }).map((r: { jobId: string }) => r.jobId)).toEqual(["2"]);
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("spreadsheetml");
     expect(res.headers["content-disposition"]).toContain("weekly-job-sheet-2026-09-01-to-2026-09-07.xlsx");
@@ -293,7 +300,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(job.getCell("BM").value).toMatchObject({ formula: 'IF(COUNT(BH3:BL3)=0,"",SUM(BH3:BL3))' });
     expect(ws.getCell("A4").value).toBe("Weekly Total");
     expect((ws.getCell("R4").value as { formula: string }).formula).toBe("SUM(R3:R3)");
-    expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("9/3/2026");
+    expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("9/3/2026 RR");
     expect(wb.getWorksheet("About")).toBeTruthy();
 
     // No week → every tracked job and no week row; a malformed week → 400; a sales rep → 403.

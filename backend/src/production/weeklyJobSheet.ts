@@ -24,6 +24,7 @@
  */
 import { dbApp, withUser, withServiceRole, type SessionContext } from "../db/client.js";
 import { stageGroup } from "@allied/shared/jobStages";
+import { isInstallCode } from "@allied/shared/production";
 import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown, billBreakdown } from "@allied/shared/weeklyJobSheet";
 import { BOARD_TIMEZONE, jobProgressUrl } from "./board.js";
 
@@ -36,6 +37,8 @@ export interface SheetRow {
   scheduledInstallDate: string | null; saleDate: string | null; completionDate: string | null;
   /** Every live production-schedule day on the job (office time), ascending; the next one on/after today. */
   installDates: string[]; nextInstallDate: string | null;
+  /** The same visits with their title code ("RR", "MS REPAIR", …), so a week can be judged by install visits only. */
+  visits: { day: string; code: string | null }[];
   gross: number | null; changeOrders: number | null; totalRev: number | null;
   paymentMethod: string | null; deposit: number | null; progressPayments: number | null; paymentsCount: number;
   totalPayments: number | null; balanceOwed: number | null;
@@ -64,7 +67,7 @@ interface Row {
   current_stage: string | null; stage_last_modified: Date | null;
   rep_names: string | null; sub_contractor_names: string | null;
   contract_signed_date: string | null; completion_date: string | null; first_install_day: string | null;
-  install_days: string[] | null; today: string;
+  install_days: string[] | null; today: string; visits: { day: string; code: string | null }[] | null;
   crews: string[] | null;
   total_job_price: string | null; total_change_order_amount: string | null; total_job_revenue: string | null;
   total_payment_received: string | null; total_amount_owed: string | null;
@@ -74,9 +77,16 @@ interface Row {
 
 const money = (v: string | null): number | null => (v === null ? null : Number(v));
 
-/** What "the week's jobs" means: which date must fall inside the range. */
-export type WeekBasis = "install" | "sale" | "stage" | "any";
-export const WEEK_BASES: WeekBasis[] = ["install", "sale", "stage", "any"];
+/**
+ * What "the week's jobs" means: which date must fall inside the range.
+ *   install  an INSTALL visit (RR, SR, RR+SR, GUTTERS, WR, SOLAR, SHED) is
+ *            scheduled in the week — how the production team's sheet works;
+ *   visit    any production visit at all (service, callback, punch list…);
+ *   sale     sold in the week;  stage  the job's stage changed in the week;
+ *   any      any of those.
+ */
+export type WeekBasis = "install" | "visit" | "sale" | "stage" | "any";
+export const WEEK_BASES: WeekBasis[] = ["install", "visit", "sale", "stage", "any"];
 
 export interface WeekFilter { from?: string | null; to?: string | null; basis?: WeekBasis }
 
@@ -96,19 +106,15 @@ export function parseWeekFilter(q: { from?: string; to?: string; basis?: string 
 const inRange = (day: string | null | undefined, f: WeekFilter): boolean =>
   !!day && (!f.from || day >= f.from) && (!f.to || day <= f.to);
 
-/**
- * The rows that belong to a week. `install`: a production visit is scheduled
- * inside it (the sheet's weekly blocks are the crews' week); `sale`: sold
- * inside it; `stage`: the job's stage changed inside it; `any`: any of those.
- * No range = every row.
- */
+/** The rows that belong to a week under the chosen basis. No range = every row. */
 export function filterSheetRows(rows: SheetRow[], f: WeekFilter): SheetRow[] {
   if (!f.from && !f.to) return rows;
-  const byInstall = (r: SheetRow) => r.installDates.some((d) => inRange(d, f));
+  const byInstall = (r: SheetRow) => r.visits.some((v) => isInstallCode(v.code) && inRange(v.day, f));
+  const byVisit = (r: SheetRow) => r.installDates.some((d) => inRange(d, f));
   const bySale = (r: SheetRow) => inRange(r.saleDate, f);
   const byStage = (r: SheetRow) => inRange(r.stageSince ? officeDay(r.stageSince) : null, f);
-  const pick = { install: byInstall, sale: bySale, stage: byStage,
-    any: (r: SheetRow) => byInstall(r) || bySale(r) || byStage(r) }[f.basis ?? "install"];
+  const pick = { install: byInstall, visit: byVisit, sale: bySale, stage: byStage,
+    any: (r: SheetRow) => byVisit(r) || bySale(r) || byStage(r) }[f.basis ?? "install"];
   return rows.filter(pick);
 }
 
@@ -122,7 +128,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
             j.rep_names, j.sub_contractor_names,
             j.contract_signed_date::text, j.completion_date::text,
             (sch.first_start AT TIME ZONE $1)::date::text AS first_install_day,
-            sch.days AS install_days, (now() AT TIME ZONE $1)::date::text AS today,
+            sch.days AS install_days, sch.visits, (now() AT TIME ZONE $1)::date::text AS today,
             crew.names AS crews,
             j.total_job_price::text, j.total_change_order_amount::text, j.total_job_revenue::text,
             j.total_payment_received::text, j.total_amount_owed::text,
@@ -133,7 +139,8 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
        LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
        LEFT JOIN LATERAL (
          SELECT min(s.start_at) AS first_start,
-                array_agg(DISTINCT (s.start_at AT TIME ZONE $1)::date::text ORDER BY (s.start_at AT TIME ZONE $1)::date::text) AS days
+                array_agg(DISTINCT (s.start_at AT TIME ZONE $1)::date::text ORDER BY (s.start_at AT TIME ZONE $1)::date::text) AS days,
+                json_agg(json_build_object('day', (s.start_at AT TIME ZONE $1)::date::text, 'code', s.job_type_code) ORDER BY s.start_at) AS visits
            FROM jp_schedule s
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
        LEFT JOIN LATERAL (
@@ -180,6 +187,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
       scheduledInstallDate: r.first_install_day, saleDate: r.contract_signed_date, completionDate: r.completion_date,
       installDates: r.install_days ?? [],
       nextInstallDate: (r.install_days ?? []).find((d) => d >= r.today) ?? null,
+      visits: r.visits ?? [],
       gross, changeOrders, totalRev,
       paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,
       totalPayments,

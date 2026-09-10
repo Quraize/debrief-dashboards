@@ -5,6 +5,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { STAGE_GROUPS } from "@allied/shared/jobStages";
 import { SHEET_COLUMNS, PENDING_COLUMNS, toSheetCsv, sheetDate } from "@allied/shared/weeklyJobSheet";
+import { isInstallCode } from "@allied/shared/production";
 import { Download, RefreshCw, Loader2, ExternalLink, Search, Info } from "lucide-react";
 import { productionApi } from "./api";
 import { qs } from "@/api/http";
@@ -82,10 +83,11 @@ export default function WeeklyJobSheet() {
   const officeDay = (iso) => (iso ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso)) : null);
   const weekMatch = (r) => {
     if (!weekFrom && !weekTo) return true;
-    const byInstall = (r.installDates ?? []).some(inWeek);
+    const byInstall = (r.visits ?? []).some((v) => isInstallCode(v.code) && inWeek(v.day));
+    const byVisit = (r.installDates ?? []).some(inWeek);
     const bySale = inWeek(r.saleDate);
     const byStage = inWeek(officeDay(r.stageSince));
-    return basis === "install" ? byInstall : basis === "sale" ? bySale : basis === "stage" ? byStage : byInstall || bySale || byStage;
+    return basis === "install" ? byInstall : basis === "visit" ? byVisit : basis === "sale" ? bySale : basis === "stage" ? byStage : byVisit || bySale || byStage;
   };
 
   const rows = useMemo(() => {
@@ -181,7 +183,8 @@ export default function WeeklyJobSheet() {
         </label>
         <select value={basis} onChange={(e) => setBasis(e.target.value)} disabled={!weekFrom && !weekTo}
           title="What puts a job in the week" className="border border-input rounded-lg px-2 py-1 text-sm bg-white disabled:opacity-50">
-          <option value="install">Install scheduled in week</option>
+          <option value="install">Install scheduled in week (RR/SR/gutters…)</option>
+          <option value="visit">Any visit scheduled in week</option>
           <option value="sale">Sold in week</option>
           <option value="stage">Stage changed in week</option>
           <option value="any">Any of those</option>
