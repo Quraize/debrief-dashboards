@@ -255,7 +255,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(job.getCell("AA").value).toMatchObject({ formula: "SUM(Y3:Z3)" });
     expect(job.getCell("AB").value).toMatchObject({ formula: "T3-AA3" });
     expect(job.getCell("U").value).toBe("Credit Card");
-    expect(job.getCell("U").dataValidation).toMatchObject({ type: "list" });
+    expect(job.getCell("U").dataValidation).toBeUndefined();          // synced: no dropdown to reject it
+    expect(job.getCell("AD").dataValidation).toMatchObject({ type: "list" }); // hand-filled: the tab's dropdown
     expect(job.getCell("HU").value).toBe("2");
     expect(job.getCell("HY").value).toBe("Synced from JobProgress API");
     expect(ws.getCell("A4").value).toBe("Weekly Total");

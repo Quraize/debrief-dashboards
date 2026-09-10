@@ -34,14 +34,17 @@ export const MASTER_COLUMNS = [
   c("K", "Division", { key: "division", width: 12.6 }),
   c("L", "Job Trade or Trades", { key: "trades", width: 10.8 }),
   c("M", "Job Stage", { key: "stage", width: 12.6 }),
-  c("N", "Sales Rep", { key: "salesRep", width: 9.5, list: REP_LIST }),
-  c("O", "Sub", { key: "sub", width: 12, list: SUB_LIST }),
+  // N, O and U are synced, so they carry JobProgress's full names ("Jason
+  // Malarchak", "Lucy Construction", "Cash/Check"), not the tab's short
+  // dropdown entries. No dropdown on them: a list would reject every value.
+  c("N", "Sales Rep", { key: "salesRep", width: 9.5 }),
+  c("O", "Sub", { key: "sub", width: 12 }),
   c("P", "Scheduled Install Date", { key: "scheduledInstallDate", type: "date", width: 10.4 }),
   c("Q", "Sale Date", { key: "saleDate", type: "date", width: 10.4 }),
   c("R", "Gross $", { key: "gross", type: "money", fill: "green", width: 11.4 }),
   c("S", "Change Orders", { key: "changeOrders", type: "money", fill: "green", width: 8.9 }),
   c("T", "Total Rev w/ C.O.s", { key: "totalRev", type: "money", fill: "green", width: 11.4, formula: "R{r}+S{r}" }),
-  c("U", "Payment Method", { key: "paymentMethod", fill: "green", width: 10.4, list: PAYMENT_METHOD_LIST }),
+  c("U", "Payment Method", { key: "paymentMethod", fill: "green", width: 10.4 }),
   c("V", "Lender", { fill: "green", width: 10.9, hidden: true, list: LENDER_LIST }),
   c("W", "Payment Method/Lender/Plan#/ Dealr Fee/ Loan Docs/ Tier if App/ Signed", { fill: "green", width: 11.4, hidden: true }),
   c("X", "Invoice Created & Payments Applied Upon Job Start", { type: "check", fill: "green", width: 17.3, hidden: true }),
