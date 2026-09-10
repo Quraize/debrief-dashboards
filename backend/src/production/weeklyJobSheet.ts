@@ -121,8 +121,20 @@ export function filterSheetRows(rows: SheetRow[], f: WeekFilter): SheetRow[] {
 const officeDay = (iso: string): string =>
   new Intl.DateTimeFormat("en-CA", { timeZone: BOARD_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 
+/** Under the caller's own identity (the page and the Excel download). */
 export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobSheet> {
-  const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<Row>(
+  return buildSheet((sql, params) => withUser(dbApp(), ctx, async (c) => (await c.query<Row>(sql, params)).rows));
+}
+
+/** As the service role — for the scheduled Google Sheet push, which has no user. */
+export async function weeklyJobSheetAsService(): Promise<WeeklyJobSheet> {
+  return buildSheet((sql, params) => withServiceRole(async (c) => (await c.query<Row>(sql, params)).rows, "production:sheet-rows", { quiet: true }));
+}
+
+type RowQuery = (sql: string, params: unknown[]) => Promise<Row[]>;
+
+async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
+  const rows = await query(
     `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, j.job_name, cu.customer_name, l.address, l.city,
             j.division, j.trades, j.is_insurance, j.current_stage, j.stage_last_modified,
             j.rep_names, j.sub_contractor_names,
@@ -163,7 +175,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
           WHERE p.jp_job_id = j.jp_job_id AND p.deleted_at IS NULL) pay ON true
       WHERE j.stage_seen_at IS NOT NULL
       ORDER BY j.contract_signed_date DESC NULLS LAST, j.job_number`,
-    [BOARD_TIMEZONE])).rows);
+    [BOARD_TIMEZONE]);
 
   const items: SheetRow[] = rows.map((r) => {
     const gross = money(r.total_job_price);

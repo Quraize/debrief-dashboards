@@ -11,6 +11,7 @@ import { refreshSchedules } from "./syncSchedules.js";
 import { jobsBoard } from "./jobsBoard.js";
 import { weeklyJobSheet, parseWeekFilter, filterSheetRows } from "./weeklyJobSheet.js";
 import { buildWeeklySheetWorkbook } from "./weeklyJobSheetXlsx.js";
+import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush } from "./sheetPush.js";
 import { runJobStageSync } from "./syncJobStages.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
@@ -69,6 +70,33 @@ export function registerProductionRoutes(app: FastifyInstance): void {
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         .header("Content-Disposition", `attachment; filename="weekly-job-sheet${span}.xlsx"`)
         .send(buffer);
+    },
+  );
+
+  // The Google Sheet push: where it goes and how it last went…
+  app.get(
+    "/api/production/weekly-job-sheet/push",
+    { preHandler: [requireAuth, productionOnly] },
+    async (_req: FastifyRequest, reply: FastifyReply) => {
+      const s = sheetPushSettings();
+      return reply.send({
+        enabled: s.enabled, reason: s.reason, tab: s.tab, weeksBack: s.weeksBack, weeksAhead: s.weeksAhead, cron: s.cron,
+        spreadsheetUrl: s.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${s.spreadsheetId}/edit` : null,
+        last: await lastSheetPush(),
+      });
+    },
+  );
+  // …and the push itself. dry_run (default true) reads and plans but writes nothing.
+  app.post<{ Body: { dry_run?: boolean } }>(
+    "/api/production/weekly-job-sheet/push",
+    { preHandler: [requireAuth, requireCsrf, productionOnly] },
+    async (req: FastifyRequest<{ Body: { dry_run?: boolean } }>, reply: FastifyReply) => {
+      const dryRun = req.body?.dry_run !== false;
+      console.info(`[production] sheet push ${dryRun ? "dry run" : "COMMIT"} by=${req.user!.email} ip=${clientIp(req)}`);
+      const result = await pushWeeklyJobSheet({ dryRun, startedBy: req.user!.email });
+      if (result.status === "skipped") return reply.code(501).send({ error: "Google Sheet push is not configured.", detail: result.errorMessage, ...result });
+      if (result.status === "failed") return reply.code(502).send({ error: "The Google Sheet push failed.", detail: result.errorMessage, ...result });
+      return reply.send(result);
     },
   );
 

@@ -323,6 +323,45 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
 
+  it("pushes the week into the Google Sheet tab: dry run plans, commit writes, both are logged", async () => {
+    const { GoogleSheetsClient } = await import("../src/integrations/google/sheets.js");
+    const { pushWeeklyJobSheet } = await import("../src/production/sheetPush.js");
+    const { generateKeyPairSync } = await import("node:crypto");
+    const key = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    const batches: unknown[][] = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data, text: async () => "" }) as unknown as Response;
+      if (u.endsWith("/token")) return json({ access_token: "t", expires_in: 3600 });
+      if (u.includes("fields=sheets.properties")) return json({ sheets: [{ properties: { sheetId: 5, title: "[AUTOMATION]WEEKLY JOB SHEET" } }] });
+      if (u.includes("/values/")) return json({ values: [] }); // an empty tab
+      if (u.endsWith(":batchUpdate")) { batches.push(JSON.parse(String(init!.body)).requests); return json({}); }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => "" } as unknown as Response;
+    }) as typeof fetch;
+    const client = new GoogleSheetsClient({ credentials: { client_email: "sa@test", private_key: key, token_uri: "https://x/token" }, spreadsheetId: "S", fetchImpl });
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID = "S"; process.env.GOOGLE_SERVICE_ACCOUNT_JSON = "{}";
+    const now = new Date("2026-09-04T15:00:00Z"); // the office week 8/31–9/6 holds job 2's 9/3 install
+
+    const dry = await pushWeeklyJobSheet({ dryRun: true, startedBy: "test", client, now, weeksBack: 0, weeksAhead: 0 });
+    expect(dry.status).toBe("completed");
+    expect(dry.weeks).toEqual(["8/31/2026-9/6/2026"]);
+    expect(dry.summary).toMatchObject({ headerCreated: true, blocksCreated: ["8/31/2026-9/6/2026"], jobsAdded: 1 });
+    expect(dry.summary!.weeks[0]!.added).toEqual(["Wayne/2 Main St/Joseph Lorent"]);
+    expect(batches).toHaveLength(0);
+
+    const live = await pushWeeklyJobSheet({ dryRun: false, startedBy: "test", client, now, weeksBack: 0, weeksAhead: 0 });
+    expect(live.status).toBe("completed");
+    expect(batches.length).toBeGreaterThan(0);
+    const all = batches.flat() as Record<string, unknown>[];
+    expect(all.some((r) => r["insertDimension"])).toBe(true);
+    expect(all.some((r) => JSON.stringify(r).includes("Wayne/2 Main St/Joseph Lorent"))).toBe(true);
+    expect(all.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
+
+    const runs = (await db.owner.query(`SELECT mode, status, counts->>'jobsAdded' AS added FROM sync_run WHERE kind = 'sheet_push' ORDER BY started_at`)).rows;
+    expect(runs).toEqual([{ mode: "dry_run", status: "completed", added: "1" }, { mode: "commit", status: "completed", added: "1" }]);
+    delete process.env.GOOGLE_SHEETS_SPREADSHEET_ID; delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  });
+
   it("re-reads a job's payments only when its payment total changes, retiring ones that vanished", async () => {
     // A second check clears the balance on job 2; the office also deleted the card payment.
     stub.summaries["2"] = { total_job_price: 4552, total_change_order_amount: "150.50", total_payment_received: 4702.5, total_amount_owed: 0 };

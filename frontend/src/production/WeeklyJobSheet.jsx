@@ -6,7 +6,7 @@ import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { STAGE_GROUPS } from "@allied/shared/jobStages";
 import { SHEET_COLUMNS, PENDING_COLUMNS, toSheetCsv, sheetDate } from "@allied/shared/weeklyJobSheet";
 import { isInstallCode } from "@allied/shared/production";
-import { Download, RefreshCw, Loader2, ExternalLink, Search, Info } from "lucide-react";
+import { Download, RefreshCw, Loader2, ExternalLink, Search, Info, CloudUpload, Eye } from "lucide-react";
 import { productionApi } from "./api";
 import { qs } from "@/api/http";
 
@@ -63,6 +63,23 @@ export default function WeeklyJobSheet() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["weekly-job-sheet"], queryFn: productionApi.weeklyJobSheet, enabled: allowed, staleTime: 60_000, refetchInterval: 5 * 60_000,
+  });
+
+  // Google Sheet push: status line plus a preview (dry run) and the real thing.
+  const { data: push } = useQuery({ queryKey: ["sheet-push-status"], queryFn: productionApi.sheetPushStatus, enabled: allowed, staleTime: 30_000 });
+  const [pushResult, setPushResult] = useState(null);
+  const pushMutation = useMutation({
+    mutationFn: ({ dryRun }) => productionApi.sheetPush({ dryRun }),
+    onSuccess: (r) => {
+      setPushResult(r);
+      qc.invalidateQueries({ queryKey: ["sheet-push-status"] });
+      const s = r.summary ?? {};
+      toast({
+        title: r.dryRun ? "Preview ready — nothing written" : "Pushed to the Google Sheet",
+        description: `${s.jobsAdded ?? 0} row(s) to add, ${s.jobsUpdated ?? 0} to update, ${(s.blocksCreated ?? []).length} week block(s) to create.`,
+      });
+    },
+    onError: (err) => toast({ title: "Google Sheet push failed", description: err.body?.detail || err.message, variant: "destructive" }),
   });
 
   const refresh = useMutation({
@@ -202,6 +219,48 @@ export default function WeeklyJobSheet() {
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{error.message}</div>}
+
+      {/* Google Sheet push */}
+      <div className="bg-white rounded-xl border border-border shadow-sm p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="text-sm">
+            <div className="font-heading font-bold text-primary flex items-center gap-2"><CloudUpload className="w-4 h-4" /> Google Sheet</div>
+            {push ? (
+              push.enabled ? (
+                <p className="text-muted-foreground">
+                  Writes into the <strong>{push.tab}</strong> tab of the production master sheet
+                  {push.spreadsheetUrl && <> (<a href={push.spreadsheetUrl} target="_blank" rel="noreferrer" className="text-accent underline">open</a>)</>}: every hour,
+                  the current week plus {push.weeksBack} before and {push.weeksAhead} ahead. Synced columns only; the team's cells are never touched.
+                  {push.last && <> Last {push.last.mode === "dry_run" ? "preview" : "push"} {relative(push.last.finishedAt || push.last.startedAt)}{push.last.status !== "completed" && <span className="text-red-600"> — {push.last.status}{push.last.errorMessage ? `: ${push.last.errorMessage}` : ""}</span>}.</>}
+                </p>
+              ) : <p className="text-amber-700">Not configured on the server: {push.reason}.</p>
+            ) : <p className="text-muted-foreground">Checking…</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => pushMutation.mutate({ dryRun: true })} disabled={!push?.enabled || pushMutation.isPending}
+              className="flex items-center gap-2 bg-white border border-border hover:bg-secondary disabled:opacity-50 text-sm font-semibold px-3 py-2 rounded-lg">
+              {pushMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />} Preview changes
+            </button>
+            <button onClick={() => { if (window.confirm("Write the current, previous and upcoming weeks into the Google Sheet now? Only synced columns change.")) pushMutation.mutate({ dryRun: false }); }}
+              disabled={!push?.enabled || pushMutation.isPending}
+              className="flex items-center gap-2 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 text-sm font-semibold px-3 py-2 rounded-lg">
+              <CloudUpload className="w-4 h-4" /> Push to Google Sheet now
+            </button>
+          </div>
+        </div>
+        {pushResult?.summary && (
+          <div className="text-xs border-t border-border pt-3 space-y-1">
+            <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {pushResult.summary.weeks.map((w) => (
+              <div key={w.label} className="text-muted-foreground">
+                <span className="font-mono text-foreground">{w.label}</span>{w.existing ? "" : " (new block)"} —
+                {w.added.length ? ` add: ${w.added.join("; ")}.` : ""}{w.updated.length ? ` update: ${w.updated.length} row(s).` : ""}{w.notThisWeek.length ? ` not this week: ${w.notThisWeek.join("; ")}.` : ""}
+                {!w.added.length && !w.updated.length && !w.notThisWeek.length ? " nothing to do." : ""}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
         {isLoading ? (

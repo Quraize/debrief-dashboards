@@ -11,4 +11,8 @@ export const productionApi = {
   jobs: () => get("/api/production/jobs"),
   /** The same jobs as rows of the production master sheet's WEEKLY JOB SHEET tab. */
   weeklyJobSheet: () => get("/api/production/weekly-job-sheet"),
+  /** Google Sheet push: configuration and the last run. */
+  sheetPushStatus: () => get("/api/production/weekly-job-sheet/push"),
+  /** Preview (dry run) or perform the push into the [AUTOMATION] tab. */
+  sheetPush: ({ dryRun }) => post("/api/production/weekly-job-sheet/push", { dry_run: dryRun }),
 };

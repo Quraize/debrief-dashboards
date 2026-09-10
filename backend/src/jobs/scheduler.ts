@@ -26,6 +26,7 @@ import { runScheduleSync, type ScheduleSyncCounts } from "../production/syncSche
 import { runJobStageSync } from "../production/syncJobStages.js";
 import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 import { runDebriefReminders, reminderSchedule, type ReminderRunResult } from "../reminders/debriefReminders.js";
+import { pushWeeklyJobSheet, sheetPushSettings, type SheetPushResult } from "../production/sheetPush.js";
 
 export const SYNC_QUEUE = "leap-sync";
 /** Production calendar mirror: short window, frequent, independent of the
@@ -44,6 +45,14 @@ const CUSTOMER_SYNC_JOB_OPTS: PgBoss.SendOptions = {
   retryLimit: 1,
   retryDelay: 600,
   expireInSeconds: 1800,
+};
+/** Google Sheet push of the Weekly Job Sheet: hourly, after the production
+ *  sync has had its turn (:20), independent of everything else. */
+export const SHEET_PUSH_QUEUE = "sheet-push";
+const SHEET_PUSH_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 1,
+  retryDelay: 300,
+  expireInSeconds: 900,
 };
 /** Debrief reminder emails: every 15 min, independent of the syncs. */
 export const DEBRIEF_REMINDER_QUEUE = "debrief-reminders";
@@ -252,6 +261,23 @@ export async function handleDebriefReminderJob(
   return result;
 }
 
+/** Needs the Google key and spreadsheet id; SHEET_PUSH_ENABLED=false turns it off. */
+export function sheetPushSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const s = sheetPushSettings();
+  return { enabled: s.enabled, cron: s.cron, reason: s.reason };
+}
+
+/** The sheet-push worker: a failed push throws so pg-boss retries once. */
+export async function handleSheetPushJob(
+  deps: { push?: typeof pushWeeklyJobSheet } = {},
+): Promise<SheetPushResult> {
+  const push = deps.push ?? pushWeeklyJobSheet;
+  const result = await push({ dryRun: false, startedBy: "sheet-scheduler" });
+  if (result.status === "failed") throw new Error(result.errorMessage ?? "sheet push failed");
+  if (result.status === "skipped") console.info(`[scheduler] sheet push skipped (${result.errorMessage})`);
+  return result;
+}
+
 /** The schedule-sync worker. Failure is a value from the sync (its telemetry
  *  row is always written); it becomes a throw here so pg-boss retries. */
 export async function handleProductionScheduleJob(
@@ -440,6 +466,28 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       DEBRIEF_REMINDER_QUEUE,
       { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
       async () => handleDebriefReminderJob(),
+    );
+  }
+
+  // ── Google Sheet push (production master sheet) ──
+  const sheetQueue = await instance.getQueue(SHEET_PUSH_QUEUE);
+  if (!sheetQueue) {
+    await instance.createQueue(SHEET_PUSH_QUEUE, { name: SHEET_PUSH_QUEUE, policy: "singleton" });
+  }
+  const sheet = sheetPushSchedule();
+  if (sheet.enabled) {
+    await instance.schedule(SHEET_PUSH_QUEUE, sheet.cron, { startedBy: "sheet-scheduler" },
+      { ...SHEET_PUSH_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${SHEET_PUSH_QUEUE} scheduled: "${sheet.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(SHEET_PUSH_QUEUE);
+    console.info(`[scheduler] sheet push disabled (${sheet.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      SHEET_PUSH_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handleSheetPushJob(),
     );
   }
 
