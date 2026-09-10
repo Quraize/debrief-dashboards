@@ -251,6 +251,7 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {(pushResult.summary.months ?? []).map((m) => <div key={m.label} className="text-muted-foreground">Month at a glance — {m.label}</div>)}
             {pushResult.summary.weeks.map((w) => (
               <div key={w.label} className="text-muted-foreground">
                 <span className="font-mono text-foreground">{w.label}</span>{w.existing ? "" : " (new block)"} —

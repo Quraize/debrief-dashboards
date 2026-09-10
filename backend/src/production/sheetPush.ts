@@ -94,7 +94,9 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
     }
 
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
-    const plan = planSheet(grid, weeks, { now, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null });
+    const plan = planSheet(grid, weeks, {
+      now, today, allRows: feed.rows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null,
+    });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
     if (!options.dryRun && requests.length) await client.batchUpdate(requests);
 
@@ -172,8 +174,13 @@ export function setupRequests(sheetId: number, grid: GridSize = { rowCount: FORM
   return reqs;
 }
 
-const LABEL_STYLE = { backgroundColor: rgb("FFFF00"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("34A853") } };
-const TOTAL_STYLE = { backgroundColor: rgb("D1F1DA"), textFormat: { bold: true, fontSize: 8 } };
+const ROW_STYLES: Record<string, Record<string, unknown>> = {
+  label: { backgroundColor: rgb("FFFF00"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("34A853") } },
+  total: { backgroundColor: rgb("D1F1DA"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
+  cumulative: { backgroundColor: rgb("92D050"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
+  // The month block is the platform's own; navy on white so it never reads as a week.
+  summary: { backgroundColor: rgb("2E4877"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("FFFFFF") } },
+};
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
   const reqs: unknown[] = [];
@@ -194,7 +201,7 @@ function opRequests(op: PlanOp, sheetId: number, lastCol: number, reqs: unknown[
     for (const r of op.rows) {
       reqs.push({ repeatCell: {
         range: { sheetId, startRowIndex: r.row, endRowIndex: r.row + 1, startColumnIndex: 0, endColumnIndex: lastCol },
-        cell: { userEnteredFormat: r.style === "label" ? LABEL_STYLE : TOTAL_STYLE },
+        cell: { userEnteredFormat: ROW_STYLES[r.style] ?? ROW_STYLES["total"] },
         fields: "userEnteredFormat(backgroundColor,textFormat)",
       } });
     }

@@ -4,18 +4,24 @@
  * feed says — nothing here talks to Google, so the rules are testable and a
  * dry run is the same code with the writes left unsent.
  *
- * The tab is the team's. The planner therefore:
- *   - recognises the tab's structure (header, "M/D/YYYY-M/D/YYYY" week label
- *     rows, job rows, "Weekly Total" rows), newest week at the top;
- *   - recognises a job row by the JobProgress Job ID in column HU, and on an
- *     existing row rewrites ONLY the synced columns — checkboxes, notes and
- *     every other hand-filled cell are never touched;
- *   - adds a missing week as a new block in date order, and a missing job as a
- *     new row at the end of its week's block (before the Weekly Total);
- *   - never deletes: a job the feed no longer places in a week is stamped in
- *     the hidden JP Sync Status column instead.
+ * The tab, top to bottom:
+ *   row 1        the header;
+ *   MONTH AT A GLANCE   a platform-owned block: per month, Projected (installs
+ *                scheduled in the month) and Started (install date passed and
+ *                the job is in production) — rewritten in place every push;
+ *   week blocks  newest first: "M/D/YYYY-M/D/YYYY" label, job rows, Weekly
+ *                Total, Cumulative Monthly Total (the tab's own row: this
+ *                week plus the earlier weeks of the same month), a spacer.
+ *
+ * The tab is the team's. The planner therefore recognises a job row by the
+ * JobProgress Job ID in column HU and on an existing row rewrites ONLY the
+ * synced columns; adds a missing week or job in place; and never deletes — a
+ * job the feed no longer places in a week is stamped in the hidden JP Sync
+ * Status column instead.
  */
 import { MASTER_COLUMNS, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
+import { isInstallCode } from "@allied/shared/production";
+import { stageKey } from "@allied/shared/jobStages";
 import type { SheetRow } from "./weeklyJobSheet.js";
 import type { CellValue } from "../integrations/google/sheets.js";
 
@@ -24,7 +30,8 @@ type Column = { col: string; header: string; key?: string; type: string; hidden?
 export interface WeekInput { from: string; to: string; rows: SheetRow[] }
 
 export interface CellWrite { row: number; col: number; value: CellValue | { formula: string } }
-export interface RowStyle { row: number; style: "label" | "total" }
+export type RowStyleName = "label" | "total" | "cumulative" | "summary";
+export interface RowStyle { row: number; style: RowStyleName }
 export type PlanOp =
   | { type: "insertRows"; at: number; count: number }
   | { type: "write"; cells: CellWrite[] }
@@ -32,6 +39,7 @@ export type PlanOp =
 
 export interface PlanSummary {
   headerCreated: boolean;
+  summaryCreated: boolean;
   blocksCreated: string[];
   jobsAdded: number;
   jobsUpdated: number;
@@ -39,12 +47,16 @@ export interface PlanSummary {
   cellsWritten: number;
   /** Per week: what happened, for the dry-run report. */
   weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[] }[];
+  /** The month lines as written, for the dry-run report. */
+  months: { label: string; jobs: number; gross: number }[];
 }
 
 export interface Plan { ops: PlanOp[]; summary: PlanSummary }
 
 export const SYNC_STATUS_OK = "Synced from JobProgress";
 export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
+export const SUMMARY_MARKER = "MONTH AT A GLANCE";
+export const CUMULATIVE_LABEL = "Cumulative Monthly Total";
 
 /** "A" → 0, "AC" → 28, "HU" → 228. */
 export function colIndex(letters: string): number {
@@ -125,32 +137,111 @@ function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellW
   return out;
 }
 
-interface Block { labelIdx: number; from: string; to: string; jobIdx: number[]; totalIdx: number | null }
+/** This week's total plus the totals of the same month's earlier weeks already on the tab. */
+function cumulativeRowCells(rowIdx: number, totalRows: number[]): CellWrite[] {
+  const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: CUMULATIVE_LABEL }];
+  for (const L of TOTALLED) {
+    out.push({ row: rowIdx, col: IDX[L]!, value: { formula: totalRows.map((r) => `${L}${r + 1}`).join("+") } });
+  }
+  return out;
+}
 
-/** Reads the tab's week blocks off the grid. */
+export interface Block { labelIdx: number; from: string; to: string; jobIdx: number[]; totalIdx: number | null; cumulativeIdx: number | null }
+
+/** Reads the tab's week blocks off the grid. The month block and the header are not blocks. */
 export function parseBlocks(grid: CellValue[][]): Block[] {
   const blocks: Block[] = [];
   let cur: Block | null = null;
   for (let i = 1; i < grid.length; i++) {
     const a = grid[i]?.[0] ?? null;
     const label = parseWeekLabel(a);
-    if (label) { cur = { labelIdx: i, ...label, jobIdx: [], totalIdx: null }; blocks.push(cur); continue; }
+    if (label) { cur = { labelIdx: i, ...label, jobIdx: [], totalIdx: null, cumulativeIdx: null }; blocks.push(cur); continue; }
+    const text = cellStr(a);
+    if (/^cumulative monthly total$/i.test(text)) { const last = blocks[blocks.length - 1]; if (last && last.totalIdx !== null && last.cumulativeIdx === null) last.cumulativeIdx = i; continue; }
     if (!cur) continue;
-    if (/^weekly total$/i.test(cellStr(a))) { cur.totalIdx = i; cur = null; continue; }
+    if (/^weekly total$/i.test(text)) { cur.totalIdx = i; cur = null; continue; }
     const rowHasContent = (grid[i] ?? []).some((v) => cellStr(v) !== "" && v !== false);
     if (rowHasContent) cur.jobIdx.push(i);
   }
   return blocks;
 }
 
-export interface PlanOptions { now?: Date; syncedAt: string | null }
+/** Last row of a block (cumulative, else total, else label). */
+const blockEnd = (b: Block) => b.cumulativeIdx ?? b.totalIdx ?? b.labelIdx;
+
+// ── Month at a glance ────────────────────────────────────────────────────────
+
+/** Stages that mean the crew has started: Production Started and everything after it. */
+const STARTED_STAGES = new Set([
+  "Production Started", "Gutters/Solar/Punchlist", "Need Final Walk-Through",
+  "City & Manufacturer Inspection", "COMPLETED NEED FINAL PAYMENT!!",
+].map(stageKey));
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const monthOf = (isoDay: string) => isoDay.slice(0, 7);
+const monthTitle = (ym: string) => `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+export interface MonthLine { label: string; jobs: number; gross: number; totalRev: number; deposit: number; paid: number; owed: number }
+
+/**
+ * Two lines per month, for the month `today` is in and the month before it:
+ *   Projected — jobs with an install visit scheduled in the month;
+ *   Started   — of those, jobs whose install day has passed and whose stage
+ *               says production started (or later).
+ */
+export function monthLines(rows: SheetRow[], today: string): MonthLine[] {
+  const thisMonth = monthOf(today);
+  const [y, m] = thisMonth.split("-").map(Number);
+  const prevMonth = `${m === 1 ? y! - 1 : y}-${String(m === 1 ? 12 : m! - 1).padStart(2, "0")}`;
+  const out: MonthLine[] = [];
+  for (const ym of [thisMonth, prevMonth]) {
+    const installsIn = (r: SheetRow) => r.visits.filter((v) => isInstallCode(v.code) && monthOf(v.day) === ym);
+    const projected = rows.filter((r) => installsIn(r).length > 0);
+    const started = projected.filter((r) => installsIn(r).some((v) => v.day <= today) && STARTED_STAGES.has(stageKey(r.stage)));
+    const sum = (set: SheetRow[], key: keyof SheetRow) => Math.round(set.reduce((n, r) => n + (Number(r[key]) || 0), 0) * 100) / 100;
+    const line = (kind: string, set: SheetRow[], what: string): MonthLine => ({
+      label: `${monthTitle(ym)} — ${kind}: ${set.length} job${set.length === 1 ? "" : "s"} ${what}, ${money(sum(set, "totalRev"))}`,
+      jobs: set.length, gross: sum(set, "gross"), totalRev: sum(set, "totalRev"), deposit: sum(set, "deposit"), paid: sum(set, "totalPayments"), owed: sum(set, "balanceOwed"),
+    });
+    out.push(line("Projected", projected, "with an install scheduled this month"));
+    out.push(line("Started", started, "with the install started (in production)"));
+  }
+  return out;
+}
+
+function monthLineCells(rowIdx: number, l: MonthLine): CellWrite[] {
+  return [
+    { row: rowIdx, col: IDX["A"]!, value: l.label },
+    { row: rowIdx, col: IDX["R"]!, value: l.gross },
+    { row: rowIdx, col: IDX["T"]!, value: l.totalRev },
+    { row: rowIdx, col: IDX["Y"]!, value: l.deposit },
+    { row: rowIdx, col: IDX["AA"]!, value: l.paid },
+    { row: rowIdx, col: IDX["AB"]!, value: l.owed },
+  ];
+}
+
+// ── The plan ─────────────────────────────────────────────────────────────────
+
+export interface PlanOptions {
+  now?: Date;
+  syncedAt: string | null;
+  /** Office day (YYYY-MM-DD) the push runs on; drives the month lines. */
+  today?: string;
+  /** Every feed row (not just the pushed weeks) — the month lines count across weeks. */
+  allRows?: SheetRow[];
+  /** Skip the month block (tests of the week layout). */
+  monthSummary?: boolean;
+}
 
 export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanOptions): Plan {
   // Work on a copy: row insertions shift indices, and the emitted operations
   // must use the indices the sheet will have at the moment each one runs.
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
-  const summary: PlanSummary = { headerCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [] };
+  const summary: PlanSummary = {
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [],
+  };
   // Writes are mirrored into the model too, so later steps see the labels and
   // job ids they just placed (a block inserted above shifts everything below).
   const write = (cells: CellWrite[]) => {
@@ -166,12 +257,35 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     ops.push({ type: "insertRows", at, count });
     grid.splice(at, 0, ...Array.from({ length: count }, () => [] as CellValue[]));
   };
+  const style = (rows: RowStyle[]) => { if (rows.length) ops.push({ type: "style", rows }); };
 
   // Header: written when the tab is empty or row 1 is blank.
   if (grid.length === 0 || cellStr(grid[0]?.[0]) === "" && cellStr(grid[0]?.[1]) === "") {
     if (grid.length === 0) grid.push([]);
     write(COLS.map((c) => ({ row: 0, col: IDX[c.col]!, value: c.header })));
     summary.headerCreated = true;
+  }
+
+  // Month at a glance: a fixed block right under the header, rewritten in place.
+  let firstBlockRow = 1;
+  if (opts.monthSummary !== false) {
+    const today = opts.today ?? (opts.now ?? new Date()).toISOString().slice(0, 10);
+    const lines = monthLines(opts.allRows ?? weeks.flatMap((w) => w.rows), today);
+    summary.months = lines.map((l) => ({ label: l.label, jobs: l.jobs, gross: l.gross }));
+    let markerIdx = grid.findIndex((r, i) => i > 0 && cellStr(r?.[0]) === SUMMARY_MARKER);
+    if (markerIdx < 0) {
+      markerIdx = 1;
+      insert(markerIdx, 1 + lines.length + 1); // marker, lines, spacer
+      summary.summaryCreated = true;
+    } else {
+      // Grow the block if it holds fewer lines than we write now (never shrink: no deletes).
+      let existing = 0;
+      while (markerIdx + 1 + existing < grid.length && cellStr(grid[markerIdx + 1 + existing]?.[0]) !== "" && !parseWeekLabel(grid[markerIdx + 1 + existing]?.[0] ?? null)) existing++;
+      if (existing < lines.length) insert(markerIdx + 1 + existing, lines.length - existing);
+    }
+    write([{ row: markerIdx, col: IDX["A"]!, value: SUMMARY_MARKER }, ...lines.flatMap((l, i) => monthLineCells(markerIdx + 1 + i, l))]);
+    style([{ row: markerIdx, style: "summary" }, ...lines.map((_, i) => ({ row: markerIdx + 1 + i, style: "summary" as RowStyleName }))]);
+    firstBlockRow = markerIdx + 1 + lines.length + 1;
   }
 
   const ordered = [...weeks].sort((a, b) => b.from.localeCompare(a.from)); // newest first, like the tab
@@ -185,14 +299,16 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     if (!block) {
       // New block goes where date order puts it: before the first older week, else after the last block.
       const older = blocks.find((b) => b.from < week.from);
-      const at = older ? older.labelIdx : blocks.length ? (blocks[blocks.length - 1]!.totalIdx ?? blocks[blocks.length - 1]!.labelIdx) + 2 : 1;
-      const count = 1 + rows.length + 1 + 1; // label, jobs, total, spacer
+      const at = older ? older.labelIdx : blocks.length ? blockEnd(blocks[blocks.length - 1]!) + 2 : firstBlockRow;
+      const count = 1 + rows.length + 1 + 1 + 1; // label, jobs, total, cumulative, spacer
       insert(at, count);
       const cells: CellWrite[] = [{ row: at, col: 0, value: label }];
       rows.forEach((r, i) => cells.push(...newRowCells(at + 1 + i, r, opts.syncedAt)));
-      cells.push(...totalRowCells(at + 1 + rows.length, at + 1, at + rows.length));
+      const totalIdx = at + 1 + rows.length;
+      cells.push(...totalRowCells(totalIdx, at + 1, at + rows.length));
+      cells.push({ row: totalIdx + 1, col: 0, value: CUMULATIVE_LABEL }); // formulas come in the final pass
       write(cells);
-      ops.push({ type: "style", rows: [{ row: at, style: "label" }, { row: at + 1 + rows.length, style: "total" }] });
+      style([{ row: at, style: "label" }, { row: totalIdx, style: "total" }, { row: totalIdx + 1, style: "cumulative" }]);
       summary.blocksCreated.push(label);
       summary.jobsAdded += rows.length;
       report.added = rows.map((r) => r.label);
@@ -244,9 +360,30 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     if (block.totalIdx !== null && block.jobIdx.length) {
       write(totalRowCells(block.totalIdx, block.jobIdx[0]!, block.jobIdx[block.jobIdx.length - 1]!));
     }
+    // The tab's Cumulative Monthly Total row, added to a block that lacks it.
+    if (block.totalIdx !== null && block.cumulativeIdx === null) {
+      insert(block.totalIdx + 1, 1);
+      write([{ row: block.totalIdx + 1, col: 0, value: CUMULATIVE_LABEL }]);
+      style([{ row: block.totalIdx + 1, style: "cumulative" }]);
+    }
     summary.weeks.push(report);
   }
+
+  // Cumulative Monthly Total rows last, once every block of the touched months
+  // is in place: a new earlier week changes the later weeks' running totals too.
+  const months = new Set(ordered.map((w) => monthOf(w.from)));
+  for (const b of parseBlocks(grid)) if (months.has(monthOf(b.from))) writeCumulative(b.from);
   return { ops, summary };
+
+  /** Rewrites the Cumulative Monthly Total formulas of the block for `from` from the blocks now on the tab. */
+  function writeCumulative(from: string): void {
+    const blocks = parseBlocks(grid);
+    const me = blocks.find((b) => b.from === from);
+    if (!me || me.totalIdx === null) return;
+    const cumulativeIdx = me.cumulativeIdx ?? me.totalIdx + 1;
+    const sameMonth = blocks.filter((b) => b.totalIdx !== null && monthOf(b.from) === monthOf(from) && b.from <= from);
+    write(cumulativeRowCells(cumulativeIdx, sameMonth.map((b) => b.totalIdx!).sort((a, b) => a - b)));
+  }
 }
 
 /** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
