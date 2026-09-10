@@ -39,7 +39,7 @@ const excelDate = (iso: string): Date => new Date(`${iso.slice(0, 10)}T12:00:00Z
 export interface WorkbookMeta { filter: WeekFilter; generatedAt: string; syncedAt: string | null; total: number }
 
 function cellValue(column: Column, row: SheetRow, meta: WorkbookMeta): ExcelJS.CellValue {
-  if (column.type === "check") return false;
+  if (column.type === "check") return column.key ? Boolean((row as unknown as Record<string, unknown>)[column.key]) : false;
   if (!column.key) return null;
   if (column.key === "syncedAt") return meta.syncedAt ? new Date(meta.syncedAt) : null;
   if (column.key === "syncStatus") return "Synced from JobProgress API";
@@ -105,7 +105,8 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
       const cell = ws.getCell(`${c.col}${r}`);
       const formula = columnFormula(c, r);
       if (formula) {
-        const cached = (row as unknown as Record<string, unknown>)[c.key ?? ""];
+        // Cached result only where the feed knows it; Excel computes the rest on open.
+        const cached = c.key ? (row as unknown as Record<string, unknown>)[c.key] : undefined;
         cell.value = { formula, result: cached == null ? undefined : Number(cached) } as ExcelJS.CellFormulaValue;
       } else {
         cell.value = cellValue(c, row, meta);
@@ -151,8 +152,10 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
     { header: "Next install", key: "nextInstallDate", width: 12 },
     { header: "All install days", key: "installDays", width: 40 },
     { header: "Payments on job", key: "paymentsCount", width: 10 },
+    { header: "Vendor bills (vendor · category · amount · date)", key: "billsText", width: 70 },
     { header: "Money as of", key: "financialsFetchedAt", width: 18 },
     { header: "Payments as of", key: "paymentsFetchedAt", width: 18 },
+    { header: "Bills as of", key: "billsFetchedAt", width: 18 },
   ];
   detail.getRow(1).font = { bold: true };
   for (const row of rows) {
@@ -163,12 +166,16 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
       nextInstallDate: row.nextInstallDate ? sheetDate(row.nextInstallDate) : "",
       installDays: row.installDates.map(sheetDate).join(", "),
       paymentsCount: row.paymentsCount,
+      billsText: row.bills.map((b) => `${b.vendorName ?? "?"} · ${b.category} · $${Number(b.amount).toFixed(2)}${b.date ? ` · ${sheetDate(b.date)}` : ""}`).join("\n"),
       financialsFetchedAt: row.financialsFetchedAt ? new Date(row.financialsFetchedAt) : null,
       paymentsFetchedAt: row.paymentsFetchedAt ? new Date(row.paymentsFetchedAt) : null,
+      billsFetchedAt: row.billsFetchedAt ? new Date(row.billsFetchedAt) : null,
     });
   }
+  detail.getColumn("billsText").alignment = { wrapText: true, vertical: "top" };
   detail.getColumn("financialsFetchedAt").numFmt = NUM_FMT.datetime;
   detail.getColumn("paymentsFetchedAt").numFmt = NUM_FMT.datetime;
+  detail.getColumn("billsFetchedAt").numFmt = NUM_FMT.datetime;
 
   // ── Provenance ──
   const about = wb.addWorksheet("About");
@@ -200,6 +207,11 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
     ["U, Y, Z", "the job's payment history: methods used; first payment; every later payment summed. Canceled payments ignored."],
     ["AA, AB", "JobProgress: payments received, amount owed"],
     ["AC Job #", "the JobProgress job number (the tab had SQs here)"],
+    ["AD Material Vendor", "material suppliers that have billed the job in JobProgress (vendor bills), in the tab's short names — so it fills after delivery, not at ordering"],
+    ["AI Container Scheduled", "ticked when a carting company (e.g. Bin Drop Waste Services) has billed the job"],
+    ["AJ Sub Scheduled", "ticked when a live production schedule on the job has a crew assigned"],
+    ["BH, BI, BJ, BL", "actual costs from the job's vendor bills, by vendor: material suppliers, subs, carting, other. BK Dealer Fee stays by hand."],
+    ["BM–BS", "the tab's arithmetic as formulas: COGS = BH..BL, GP $ = T − COGS, and each cost as a share of T"],
   ];
   for (const l of lines) about.addRow(l);
   about.getColumn(1).font = { bold: true };

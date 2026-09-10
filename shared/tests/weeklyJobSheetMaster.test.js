@@ -26,7 +26,18 @@ describe("master column map", () => {
     expect(MASTER_MANUAL.length).toBeGreaterThan(40);
     for (const col of MASTER_MANUAL) expect(["text", "check", "date", "money", "pct"]).toContain(col.type);
     expect(MASTER_CHECKBOXES.map((c) => c.col)).toEqual(expect.arrayContaining(["B", "D", "E", "F", "G", "H", "I", "J", "X", "AG", "AI", "AJ", "AK", "AL", "AM", "AQ", "AT", "AU", "BF"]));
-    expect(MASTER_COLUMNS.find((c) => c.col === "AD").list).toEqual(["NCBP", "QXO", "Lansing", "ABC"]);
+    expect(MASTER_COLUMNS.find((c) => c.col === "AE").list).toEqual(["Atlas", "GAF", "Hardie", "Certainteed"]);
+  });
+  it("fills vendor, container, sub-scheduled and the actual-cost ledger from JobProgress", () => {
+    const by = (col) => MASTER_COLUMNS.find((c) => c.col === col);
+    expect(by("AD")).toMatchObject({ key: "materialVendor" });
+    expect(by("AI")).toMatchObject({ key: "containerScheduled", type: "check" });
+    expect(by("AJ")).toMatchObject({ key: "subScheduled", type: "check" });
+    expect(["BH", "BI", "BJ", "BL"].map((c) => by(c).key)).toEqual(["actualMaterial", "actualLabor", "actualCarting", "actualOther"]);
+    expect(by("BK").key).toBeUndefined(); // dealer fee is not a vendor bill
+    expect(columnFormula(by("BM"), 7)).toBe('IF(COUNT(BH7:BL7)=0,"",SUM(BH7:BL7))');
+    expect(columnFormula(by("BN"), 7)).toBe('IF(BM7="","",T7-BM7)');
+    expect(columnFormula(by("BO"), 7)).toBe('IFERROR(BN7/T7,"")');
   });
   it("puts no dropdown on a synced column, whose JobProgress values are not the tab's short entries", () => {
     for (const col of MASTER_SYNCED) expect(col.list).toBeUndefined();

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SHEET_COLUMNS, LINK_COLUMNS, AUTOMATED_COLUMNS, PENDING_COLUMNS,
   totalRevenue, balanceOwed, sheetDate, sheetCell, sheetTable, toSheetCsv, rowLabel, paymentBreakdown,
+  classifyVendor, vendorShortName, billBreakdown,
 } from "../src/weeklyJobSheet.js";
 
 const row = (over = {}) => ({
@@ -87,6 +88,43 @@ describe("cell formatting", () => {
   it("builds the legacy column-A label from town, address and customer", () => {
     expect(rowLabel(row())).toBe("Paramus/320 Ivy Place/Sam Molano");
     expect(rowLabel(row({ address: null }))).toBe("Paramus/Sam Molano");
+  });
+});
+
+describe("vendor bills", () => {
+  it("classifies the office's vendors by name", () => {
+    const v = {
+      "New Castle Building Products": "material", "QXO": "material", "Lansing BP Rockaway": "material", "Home Depot": "material",
+      "Garfield Lumber & Millworks": "material", "Universal Supply Company": "material",
+      "Bin Drop Waste Services": "carting",
+      "CAVALLARI CONSTRUCTION CORP": "labor", "Lucy LD Construction Corp.": "labor", "Chuma Siding": "labor",
+      "DNC Contracting LLC": "labor", "AK Contractor Enterprises": "labor", "Leaf Solution LLC": "labor",
+      "AMK": "other", "": "other",
+    };
+    for (const [name, cat] of Object.entries(v)) expect([name, classifyVendor(name)]).toEqual([name, cat]);
+  });
+  it("shortens material vendors to the tab's dropdown names", () => {
+    expect(vendorShortName("New Castle Building Products")).toBe("NCBP");
+    expect(vendorShortName("Lansing BP Rockaway")).toBe("Lansing");
+    expect(vendorShortName("Home Depot")).toBe("Home Depot");
+    expect(vendorShortName("Some Roofing Supply")).toBe("Some Roofing Supply");
+  });
+  it("sums a job's bills by category and names the material vendors in billing order", () => {
+    const r = billBreakdown([
+      { vendorName: "QXO", category: "material", amount: "1200.50", date: "2026-08-20" },
+      { vendorName: "New Castle Building Products", category: "material", amount: 6958.24, date: "2026-08-15" },
+      { vendorName: "Bin Drop Waste Services", category: "carting", amount: 550, date: "2026-08-21" },
+      { vendorName: "Lucy LD Construction Corp.", category: "labor", amount: 4000, date: "2026-08-25" },
+      { vendorName: "New Castle Building Products", category: "material", amount: 100, date: "2026-08-26" },
+    ]);
+    expect(r).toEqual({
+      materialVendor: "NCBP/QXO", containerBilled: true,
+      actualMaterial: 8258.74, actualLabor: 4000, actualCarting: 550, actualOther: null, count: 5,
+    });
+  });
+  it("is blank with no bills, and never reports a zero as a cost", () => {
+    expect(billBreakdown([])).toEqual({ materialVendor: null, containerBilled: false, actualMaterial: null, actualLabor: null, actualCarting: null, actualOther: null, count: 0 });
+    expect(billBreakdown([{ vendorName: "AMK", amount: 900, date: "2026-08-01" }]).actualOther).toBe(900);
   });
 });
 

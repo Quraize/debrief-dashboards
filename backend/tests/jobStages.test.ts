@@ -30,7 +30,8 @@ const job = (id: number, stage: typeof STAGES[number], over: Record<string, unkn
 
 interface Stub {
   stages: Record<string, unknown>[]; inStages: Record<string, unknown>[]; byId: Record<string, Record<string, unknown>>;
-  summaries: Record<string, Record<string, unknown>>; payments: Record<string, Record<string, unknown>[]>; calls: string[];
+  summaries: Record<string, Record<string, unknown>>; payments: Record<string, Record<string, unknown>[]>;
+  bills: Record<string, Record<string, unknown>[]>; calls: string[];
 }
 const PAYMENT_TYPES = [
   { id: 122, label: "Cash", method: "cash" }, { id: 123, label: "Check", method: "echeque" }, { id: 124, label: "Credit Card", method: "cc" },
@@ -45,6 +46,11 @@ function stubClient(stub: Stub) {
       const id = /jobs\/(\d+)\/payment_history/.exec(u)![1]!;
       stub.calls.push(`payments:${id}`);
       data = stub.payments[id] ?? [];
+    }
+    else if (u.includes("/vendor_bills")) {
+      const id = /jobs\/(\d+)\/vendor_bills/.exec(u)![1]!;
+      stub.calls.push(`bills:${id}`);
+      data = stub.bills[id] ?? [];
     }
     else if (u.includes("/divisions")) { data = [{ id: 1, name: "ACR Roofing Division" }]; }
     else if (u.includes("/financial_summary")) {
@@ -106,6 +112,17 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       ],
       "2": [{ id: 7010, customer_id: 9002, job_id: 2, canceled: null, method: "cc", payment: 2276, status: "unapplied", date: "2026-09-01" }],
     },
+    // Shaped like the API's vendor_bills listing with the vendor include. Job 1: two
+    // suppliers, the carting company and a sub. Job 2: none yet.
+    bills: {
+      "1": [
+        { id: 9101, job_id: 1, bill_date: "2026-08-15", due_date: "2026-10-15", bill_number: "NC-1", note: "shingles", total_amount: 6958.24, tax_amount: 0, origin: "JobProgress",
+          vendor: { data: { id: 303837, first_name: "New", last_name: "Castle Building Products", display_name: "New Castle Building Products", origin: "QuickBooks" } } },
+        { id: 9102, job_id: 1, bill_date: "2026-08-20", total_amount: "1200.50", vendor: { data: { id: 1, display_name: "QXO", origin: "QuickBooks" } } },
+        { id: 9103, job_id: 1, bill_date: "2026-08-21", total_amount: 550, vendor: { data: { id: 2, display_name: "Bin Drop Waste Services", origin: "QuickBooks" } } },
+        { id: 9104, job_id: 1, bill_date: "2026-08-25", total_amount: 4000, vendor: { data: { id: 3, display_name: "Lucy LD Construction Corp.", origin: "QuickBooks" } } },
+      ],
+    },
   };
 
   beforeAll(async () => {
@@ -135,6 +152,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       stages_examined: 4, stages_tracked: 2, jobs_examined: 2, jobs_upserted: 2, jobs_moved_out: 0, locations_fetched: 2,
       financials_from_listing: 1, financial_summaries_fetched: 1, financial_summary_errors: 0,
       payments_jobs_fetched: 2, payments_upserted: 4, payments_retired: 0, payment_errors: 0,
+      bills_jobs_fetched: 2, bills_upserted: 4, bills_retired: 0, bill_errors: 0,
     });
     expect(stub.calls).toContain("summary:2");
     expect(stub.calls).not.toContain("summary:1");
@@ -171,8 +189,15 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       { jp_payment_id: "7003", jp_job_id: "1", amount: "1276.00", method: "echeque", method_label: "Check", payment_date: "2026-08-20", canceled: true, reference_number: null },
       { jp_payment_id: "7010", jp_job_id: "2", amount: "2276.00", method: "cc", method_label: "Credit Card", payment_date: "2026-09-01", canceled: false, reference_number: null },
     ]);
-    const marks = (await db.owner.query(`SELECT jp_job_id, payments_fetched_total::text AS t, payments_fetched_at IS NOT NULL AS f FROM jp_job ORDER BY jp_job_id`)).rows;
-    expect(marks).toEqual([{ jp_job_id: "1", t: "2276.00", f: true }, { jp_job_id: "2", t: "2276.00", f: true }]);
+    const marks = (await db.owner.query(`SELECT jp_job_id, payments_fetched_total::text AS t, payments_fetched_at IS NOT NULL AS f, bills_fetched_at IS NOT NULL AS b FROM jp_job ORDER BY jp_job_id`)).rows;
+    expect(marks).toEqual([{ jp_job_id: "1", t: "2276.00", f: true, b: true }, { jp_job_id: "2", t: "2276.00", f: true, b: true }]);
+    const bills = (await db.owner.query(`SELECT jp_bill_id, vendor_name, category, total_amount::text AS amt, bill_date::text FROM jp_vendor_bill ORDER BY jp_bill_id`)).rows;
+    expect(bills).toEqual([
+      { jp_bill_id: "9101", vendor_name: "New Castle Building Products", category: "material", amt: "6958.24", bill_date: "2026-08-15" },
+      { jp_bill_id: "9102", vendor_name: "QXO", category: "material", amt: "1200.50", bill_date: "2026-08-20" },
+      { jp_bill_id: "9103", vendor_name: "Bin Drop Waste Services", category: "carting", amt: "550.00", bill_date: "2026-08-21" },
+      { jp_bill_id: "9104", vendor_name: "Lucy LD Construction Corp.", category: "labor", amt: "4000.00", bill_date: "2026-08-25" },
+    ]);
   });
 
   it("does not re-read fresh money, and leaves names alone when a sweep did not ask for them", async () => {
@@ -182,8 +207,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const bare = job(1, STAGES[0]!, { financial_details: SHEET_JOB_1.financial_details, completion_date: SHEET_JOB_1.completion_date });
     stub.inStages = [bare, job(2, STAGES[1]!)];
     const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
-    expect(r.counts).toMatchObject({ financials_from_listing: 1, financial_summaries_fetched: 0, payments_jobs_fetched: 0 });
-    expect(stub.calls.filter((c) => c.startsWith("summary:") || c.startsWith("payments:"))).toEqual([]);
+    expect(r.counts).toMatchObject({ financials_from_listing: 1, financial_summaries_fetched: 0, payments_jobs_fetched: 0, bills_jobs_fetched: 0 });
+    expect(stub.calls.filter((c) => c.startsWith("summary:") || c.startsWith("payments:") || c.startsWith("bills:"))).toEqual([]);
     const row = (await db.owner.query(`SELECT rep_names, sub_contractor_names FROM jp_job WHERE jp_job_id = '1'`)).rows[0];
     expect(row).toEqual({ rep_names: "Jason Malarchak", sub_contractor_names: "Lucy" });
     stub.inStages = [job(1, STAGES[0]!, SHEET_JOB_1), job(2, STAGES[1]!)];
@@ -211,6 +236,9 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       gross: 13999, changeOrders: 0, totalRev: 13999, totalPayments: 2276, balanceOwed: 11723,
       // Deposit = first payment, progress = the rest, the canceled duplicate ignored.
       paymentMethod: "Cash/Check", deposit: 1000, progressPayments: 1276, paymentsCount: 2,
+      // Vendor bills: suppliers in billing order, a carting bill, costs by category; crews on the schedules.
+      materialVendor: "NCBP/QXO", containerScheduled: true, subScheduled: true,
+      actualMaterial: 8158.74, actualLabor: 4000, actualCarting: 550, actualOther: null, billsCount: 4,
     });
     expect(one!["jpUrl"]).toContain("/customer-jobs/9001/job/1");
     // No sub on the job: the crews on its live schedules stand in; the retired visit's crew does not.
@@ -218,6 +246,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       jobId: "2", salesRep: null, sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
       gross: 4552, changeOrders: 150.5, totalRev: 4702.5, totalPayments: 2276, balanceOwed: 2426.5,
       paymentMethod: "Credit Card", deposit: 2276, progressPayments: null, paymentsCount: 1,
+      materialVendor: null, containerScheduled: false, subScheduled: true, actualMaterial: null, billsCount: 0,
     });
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
@@ -256,9 +285,12 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(job.getCell("AB").value).toMatchObject({ formula: "T3-AA3" });
     expect(job.getCell("U").value).toBe("Credit Card");
     expect(job.getCell("U").dataValidation).toBeUndefined();          // synced: no dropdown to reject it
-    expect(job.getCell("AD").dataValidation).toMatchObject({ type: "list" }); // hand-filled: the tab's dropdown
+    expect(job.getCell("AE").dataValidation).toMatchObject({ type: "list" }); // hand-filled: the tab's dropdown
     expect(job.getCell("HU").value).toBe("2");
     expect(job.getCell("HY").value).toBe("Synced from JobProgress API");
+    expect(job.getCell("AJ").value).toBe(true);                   // sub scheduled: crew on its 9/3 visit
+    expect(job.getCell("AI").value).toBe(false);                  // no carting bill on job 2
+    expect(job.getCell("BM").value).toMatchObject({ formula: 'IF(COUNT(BH3:BL3)=0,"",SUM(BH3:BL3))' });
     expect(ws.getCell("A4").value).toBe("Weekly Total");
     expect((ws.getCell("R4").value as { formula: string }).formula).toBe("SUM(R3:R3)");
     expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("9/3/2026");
@@ -271,6 +303,15 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const wsAll = wbAll.getWorksheet("WEEKLY JOB SHEET")!;
     expect(wsAll.getCell("A2").value).not.toBe("9/1/2026-9/7/2026");
     expect(wsAll.getCell("A4").value).toBe("Weekly Total"); // header + 2 jobs + total
+    // Job 1 (row 2, newest sale first ties → job number order): vendor bills fill AD, AI and the ledger.
+    const one = wsAll.getRow(2);
+    expect(one.getCell("AC").value).toBe("2609-1-01");
+    expect(one.getCell("AD").value).toBe("NCBP/QXO");
+    expect(one.getCell("AI").value).toBe(true);
+    expect(one.getCell("BH").value).toBe(8158.74);
+    expect(one.getCell("BI").value).toBe(4000);
+    expect(one.getCell("BJ").value).toBe(550);
+    expect(one.getCell("BL").value).toBeNull();
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx?from=9/1/2026", ...as("prod@allied.test") })).statusCode).toBe(400);
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet.xlsx", ...as("rep@allied.test") })).statusCode).toBe(403);
   });

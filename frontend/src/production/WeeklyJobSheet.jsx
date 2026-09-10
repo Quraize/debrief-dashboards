@@ -40,6 +40,10 @@ const VISIBLE = [
   { key: "progressPayments", label: "Progress Pmts", col: "Z", type: "money" },
   { key: "totalPayments", label: "Payments", col: "AA", type: "money" },
   { key: "balanceOwed", label: "Balance", col: "AB", type: "money" },
+  { key: "materialVendor", label: "Material Vendor", col: "AD" },
+  { key: "actualMaterial", label: "Actual Material", col: "BH", type: "money" },
+  { key: "actualLabor", label: "Actual Labor/Sub", col: "BI", type: "money" },
+  { key: "actualCarting", label: "Actual Carting", col: "BJ", type: "money" },
 ];
 
 export default function WeeklyJobSheet() {
@@ -252,6 +256,11 @@ export default function WeeklyJobSheet() {
             <strong>Payments</strong> come from the job's Payment History in JobProgress: Deposit is the first payment recorded, Progress
             Payments are every later one, Payment Method lists the methods used (Cash/Check…). Canceled payments are ignored.
             A job whose payment total changed is re-read within ~10 minutes.
+          </div>
+          <div>
+            <strong>Vendor bills</strong> fill Material Vendor (the suppliers that billed the job, in the sheet's short names), Container
+            Scheduled (a carting company billed) and the Actual Material / Labor / Carting / Other cost columns. Bills appear after
+            delivery, so a job in progress shows them as they arrive. Sub Scheduled is ticked when a production visit has a crew.
           </div>
           {PENDING_COLUMNS.length > 0 && (
             <div><strong>Not yet available from JobProgress:</strong> {PENDING_COLUMNS.map((c) => `${c.col} ${c.header}`).join(" · ")}. These export blank.</div>

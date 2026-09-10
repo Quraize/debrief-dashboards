@@ -24,7 +24,7 @@
  */
 import { dbApp, withUser, withServiceRole, type SessionContext } from "../db/client.js";
 import { stageGroup } from "@allied/shared/jobStages";
-import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown } from "@allied/shared/weeklyJobSheet";
+import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown, billBreakdown } from "@allied/shared/weeklyJobSheet";
 import { BOARD_TIMEZONE, jobProgressUrl } from "./board.js";
 
 export interface SheetRow {
@@ -39,10 +39,17 @@ export interface SheetRow {
   gross: number | null; changeOrders: number | null; totalRev: number | null;
   paymentMethod: string | null; deposit: number | null; progressPayments: number | null; paymentsCount: number;
   totalPayments: number | null; balanceOwed: number | null;
-  financialsFetchedAt: string | null; paymentsFetchedAt: string | null; jpUrl: string | null;
+  /** True when a live production schedule on the job has a crew assigned (AJ Sub Scheduled). */
+  subScheduled: boolean;
+  /** From vendor bills: material vendors (AD), a carting bill (AI), actual costs (BH..BL). */
+  materialVendor: string | null; containerScheduled: boolean;
+  actualMaterial: number | null; actualLabor: number | null; actualCarting: number | null; actualOther: number | null;
+  billsCount: number; bills: BillJson[];
+  financialsFetchedAt: string | null; paymentsFetchedAt: string | null; billsFetchedAt: string | null; jpUrl: string | null;
 }
 
 interface PaymentJson { id: string; amount: number | string; date: string | null; method: string | null; methodLabel: string | null; status: string | null; canceled: boolean }
+export interface BillJson { vendorName: string | null; category: string; amount: number | string; date: string | null; billNumber: string | null }
 
 export interface WeeklyJobSheet {
   rows: SheetRow[];
@@ -61,8 +68,8 @@ interface Row {
   crews: string[] | null;
   total_job_price: string | null; total_change_order_amount: string | null; total_job_revenue: string | null;
   total_payment_received: string | null; total_amount_owed: string | null;
-  financials_fetched_at: Date | null; payments_fetched_at: Date | null;
-  payments: PaymentJson[];
+  financials_fetched_at: Date | null; payments_fetched_at: Date | null; bills_fetched_at: Date | null;
+  payments: PaymentJson[]; bills: BillJson[]; sub_scheduled: boolean;
 }
 
 const money = (v: string | null): number | null => (v === null ? null : Number(v));
@@ -118,8 +125,9 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
             sch.days AS install_days, (now() AT TIME ZONE $1)::date::text AS today,
             crew.names AS crews,
             j.total_job_price::text, j.total_change_order_amount::text, j.total_job_revenue::text,
-            j.total_payment_received::text, j.total_amount_owed::text, j.financials_fetched_at, j.payments_fetched_at,
-            pay.payments
+            j.total_payment_received::text, j.total_amount_owed::text,
+            j.financials_fetched_at, j.payments_fetched_at, j.bills_fetched_at,
+            pay.payments, bill.bills, coalesce(crew.any_crew, false) AS sub_scheduled
        FROM jp_job j
        LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
        LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
@@ -129,9 +137,16 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
            FROM jp_schedule s
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
        LEFT JOIN LATERAL (
-         SELECT array_agg(DISTINCT n ORDER BY n) AS names
+         SELECT array_agg(DISTINCT n ORDER BY n) AS names, count(*) > 0 AS any_crew
            FROM jp_schedule s, unnest(s.crew_names) AS n
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) crew ON true
+       LEFT JOIN LATERAL (
+         SELECT coalesce(json_agg(json_build_object(
+                  'vendorName', b.vendor_name, 'category', b.category, 'amount', b.total_amount,
+                  'date', b.bill_date::text, 'billNumber', b.bill_number)
+                ORDER BY b.bill_date, b.jp_bill_id), '[]'::json) AS bills
+           FROM jp_vendor_bill b
+          WHERE b.jp_job_id = j.jp_job_id AND b.deleted_at IS NULL) bill ON true
        LEFT JOIN LATERAL (
          SELECT coalesce(json_agg(json_build_object(
                   'id', p.jp_payment_id, 'amount', p.amount, 'date', p.payment_date::text, 'method', p.method,
@@ -149,6 +164,7 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
     const totalRev = money(r.total_job_revenue) ?? totalRevenue(gross, changeOrders);
     const totalPayments = money(r.total_payment_received);
     const pay = paymentBreakdown(r.payments ?? []);
+    const bill = billBreakdown(r.bills ?? []);
     const base = {
       jobId: r.jp_job_id, customerId: r.jp_customer_id, jobNumber: r.job_number, jobName: r.job_name,
       customer: r.customer_name, address: r.address, city: r.city,
@@ -168,8 +184,13 @@ export async function weeklyJobSheet(ctx: SessionContext): Promise<WeeklyJobShee
       paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,
       totalPayments,
       balanceOwed: money(r.total_amount_owed) ?? balanceOwed(totalRev, totalPayments, r.current_stage),
+      subScheduled: r.sub_scheduled,
+      materialVendor: bill.materialVendor, containerScheduled: bill.containerBilled,
+      actualMaterial: bill.actualMaterial, actualLabor: bill.actualLabor, actualCarting: bill.actualCarting, actualOther: bill.actualOther,
+      billsCount: bill.count, bills: r.bills ?? [],
       financialsFetchedAt: r.financials_fetched_at ? r.financials_fetched_at.toISOString() : null,
       paymentsFetchedAt: r.payments_fetched_at ? r.payments_fetched_at.toISOString() : null,
+      billsFetchedAt: r.bills_fetched_at ? r.bills_fetched_at.toISOString() : null,
       jpUrl: jobProgressUrl(r.jp_customer_id, r.jp_job_id),
     };
   });

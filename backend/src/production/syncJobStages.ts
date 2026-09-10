@@ -17,6 +17,7 @@ import {
 } from "../jobs/syncJobProgress.js";
 import { parseApiTimestamp } from "./syncSchedules.js";
 import { isTrackedStage } from "@allied/shared/jobStages";
+import { classifyVendor } from "@allied/shared/weeklyJobSheet";
 
 export interface StageSyncCounts {
   stages_examined: number;
@@ -35,6 +36,11 @@ export interface StageSyncCounts {
   payments_upserted: number;
   payments_retired: number;
   payment_errors: number;
+  /** Jobs whose vendor bills were (re)read this run, and the bills written. */
+  bills_jobs_fetched: number;
+  bills_upserted: number;
+  bills_retired: number;
+  bill_errors: number;
   api_requests: number;
   retries: number;
   rate_limit_hits: number;
@@ -60,8 +66,12 @@ const emptyCounts = (): StageSyncCounts => ({
   stages_examined: 0, stages_tracked: 0, jobs_examined: 0, jobs_upserted: 0, jobs_moved_out: 0,
   locations_fetched: 0, financials_from_listing: 0, financial_summaries_fetched: 0, financial_summary_errors: 0,
   payments_jobs_fetched: 0, payments_upserted: 0, payments_retired: 0, payment_errors: 0,
+  bills_jobs_fetched: 0, bills_upserted: 0, bills_retired: 0, bill_errors: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
+
+/** Vendor bills have no change signal on the job, so each job's list is re-read this often. */
+export const BILLS_MAX_AGE_HOURS = 24;
 
 const str = (v: unknown): string | null => (v === null || v === undefined || v === "" ? null : String(v));
 const num = (v: unknown): number | null => {
@@ -269,6 +279,76 @@ export async function refreshPayments(
   }
 }
 
+/** One vendor_bills entry → a jp_vendor_bill row; null when it has no id. */
+export function mapVendorBill(api: Record<string, unknown>, jpJobId: string): Record<string, unknown> | null {
+  const id = str(api["id"]);
+  if (!id) return null;
+  const vendor = unwrap(api["vendor"]);
+  const fullName = vendor ? [vendor["first_name"], vendor["last_name"]].map((x) => str(x) ?? "").join(" ").trim() : "";
+  const vendorName = vendor ? (str(vendor["display_name"]) ?? (fullName || null)) : null;
+  return {
+    jp_bill_id: id,
+    jp_job_id: str(api["job_id"]) ?? jpJobId,
+    vendor_id: vendor ? str(vendor["id"]) : null,
+    vendor_name: vendorName,
+    vendor_origin: vendor ? str(vendor["origin"]) : null,
+    category: classifyVendor(vendorName),
+    bill_number: str(api["bill_number"]),
+    bill_date: str(api["bill_date"])?.slice(0, 10) ?? null,
+    due_date: str(api["due_date"])?.slice(0, 10) ?? null,
+    note: str(api["note"]),
+    total_amount: num(api["total_amount"]) ?? num(api["amount"]) ?? 0,
+    tax_amount: num(api["tax_amount"]),
+    origin: str(api["origin"]),
+    raw: JSON.stringify({ ...api, file_path: undefined, attachments: undefined }),
+    last_seen_at: new Date(),
+    deleted_at: null,
+  };
+}
+
+/**
+ * Mirrors the vendor bills of tracked jobs never read or read more than a day
+ * ago, one call per job, capped per run like the money refresh. Bills the API
+ * no longer returns for the job are retired, never erased.
+ */
+export async function refreshVendorBills(
+  client: JobProgressClient, counts: StageSyncCounts,
+  perRun = Number(process.env.PRODUCTION_FINANCIALS_PER_RUN ?? FINANCIALS_PER_RUN_DEFAULT),
+): Promise<void> {
+  if (perRun <= 0) return;
+  const stale = await withServiceRole(async (c) => {
+    const { rows } = await c.query<{ jp_job_id: string }>(
+      `SELECT jp_job_id FROM jp_job
+        WHERE stage_seen_at IS NOT NULL
+          AND (bills_fetched_at IS NULL OR bills_fetched_at < now() - make_interval(hours => $1))
+        ORDER BY bills_fetched_at NULLS FIRST, jp_job_id
+        LIMIT $2`,
+      [BILLS_MAX_AGE_HOURS, perRun]);
+    return rows.map((r) => r.jp_job_id);
+  }, "job-stages:bills-stale", { quiet: true });
+
+  for (const id of stale) {
+    try {
+      counts.bills_jobs_fetched++;
+      const rows = (await client.listJobVendorBills(id))
+        .map((b) => mapVendorBill(b, id))
+        .filter((r): r is Record<string, unknown> => r !== null);
+      counts.bills_upserted += await upsertJpRows("jp_vendor_bill", "jp_bill_id", rows);
+      await withServiceRole(async (c) => {
+        const gone = await c.query(
+          `UPDATE jp_vendor_bill SET deleted_at = now()
+            WHERE jp_job_id = $1 AND deleted_at IS NULL AND NOT (jp_bill_id = ANY($2::text[]))`,
+          [id, rows.map((r) => String(r["jp_bill_id"]))]);
+        counts.bills_retired += gone.rowCount ?? 0;
+        await c.query(`UPDATE jp_job SET bills_fetched_at = now() WHERE jp_job_id = $1`, [id]);
+      }, "job-stages:bills-mark", { quiet: true });
+    } catch (err) {
+      counts.bill_errors++;
+      console.warn(`[job-stages] vendor bills failed for job ${id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** A jp_job row from a job payload, with the stage sweep's own extras. */
 export function mapStageJob(api: Record<string, unknown>, divisionNames: Map<string, string>, seen: boolean): Record<string, unknown> {
   const row = mapJpJob(api, divisionNames);
@@ -309,6 +389,7 @@ export async function runJobStageSync(options: StageSyncOptions = {}): Promise<S
     await upsertLocations(jobs, counts);
     await refreshFinancials(client, jobs, counts);
     await refreshPayments(client, counts);
+    await refreshVendorBills(client, counts);
 
     // Sweep 2: jobs we last saw in a tracked stage that were not returned now.
     const seenIds = new Set(rows.map((r) => String(r["jp_job_id"])));

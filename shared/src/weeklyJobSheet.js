@@ -119,6 +119,79 @@ export function paymentBreakdown(payments) {
   };
 }
 
+// ── Vendor bills ────────────────────────────────────────────────────────────
+//
+// JobProgress bills carry the vendor's QuickBooks display name; the sheet
+// wants to know material from labor from carting. Classification is by
+// keyword on the name — the office's vendors as of 2026-09-10 all resolve.
+
+export const VENDOR_CATEGORIES = ["material", "labor", "carting", "other"];
+
+const CARTING_RE = /\b(waste|disposal|dumpster|carting|container|bin drop|sanitation|recycling|hauling)\b/i;
+const MATERIAL_RE = /\b(supply|supplies|lumber|building products|millworks?|depot|qxo|lansing|abc|beacon|srs|roofing supply|siding supply)\b/i;
+const LABOR_RE = /\b(construction|contracting|contractors?|corp\.?|siding|roofing|gutters?|solar|enterprises?|services?|solutions?)\b/i;
+
+/** material | labor | carting | other, from a vendor's display name. */
+export function classifyVendor(name) {
+  const n = String(name ?? "").trim();
+  if (!n) return "other";
+  if (CARTING_RE.test(n)) return "carting";
+  if (MATERIAL_RE.test(n)) return "material";
+  if (LABOR_RE.test(n)) return "labor";
+  return "other";
+}
+
+/** The short names the tab's Material Vendor dropdown uses. */
+export const VENDOR_SHORT_NAMES = [
+  [/new castle/i, "NCBP"],
+  [/^qxo\b/i, "QXO"],
+  [/lansing/i, "Lansing"],
+  [/\babc\b/i, "ABC"],
+  [/home depot/i, "Home Depot"],
+  [/garfield/i, "Garfield"],
+  [/universal supply/i, "Universal"],
+  [/allied supply/i, "Allied Supply"],
+  [/athenia/i, "Athenia"],
+];
+
+export function vendorShortName(name) {
+  const n = String(name ?? "").trim();
+  for (const [re, short] of VENDOR_SHORT_NAMES) if (re.test(n)) return short;
+  return n;
+}
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * What a job's bills say for the sheet: the material vendors (column AD, the
+ * tab's short names, "/"-joined in first-billed order), whether a carting
+ * company billed the job (a container was on site — column AI), and the
+ * actual-cost totals behind BH..BL. Bills are `{vendorName, category, amount, date}`.
+ */
+export function billBreakdown(bills) {
+  const live = (bills ?? [])
+    .map((b) => ({
+      amount: num(b.amount) ?? 0, date: b.date, vendorName: b.vendorName,
+      category: VENDOR_CATEGORIES.includes(b.category) ? b.category : classifyVendor(b.vendorName),
+    }))
+    .sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")));
+  const totals = { material: null, labor: null, carting: null, other: null };
+  const vendors = [];
+  for (const b of live) {
+    totals[b.category] = round2((totals[b.category] ?? 0) + b.amount);
+    if (b.category === "material") {
+      const short = vendorShortName(b.vendorName);
+      if (short && !vendors.includes(short)) vendors.push(short);
+    }
+  }
+  return {
+    materialVendor: vendors.length ? vendors.join("/") : null,
+    containerBilled: totals.carting !== null,
+    actualMaterial: totals.material, actualLabor: totals.labor, actualCarting: totals.carting, actualOther: totals.other,
+    count: live.length,
+  };
+}
+
 /** `YYYY-MM-DD` → `M/D/YYYY`, the format the sheet's date columns use. */
 export function sheetDate(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""));

@@ -54,13 +54,17 @@ export const MASTER_COLUMNS = [
   c("AB", "Balance Owed", { key: "balanceOwed", type: "money", fill: "green", width: 12.4, formula: "T{r}-AA{r}" }),
   // The tab has "SQs" here; the managers moved the job number in (2026-09-09).
   c("AC", "Job #", { key: "jobNumber", width: 16 }),
-  c("AD", "Material Vendor", { width: 12.1, list: VENDOR_LIST }),
+  // AD from the job's vendor bills (material suppliers, in the tab's short
+  // names); AI when a carting company has billed the job; AJ when a live
+  // production schedule on the job has a crew. Manufacturer, colour and the
+  // delivery/pick-up dates have no source in JobProgress yet.
+  c("AD", "Material Vendor", { key: "materialVendor", width: 12.1 }),
   c("AE", "Manufacturer", { width: 12.5, list: MANUFACTURER_LIST }),
   c("AF", "Color", { width: 11.3 }),
   c("AG", "Material Delivery Scheduled", { type: "check", width: 10.3 }),
   c("AH", "Material Delivery Date", { type: "date", width: 11.5 }),
-  c("AI", "Container Scheduled", { type: "check", width: 10.3 }),
-  c("AJ", "Sub Scheduled", { type: "check", width: 11 }),
+  c("AI", "Container Scheduled", { key: "containerScheduled", type: "check", width: 10.3 }),
+  c("AJ", "Sub Scheduled", { key: "subScheduled", type: "check", width: 11 }),
   c("AK", "Client Install Confirmed", { type: "check", width: 10.1 }),
   c("AL", "*Confirmed & Ready For Install*", { type: "check", width: 13.6 }),
   c("AM", "Container Pick Up Scheduled", { type: "check", width: 10.4 }),
@@ -84,18 +88,21 @@ export const MASTER_COLUMNS = [
   c("BE", "GP $ACT", { type: "money", fill: "green", width: 8.3 }),
   c("BF", "Sales Commission Upd", { type: "check", fill: "green", width: 11 }),
   c("BG", "UPDATES / NOTES", { fill: "green", width: 60 }),
-  c("BH", "Actual Material", { type: "money", fill: "ledger", width: 12.6 }),
-  c("BI", "Actual Labor / Sub", { type: "money", fill: "ledger", width: 12.6 }),
-  c("BJ", "Actual Carting", { type: "money", fill: "ledger", width: 12.6 }),
+  // The tab pulls BH..BS from its JOB COST AP LEDGER tab. Here the actual
+  // costs come from the job's vendor bills in JobProgress, by vendor
+  // category; the derived columns keep the tab's own arithmetic as formulas.
+  c("BH", "Actual Material", { key: "actualMaterial", type: "money", fill: "ledger", width: 12.6 }),
+  c("BI", "Actual Labor / Sub", { key: "actualLabor", type: "money", fill: "ledger", width: 12.6 }),
+  c("BJ", "Actual Carting", { key: "actualCarting", type: "money", fill: "ledger", width: 12.6 }),
   c("BK", "Actual Dealer Fee", { type: "money", fill: "ledger", width: 12.6 }),
-  c("BL", "Actual Other COGS", { type: "money", fill: "ledger", width: 12.6 }),
-  c("BM", "Actual COGS (Ledger)", { type: "money", fill: "ledger", width: 14.5 }),
-  c("BN", "Actual GP $ (Ledger)", { type: "money", fill: "ledger", width: 14.5 }),
-  c("BO", "Actual GP % (Ledger)", { type: "pct", fill: "ledger", width: 14.5 }),
-  c("BP", "Actual Material %", { type: "pct", fill: "ledger", width: 12 }),
-  c("BQ", "Actual Labor %", { type: "pct", fill: "ledger", width: 12 }),
-  c("BR", "Actual Carting %", { type: "pct", fill: "ledger", width: 12 }),
-  c("BS", "Actual Dealer Fee %", { type: "pct", fill: "ledger", width: 12 }),
+  c("BL", "Actual Other COGS", { key: "actualOther", type: "money", fill: "ledger", width: 12.6 }),
+  c("BM", "Actual COGS (Ledger)", { type: "money", fill: "ledger", width: 14.5, formula: 'IF(COUNT(BH{r}:BL{r})=0,"",SUM(BH{r}:BL{r}))' }),
+  c("BN", "Actual GP $ (Ledger)", { type: "money", fill: "ledger", width: 14.5, formula: 'IF(BM{r}="","",T{r}-BM{r})' }),
+  c("BO", "Actual GP % (Ledger)", { type: "pct", fill: "ledger", width: 14.5, formula: 'IFERROR(BN{r}/T{r},"")' }),
+  c("BP", "Actual Material %", { type: "pct", fill: "ledger", width: 12, formula: 'IFERROR(BH{r}/T{r},"")' }),
+  c("BQ", "Actual Labor %", { type: "pct", fill: "ledger", width: 12, formula: 'IFERROR(BI{r}/T{r},"")' }),
+  c("BR", "Actual Carting %", { type: "pct", fill: "ledger", width: 12, formula: 'IFERROR(BJ{r}/T{r},"")' }),
+  c("BS", "Actual Dealer Fee %", { type: "pct", fill: "ledger", width: 12, formula: 'IFERROR(BK{r}/T{r},"")' }),
   c("HT", "JP Customer ID", { key: "customerId", fill: "navy", width: 12.6, hidden: true }),
   c("HU", "JP Job ID", { key: "jobId", fill: "navy", width: 12.6, hidden: true }),
   c("HV", "JP Overview URL", { key: "jpUrl", fill: "navy", width: 12.6, hidden: true }),
@@ -112,7 +119,7 @@ export const MASTER_MANUAL = MASTER_COLUMNS.filter((col) => !col.key);
 /** The tab's checkbox columns (Google Sheets checkboxes, TRUE/FALSE in Excel). */
 export const MASTER_CHECKBOXES = MASTER_COLUMNS.filter((col) => col.type === "check");
 
-export const NUM_FMT = { money: '"$"#,##0.00', pct: "0%", date: "m/d/yyyy", datetime: "m/d/yyyy h:mm" };
+export const NUM_FMT = { money: '"$"#,##0.00', pct: "0.0%", date: "m/d/yyyy", datetime: "m/d/yyyy h:mm" };
 
 /** The Excel formula for a formula column on a given row, e.g. T on row 5 → "R5+S5". */
 export const columnFormula = (column, rowNumber) => column.formula ? column.formula.replaceAll("{r}", String(rowNumber)) : null;

@@ -361,6 +361,14 @@ export class JobProgressClient {
     return this.collect<Record<string, unknown>>(`/jobs/${jobId}/payment_history`, {}, "payment_history");
   }
 
+  /**
+   * Every vendor bill entered on a job (supplier, sub-contractor and carting
+   * invoices; vendors are QuickBooks-synced). Verified live 2026-09-10.
+   */
+  async listJobVendorBills(jobId: string | number): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>(`/jobs/${jobId}/vendor_bills`, { "includes[]": ["vendor"] }, "vendor_bills");
+  }
+
   /** The company's payment methods: method code → the office's label ("echeque" → "Check"). */
   async listPaymentTypes(): Promise<Record<string, unknown>[]> {
     return this.collect<Record<string, unknown>>("/company/payment_types", {}, "payment_types");
