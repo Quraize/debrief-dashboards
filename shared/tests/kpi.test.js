@@ -2,17 +2,40 @@ import { describe, it, expect } from "vitest";
 import {
   effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats,
 } from "../src/kpi.js";
-import { APPOINTMENT_OUTCOMES, DQ_NO_DEMO_OUTCOME } from "../src/constants.js";
+import {
+  APPOINTMENT_OUTCOMES, DQ_NO_DEMO_OUTCOME, DQ_DEMO_OUTCOME, LEGACY_DQ_OUTCOME,
+  DEMO_OUTCOMES, SALE_OUTCOMES, requiresDqReason, dqReasonPrompt,
+} from "../src/constants.js";
 
-describe("No Demo — DQ / Do Not Reset", () => {
-  it("is an outcome the form offers, and counts as an attended no-demo like the other No Demo outcomes", () => {
+describe("the two DQ outcomes", () => {
+  it("are both offered, and both make the form ask why", () => {
     expect(APPOINTMENT_OUTCOMES).toContain(DQ_NO_DEMO_OUTCOME);
+    expect(APPOINTMENT_OUTCOMES).toContain(DQ_DEMO_OUTCOME);
+    expect(requiresDqReason(DQ_NO_DEMO_OUTCOME)).toBe(true);
+    expect(requiresDqReason(DQ_DEMO_OUTCOME)).toBe(true);
+    expect(requiresDqReason("Demo Completed — Sale")).toBe(false);
+    expect(requiresDqReason(undefined)).toBe(false);
+    // Different question for each: one had a demo, the other did not.
+    expect(dqReasonPrompt(DQ_DEMO_OUTCOME).label).toMatch(/after the demo/i);
+    expect(dqReasonPrompt(DQ_NO_DEMO_OUTCOME).label).not.toMatch(/after the demo/i);
+  });
+
+  it("counts a DQ after a demo as a demo, and a DQ with no demo as an attended no-demo", () => {
+    expect(DEMO_OUTCOMES).toContain(DQ_DEMO_OUTCOME);
+    expect(SALE_OUTCOMES).not.toContain(DQ_DEMO_OUTCOME);
+    expect(isSale({ appointment_outcome: DQ_DEMO_OUTCOME })).toBe(false);
     const aq = appointmentQualityStats([
       { appointment_type: "First Appointment", appointment_outcome: DQ_NO_DEMO_OUTCOME, dq_reason: "Renter, not the homeowner" },
       { appointment_type: "First Appointment", appointment_outcome: "Demo Completed — Sale" },
-      { appointment_type: "First Appointment", appointment_outcome: "DQ — Disqualified" }, // the old DQ: excluded from the pool
+      { appointment_type: "First Appointment", appointment_outcome: DQ_DEMO_OUTCOME, dq_reason: "Rental, owner out of state" },
+      { appointment_type: "First Appointment", appointment_outcome: LEGACY_DQ_OUTCOME }, // retired value: still excluded
     ]);
-    expect(aq).toMatchObject({ aqOpportunities: 2, aqAttended: 2, aqDemos: 1, aqNoDemo: 1 });
+    expect(aq).toMatchObject({ aqOpportunities: 3, aqAttended: 3, aqDemos: 2, aqNoDemo: 1 });
+  });
+
+  it("keeps the retired value out of the dropdown but still understood", () => {
+    expect(APPOINTMENT_OUTCOMES).not.toContain(LEGACY_DQ_OUTCOME);
+    expect(requiresDqReason(LEGACY_DQ_OUTCOME)).toBe(false);
   });
 });
 

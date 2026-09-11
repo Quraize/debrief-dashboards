@@ -1,7 +1,7 @@
 import {
   DEMO_OUTCOMES, SALE_OUTCOMES, NON_COMPLETED_OUTCOMES, RESET_OUTCOMES,
   DEMO_NO_SALE_OUTCOME, SALE_CREDIT_DECLINE_OUTCOME, SALE_CANCELLATION_OUTCOME,
-  FIRST_CALL_CLOSE, CREDIT_DECLINE_CLOSE, CANCELLATION_CLOSE, inDateRange
+  FIRST_CALL_CLOSE, CREDIT_DECLINE_CLOSE, CANCELLATION_CLOSE, LEGACY_DQ_OUTCOME, inDateRange
 } from "./constants.js";
 import { salesAppointmentsOnly } from "./salesAppointment.js";
 import { nonInsuranceDebriefs, nonInsuranceAppointments } from "./insurance.js";
@@ -108,9 +108,12 @@ const AQ_NO_SEE_TYPES = ["No Show"];
 const AQ_NO_SEE_STATUSES = ["Cancelled", "Canceled"];
 const AQ_CORE_EXCLUDE_OUTCOMES = ["Rescheduled Before Appointment", "Pending / Not Updated"];
 // A DQ'd no-demo is still an attended visit with no demo: it counts against the
-// demo rate like the other No Demo outcomes (only "DQ — Disqualified" is excluded).
+// demo rate like the other No Demo outcomes. A DQ *after* a demo is a demo —
+// it lives in DEMO_OUTCOMES and needs nothing here. Only the retired
+// "DQ — Disqualified" value, which meant "never a real opportunity", is left
+// out of the appointment-quality core.
 const AQ_NO_DEMO_OUTCOMES = ["No Demo / Not Presented", "No Demo — Reset Needed", "No Demo — Do Not Reset", "No Demo — DQ / Do Not Reset"];
-const AQ_DQ_OUTCOME = "DQ — Disqualified";
+const AQ_DQ_OUTCOME = LEGACY_DQ_OUTCOME;
 
 export const DEMO_RATE_DEFINITION = "Demos completed on First Appointments and Rehashes ÷ eligible First Appointments and Rehashes. Reset Demos and Follow-Ups are excluded.";
 export const NO_DEMO_RATE_DEFINITION = "Attended eligible appointments that did not demo ÷ attended eligible appointments (Demo + No Demo). No See records are excluded.";

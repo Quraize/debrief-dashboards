@@ -24,7 +24,7 @@ export const APPOINTMENT_OUTCOMES = [
   "Cancelled Before Appointment",
   "Rescheduled Before Appointment",
   "Pending / Not Updated",
-  "DQ — Disqualified",
+  "Demo Completed — DQ: Demo No Sale",
   "Estimating in Progress — Proposal Not Yet Sent"
 ];
 
@@ -86,7 +86,10 @@ export const DEMO_OUTCOMES = [
   "Demo Completed — Sale",
   "Demo Completed — Demo No Sale",
   "Demo Completed — Sale / Credit Decline",
-  "Demo Completed — Sale / Cancellation"
+  "Demo Completed — Sale / Cancellation",
+  // A demo WAS given; the lead was then disqualified instead of reset. It is a
+  // demo for every demo-rate purpose and a no-sale for every revenue purpose.
+  "Demo Completed — DQ: Demo No Sale"
 ];
 
 export const NON_COMPLETED_OUTCOMES = [
@@ -103,10 +106,43 @@ export const RESET_OUTCOMES = [
 export const DEMO_NO_SALE_OUTCOME = "Demo Completed — Demo No Sale";
 /** The rep went, gave no demo, and disqualified the lead. The form requires a reason (dq_reason). */
 export const DQ_NO_DEMO_OUTCOME = "No Demo — DQ / Do Not Reset";
+/** The rep gave the demo, did not sell, and disqualified the lead instead of resetting it. */
+export const DQ_DEMO_OUTCOME = "Demo Completed — DQ: Demo No Sale";
 export const SALE_CREDIT_DECLINE_OUTCOME = "Demo Completed — Sale / Credit Decline";
 export const SALE_CANCELLATION_OUTCOME = "Demo Completed — Sale / Cancellation";
-export const DQ_OUTCOME = "DQ — Disqualified";
+/**
+ * The outcome "Demo Completed — DQ: Demo No Sale" was called this before
+ * September 2026, when it meant "not a real opportunity" and was left out of
+ * the appointment-quality metrics entirely. Debriefs filed under the old name
+ * keep it and keep that treatment; nothing new is ever written with it.
+ */
+export const LEGACY_DQ_OUTCOME = "DQ — Disqualified";
 export const ESTIMATING_IN_PROGRESS_OUTCOME = "Estimating in Progress — Proposal Not Yet Sent";
+
+/**
+ * Outcomes where the rep disqualified the lead. Both take the opportunity off
+ * the board, so the form makes the rep say why — see `dqReasonPrompt`.
+ */
+export const DQ_OUTCOMES = [DQ_NO_DEMO_OUTCOME, DQ_DEMO_OUTCOME];
+export const requiresDqReason = (outcome) => DQ_OUTCOMES.includes(outcome);
+
+/** The question to put above the reason box, phrased for the outcome chosen. */
+export function dqReasonPrompt(outcome) {
+  if (outcome === DQ_DEMO_OUTCOME) {
+    return {
+      label: "Why was this disqualified after the demo?",
+      hint: "The demo was given and the lead is being taken off the board rather than reset. Say what disqualifies it — "
+        + "not a homeowner, structure or scope we do not do, no intention to buy, budget nowhere near, already under contract.",
+      placeholder: "e.g. Presented the full roof, then found the building is a rental and the owner lives out of state.",
+    };
+  }
+  return {
+    label: "Why was this disqualified?",
+    hint: "No demo was given and the lead is being taken off the board rather than reset. Say what disqualifies it — "
+      + "renter, not the decision maker, outside our service area, work we do not do, already sold elsewhere.",
+    placeholder: "e.g. Tenant, not the owner — the landlord lives out of state and will not authorise work.",
+  };
+}
 
 export const FIRST_CALL_CLOSE = "First Call Close";
 export const CREDIT_DECLINE_CLOSE = "Credit Decline";

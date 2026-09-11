@@ -6,7 +6,7 @@ import { X, Loader2, Save } from "lucide-react";
 import ComboSelect from "@/components/ComboSelect";
 import {
   APPOINTMENT_OUTCOMES, DECISION_MAKER_STATUS, SALE_CLOSE_TYPES, TRADES,
-  INSURANCE_OUTCOMES, RESET_STATUSES, FOLLOW_UP_BUCKETS, DQ_NO_DEMO_OUTCOME
+  INSURANCE_OUTCOMES, RESET_STATUSES, FOLLOW_UP_BUCKETS, requiresDqReason
 } from "@allied/shared/constants";
 import { normalizeAppointmentType } from "@allied/shared/appointmentTypes";
 
@@ -119,7 +119,7 @@ export default function EditDebriefModal({ debrief, onClose }) {
                 <option value="">Select…</option>{APPOINTMENT_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </Field>
-            {(form.appointment_outcome === DQ_NO_DEMO_OUTCOME || form.dq_reason) && (
+            {(requiresDqReason(form.appointment_outcome) || form.dq_reason) && (
               <Field label="Why was the lead disqualified?">
                 <textarea className={inputCls + " min-h-16"} value={form.dq_reason || ""} onChange={(e) => set("dq_reason", e.target.value)} />
               </Field>
