@@ -40,7 +40,8 @@ export default function MarkDuplicateModal({ appointment, appointments, debriefs
     }
     const toDelete = candidates.find((c) => c.id === keepId);
     if (!toDelete) return;
-    // The record(s) NOT selected are moved to Trash
+    // The record(s) NOT selected are deleted (marked Duplicate first, so the
+    // reason is on the row for anything reading it before the delete lands).
     const dups = candidates.filter((c) => c.id !== keepId);
     if (dups.length === 0) {
       onClose();
@@ -55,7 +56,7 @@ export default function MarkDuplicateModal({ appointment, appointments, debriefs
         }
       }
       qc.invalidateQueries({ queryKey: ["appointments-all"] });
-      toast({ title: "Duplicate resolved", description: `${dups.length} record(s) moved to Trash. Kept: ${toDelete.customer_name}.` });
+      toast({ title: "Duplicate resolved", description: `${dups.length} record(s) deleted. Kept: ${toDelete.customer_name}.` });
       onResolved();
     } catch (err) {
       toast({ title: "Failed", description: err.message, variant: "destructive" });
@@ -92,7 +93,8 @@ export default function MarkDuplicateModal({ appointment, appointments, debriefs
         </div>
 
         <p className="text-sm text-muted-foreground">
-          {matches.length + 1} records share the same CRM Lead ID + date + time. Select which record to <strong>keep</strong>. The others will be moved to recoverable Trash.
+          {matches.length + 1} records share the same CRM Lead ID + date + time. Select which record to <strong>keep</strong>. The
+          others are deleted permanently — there is no in-app Trash to restore them from.
         </p>
 
         <div className="space-y-2">
@@ -126,7 +128,7 @@ export default function MarkDuplicateModal({ appointment, appointments, debriefs
           <button onClick={doResolve} disabled={busy || !keepId}
             className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
-            Move Duplicate(s) to Trash
+            Delete Duplicate(s)
           </button>
           <button onClick={onClose} disabled={busy}
             className="w-full bg-secondary hover:bg-secondary/80 disabled:opacity-50 text-secondary-foreground font-bold py-3 rounded-lg">

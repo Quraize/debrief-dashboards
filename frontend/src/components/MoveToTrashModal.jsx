@@ -38,9 +38,9 @@ export default function MoveToTrashModal({ appointment, debriefs, onClose, onDel
       qc.invalidateQueries({ queryKey: ["appointments-all"] });
       qc.invalidateQueries({ queryKey: ["debriefs"] });
       qc.invalidateQueries({ queryKey: ["debriefs-all"] });
-      toast({ title: "Moved to Trash", description: includeDebriefs
-        ? `Appointment and ${linkedDebriefs.length} linked debrief(s) moved to recoverable Trash.`
-        : "Appointment moved to recoverable Trash." });
+      toast({ title: "Deleted", description: includeDebriefs
+        ? `Appointment and ${linkedDebriefs.length} linked debrief(s) deleted.`
+        : "Appointment deleted." });
       onDeleted();
     } catch (err) {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
@@ -55,7 +55,7 @@ export default function MoveToTrashModal({ appointment, debriefs, onClose, onDel
       <div className="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-heading font-bold text-lg text-primary flex items-center gap-2">
-            <Trash2 className="w-5 h-5 text-red-600" /> Move to Trash
+            <Trash2 className="w-5 h-5 text-red-600" /> Delete Appointment
           </h2>
           <button onClick={onClose}><X className="w-5 h-5" /></button>
         </div>
@@ -79,13 +79,14 @@ export default function MoveToTrashModal({ appointment, debriefs, onClose, onDel
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              This appointment has linked debrief records. Choose how to handle them:
+              This appointment has linked debrief records. Deleting is permanent — there is no in-app Trash to
+              restore from, only the nightly database backup.
             </p>
             <div className="space-y-2">
               <button onClick={() => doDelete(true)} disabled={busy}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Move Appointment + {linkedDebriefs.length} Debrief(s) to Trash
+                Delete Appointment + {linkedDebriefs.length} Debrief(s)
               </button>
               <button onClick={onClose} disabled={busy}
                 className="w-full bg-secondary hover:bg-secondary/80 disabled:opacity-50 text-secondary-foreground font-bold py-3 rounded-lg">
@@ -95,7 +96,10 @@ export default function MoveToTrashModal({ appointment, debriefs, onClose, onDel
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">No linked debriefs. This will move the appointment to recoverable Trash.</p>
+            <p className="text-xs text-muted-foreground">
+              No linked debriefs. Deleting is permanent — there is no in-app Trash to restore from, only the
+              nightly database backup.
+            </p>
             <button onClick={() => doDelete(false)} disabled={busy}
               className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
