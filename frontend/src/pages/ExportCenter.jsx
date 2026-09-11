@@ -3,6 +3,7 @@ import { base44 } from "@/api/client";
 import { buildExportRows, toCSV } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { isInsuranceDebrief, insuranceDebriefs, nonInsuranceAppointments } from "@allied/shared/insurance";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 import { Download, Loader2, FileSpreadsheet, CheckCircle2, Shield } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useState } from "react";
@@ -10,7 +11,7 @@ import { useState } from "react";
 export default function ExportCenter() {
   const { toast } = useToast();
   const [exported, setExported] = useState(false);
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
 
   const rows = buildExportRows(debriefs, salesAppointmentsOnly(nonInsuranceAppointments(appointments)));

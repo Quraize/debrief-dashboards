@@ -32,6 +32,7 @@ import InsuranceDashboard from '@/pages/InsuranceDashboard';
 import ProductionSchedule from '@/production/ProductionSchedule';
 import ProductionJobs from '@/production/ProductionJobs';
 import WeeklyJobSheet from '@/production/WeeklyJobSheet';
+import DebriefApprovals from '@/pages/DebriefApprovals';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -91,6 +92,7 @@ const AuthenticatedApp = () => {
           <Route path="/admin" element={<AdminSettings />} />
           <Route path="/import" element={<ImportAppointments />} />
           <Route path="/results" element={<ResultsReview />} />
+          <Route path="/debrief-approvals" element={<DebriefApprovals />} />
           <Route path="/manager-report" element={<ManagerReport />} />
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
           <Route path="/price-review" element={<PriceReview />} />

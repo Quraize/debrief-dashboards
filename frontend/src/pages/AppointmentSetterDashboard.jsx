@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Loader2 } from "lucide-react";
 import { DebriefSectionHeader } from "@/components/JpCrmSection";
 import JpCallCenterSection from "@/components/JpCallCenterSection";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 
 const COLORS = { Excellent: "#16a34a", Good: "#f59e0b", Poor: "#dc2626", "No Data": "#94a3b8" };
 
@@ -34,7 +35,7 @@ export default function AppointmentSetterDashboard() {
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
 
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
 
   const filtered = filterByDate(nonInsuranceDebriefs(debriefs), "appointment_date", filter, cs, ce);

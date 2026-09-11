@@ -20,6 +20,8 @@ import { getMarketingCategory, isUnmappedSource, isSelfGenNeedsDetail, MARKETING
 import ClassificationCounts from "@/components/ClassificationCounts";
 import EditDebriefModal from "@/components/EditDebriefModal";
 import RecordSaleLaterModal from "@/components/RecordSaleLaterModal";
+import { countedDebriefs, pendingApprovals } from "@allied/shared/debriefApproval";
+import { Link } from "react-router-dom";
 
 export default function ResultsReview() {
   const [searchParams] = useSearchParams();
@@ -44,10 +46,14 @@ export default function ResultsReview() {
   const [editing, setEditing] = useState(null);
   const [recordingSale, setRecordingSale] = useState(null);
 
-  const { data: debriefs = [], isLoading } = useQuery({
+  // Every debrief, then the ones that count: a "No Demo — DQ / Do Not Reset" debrief
+  // stays out of the results until a manager approves it (Debrief Approvals page).
+  const { data: allDebriefs = [], isLoading } = useQuery({
     queryKey: ["debriefs"],
     queryFn: () => base44.entities.Debrief.list("-created_date", 500)
   });
+  const debriefs = useMemo(() => countedDebriefs(allDebriefs), [allDebriefs]);
+  const awaitingApproval = useMemo(() => pendingApprovals(allDebriefs), [allDebriefs]);
   const { data: appointments = [] } = useQuery({
     queryKey: ["appointments-all"],
     queryFn: () => base44.entities.Appointment.list("-created_date", 500)
@@ -243,6 +249,13 @@ export default function ResultsReview() {
       {crmCheck !== "all" && <p className="text-xs text-muted-foreground -mt-2">{CRM_CHECK_HELP[crmCheck]}</p>}
 
       {/* Summary */}
+      {awaitingApproval > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-2.5 text-sm flex flex-wrap items-center gap-2">
+          <AlertTriangle className="w-4 h-4" />
+          <span><strong>{awaitingApproval}</strong> DQ / Do Not Reset debrief{awaitingApproval === 1 ? "" : "s"} awaiting manager approval — not counted in these results until approved.</span>
+          <Link to="/debrief-approvals" className="ml-auto font-semibold underline">Review approvals</Link>
+        </div>
+      )}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         <SummaryStat label="Debriefs" value={summary.total} title="Debrief forms filed by the reps that match the current date range and Insurance / Retail filter. One debrief = one appointment a rep reported on. Appointments with no debrief filed are not counted here — see the Open Debrief Queue." />
         <SummaryStat label="Demos" value={summary.demos} title="Debriefs whose outcome is a completed demo (with or without a sale)." />

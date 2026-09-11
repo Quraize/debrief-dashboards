@@ -10,6 +10,7 @@ import { DEMO_OUTCOMES, SALE_CANCELLATION_OUTCOME, SALE_CREDIT_DECLINE_OUTCOME }
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ComposedChart, LabelList } from "recharts";
 import { Loader2 } from "lucide-react";
 import { JpKpiSection, DebriefSectionHeader } from "@/components/JpCrmSection";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 
 const DM_COLORS = { "Two-Leg": "#16a34a", "One-Leg": "#f59e0b", "N/A": "#94a3b8", "Unassigned": "#94a3b8" };
 const PERIODS = ["Week", "Month", "Year"];
@@ -21,7 +22,8 @@ export default function KpiDashboard() {
   const [revenuePeriod, setRevenuePeriod] = useState("Week");
   const [lossPeriod, setLossPeriod] = useState("Month");
 
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  // Results count only debriefs a manager has not left awaiting approval (DQ / Do Not Reset).
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
 
   const retailDb = nonInsuranceDebriefs(debriefs);

@@ -4,7 +4,7 @@ import { base44 } from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
-  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing, Table2
+  AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing, Table2, ShieldCheck
 } from "lucide-react";
 import { PRODUCTION_ROLES, isProductionOnly } from "@allied/shared/constants";
 
@@ -22,6 +22,7 @@ const OPERATIONS = [
   { to: "/appointments", label: "Appointment Records", icon: CalendarDays },
   { to: "/kpi", label: "KPI Dashboard", icon: BarChart3 },
   { to: "/results", label: "Results Review", icon: FileText },
+  { to: "/debrief-approvals", label: "Debrief Approvals", icon: ShieldCheck },
   { to: "/manager-report", label: "Manager Report", icon: ClipboardCheck },
   { to: "/exceptions", label: "Exceptions / Unmatched", icon: AlertTriangle },
   { to: "/import", label: "Import Appointments", icon: Upload },

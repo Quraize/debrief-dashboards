@@ -17,6 +17,7 @@ import ClassificationCounts from "@/components/ClassificationCounts";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from "recharts";
 import { Loader2 } from "lucide-react";
 import { JpRepSection, DebriefSectionHeader } from "@/components/JpCrmSection";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 
 const NAVY = "#1e293b";
 const GOLD = "#b45309";
@@ -30,7 +31,7 @@ export default function SalesRepDashboard() {
   const [ce, setCe] = useState("");
   const [reportingGroup, setReportingGroup] = useState("all");
 
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
   const enrichedDb = useMemo(() => enrichDebriefsWithTitles(debriefs, appointments), [debriefs, appointments]);
 

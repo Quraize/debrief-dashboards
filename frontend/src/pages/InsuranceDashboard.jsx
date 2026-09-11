@@ -10,6 +10,7 @@ import {
   insuranceRepTable, insuranceDebriefs
 } from "@allied/shared/insurance";
 import { filterByDate } from "@allied/shared/kpi";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 import { Shield, Loader2, AlertTriangle } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -29,8 +30,8 @@ export default function InsuranceDashboard() {
   const [status, setStatus] = useState("");
 
   const { data: debriefs = [], isLoading } = useQuery({
-    queryKey: ["debriefs"],
-    queryFn: () => base44.entities.Debrief.list("-created_date", 500)
+    queryKey: ["debriefs", "counted"],
+    queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs)
   });
   const { data: appointments = [] } = useQuery({
     queryKey: ["appointments-all"],

@@ -8,6 +8,7 @@ import {
 } from "@allied/shared/constants";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { nonInsuranceDebriefs, nonInsuranceAppointments } from "@allied/shared/insurance";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 import { Printer, Download, Loader2, Target } from "lucide-react";
 
 function num(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
@@ -26,7 +27,7 @@ export default function ManagerReport() {
   const [dm, setDm] = useState("");
   const [closeType, setCloseType] = useState("");
 
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
 
   const fdb = useMemo(() => {

@@ -17,6 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Loader2, ChevronDown, ChevronRight, Info, AlertTriangle } from "lucide-react";
 import { DebriefSectionHeader } from "@/components/JpCrmSection";
 import JpMarketingSection from "@/components/JpMarketingSection";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
 
 function num(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function pct(a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; }
@@ -42,7 +43,7 @@ export default function MarketingDashboard() {
   const [expandedSrc, setExpandedSrc] = useState(null);
   const [defsOpen, setDefsOpen] = useState(false);
 
-  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs"], queryFn: () => base44.entities.Debrief.list("-created_date", 500) });
+  const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
 
   const retailDebriefs = useMemo(() => nonInsuranceDebriefs(debriefs), [debriefs]);
   const sourceOptions = useMemo(() => {
