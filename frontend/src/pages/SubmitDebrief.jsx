@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui/use-toast";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import {
-  SALE_OUTCOMES, DEMO_OUTCOMES, DEMO_NO_SALE_OUTCOME, SALE_CANCELLATION_OUTCOME, RESET_OUTCOMES, NON_COMPLETED_OUTCOMES,
+  SALE_OUTCOMES, DEMO_OUTCOMES, DEMO_NO_SALE_OUTCOME, SALE_CANCELLATION_OUTCOME, RESET_OUTCOMES, NON_COMPLETED_OUTCOMES, DQ_NO_DEMO_OUTCOME,
   DECISION_MAKER_STATUS, TRADES, INSURANCE_OUTCOMES, APPOINTMENT_TYPE_HELP_TEXT
 } from "@allied/shared/constants";
 import { dataQualityFlags } from "@allied/shared/kpi";
@@ -40,6 +40,7 @@ const EMPTY = {
   rep_response: "", client_response_1: "", rep_response_2: "", client_response_2: "", rep_response_3: "", cancellation_reason: "",
   reset_needed: false, reset_status: "", reset_date: "", reset_reason: "",
   reset_appointment_scheduled: null, reset_follow_up_notes: "",
+  dq_reason: "",
   follow_up_needed: false, follow_up_bucket: "", follow_up_date: "",
   notes: "", marketing_source: "", referral_source: "", submitted_by: "",
   business_division: "", trade: "",
@@ -148,6 +149,8 @@ export default function SubmitDebrief() {
   const isDemoNoSale = outcome === DEMO_NO_SALE_OUTCOME;
   const isCancellation = outcome === SALE_CANCELLATION_OUTCOME;
   const isResetNeeded = RESET_OUTCOMES.includes(outcome);
+  // The rep went, gave no demo and disqualified the lead: the managers want the why, every time.
+  const isDqNoDemo = outcome === DQ_NO_DEMO_OUTCOME;
   const isResetDemo = form.appointment_type === "Reset Demo";
   const isInsurance = form.product === "Insurance" || form.business_division === "Insurance";
   // Trades on offer: the chosen division's, else every trade any division has,
@@ -174,6 +177,7 @@ export default function SubmitDebrief() {
       ? ["customer_name", "appointment_date", "sales_rep", "appointment_setter", "insurance_outcome", "submitted_by"]
       : ["customer_name", "appointment_date", "sales_rep", "appointment_setter", "appointment_outcome", "submitted_by"];
     for (const k of base) if (!String(form[k] || "").trim()) return false;
+    if (isDqNoDemo && !isInsurance && !String(form.dq_reason || "").trim()) return false;
     if (legRequired) {
       if (!String(form.decision_maker_status || "").trim()) return false;
       if (form.decision_maker_status === "One-Leg" && !String(form.one_leg_reason || "").trim()) return false;
@@ -235,6 +239,7 @@ export default function SubmitDebrief() {
         sale_amount: form.sale_amount ? Number(form.sale_amount) : undefined,
         prices_given: form.prices_given ? Number(form.prices_given) : undefined,
         reset_needed: isResetNeeded ? true : form.reset_needed,
+        dq_reason: isDqNoDemo ? String(form.dq_reason || "").trim() : "",
         upgrade_price_1: form.upgrade_price_1 ? Number(form.upgrade_price_1) : undefined,
         upgrade_price_2: form.upgrade_price_2 ? Number(form.upgrade_price_2) : undefined,
         upgrade_price_3: form.upgrade_price_3 ? Number(form.upgrade_price_3) : undefined,
@@ -412,6 +417,13 @@ export default function SubmitDebrief() {
           <Field label="Appointment Outcome *" required>
             <ComboSelect category="appointment_outcome" value={form.appointment_outcome} onChange={(v) => set("appointment_outcome", v)} placeholder="Select outcome" />
             <span className="block text-xs text-muted-foreground mt-1">Demo = a substantial residential presentation, typically about one hour, in which the rep showed products and gave the customer a price.</span>
+          </Field>
+        )}
+        {isDqNoDemo && !isInsurance && (
+          <Field label="Why was this lead disqualified, and why should it not be reset? *" required
+            hint="Say what you found on site that made this a DQ — for example: renter or not the decision maker, no real project or budget, outside our service area, wants work we don't do, already hired someone. Be specific enough that a manager can agree without calling you.">
+            <textarea className={inputCls + " min-h-24"} value={form.dq_reason} onChange={(e) => set("dq_reason", e.target.value)}
+              placeholder="e.g. Homeowner is the customer's landlord and was not present; tenant has no authority to approve work. Not worth a reset." />
           </Field>
         )}
         {showLegQuestion && (

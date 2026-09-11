@@ -107,7 +107,9 @@ const AQ_NO_SEE_OUTCOMES = ["No Show", "No C / No Show — Reset Needed", "No C 
 const AQ_NO_SEE_TYPES = ["No Show"];
 const AQ_NO_SEE_STATUSES = ["Cancelled", "Canceled"];
 const AQ_CORE_EXCLUDE_OUTCOMES = ["Rescheduled Before Appointment", "Pending / Not Updated"];
-const AQ_NO_DEMO_OUTCOMES = ["No Demo / Not Presented", "No Demo — Reset Needed", "No Demo — Do Not Reset"];
+// A DQ'd no-demo is still an attended visit with no demo: it counts against the
+// demo rate like the other No Demo outcomes (only "DQ — Disqualified" is excluded).
+const AQ_NO_DEMO_OUTCOMES = ["No Demo / Not Presented", "No Demo — Reset Needed", "No Demo — Do Not Reset", "No Demo — DQ / Do Not Reset"];
 const AQ_DQ_OUTCOME = "DQ — Disqualified";
 
 export const DEMO_RATE_DEFINITION = "Demos completed on First Appointments and Rehashes ÷ eligible First Appointments and Rehashes. Reset Demos and Follow-Ups are excluded.";

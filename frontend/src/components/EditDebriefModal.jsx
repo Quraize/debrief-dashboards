@@ -6,7 +6,7 @@ import { X, Loader2, Save } from "lucide-react";
 import ComboSelect from "@/components/ComboSelect";
 import {
   APPOINTMENT_OUTCOMES, DECISION_MAKER_STATUS, SALE_CLOSE_TYPES, TRADES,
-  INSURANCE_OUTCOMES, RESET_STATUSES, FOLLOW_UP_BUCKETS
+  INSURANCE_OUTCOMES, RESET_STATUSES, FOLLOW_UP_BUCKETS, DQ_NO_DEMO_OUTCOME
 } from "@allied/shared/constants";
 import { normalizeAppointmentType } from "@allied/shared/appointmentTypes";
 
@@ -21,7 +21,7 @@ function fromDebrief(d) {
   [
     "customer_name","phone","address","city","crm_lead_id","appointment_date","marketing_source","referral_source",
     "sales_rep","appointment_setter","product","business_division","trade","appointment_type",
-    "appointment_outcome","decision_maker_status","one_leg_reason","sales_appointment","non_sales_reason",
+    "appointment_outcome","dq_reason","decision_maker_status","one_leg_reason","sales_appointment","non_sales_reason",
     "products_discussed","products_presented_other","additional_prices_given",
     "financing_not_offered_reason","financing_option_presented","financing_result",
     "sale_close_type","sale_signed_date","sale_date","sale_price_number",
@@ -119,6 +119,11 @@ export default function EditDebriefModal({ debrief, onClose }) {
                 <option value="">Select…</option>{APPOINTMENT_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </Field>
+            {(form.appointment_outcome === DQ_NO_DEMO_OUTCOME || form.dq_reason) && (
+              <Field label="Why was the lead disqualified?">
+                <textarea className={inputCls + " min-h-16"} value={form.dq_reason || ""} onChange={(e) => set("dq_reason", e.target.value)} />
+              </Field>
+            )}
             <Field label="Decision Maker Status">
               <select className={inputCls} value={form.decision_maker_status || ""} onChange={(e) => set("decision_maker_status", e.target.value)}>
                 <option value="">Select…</option>{DECISION_MAKER_STATUS.map((o) => <option key={o} value={o}>{o}</option>)}

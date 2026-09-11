@@ -554,6 +554,7 @@ function DetailPanel({ debrief: d, cmp, rawTitle, onEdit, onRecordSale }) {
       ]} />
 
       <Group title="Follow-Up" fields={[
+        ["Why Disqualified (DQ)", d.dq_reason],
         ["Reset Needed", d.reset_needed === true ? "Yes" : (d.reset_needed === false ? "No" : null)],
         ["Reset Status", d.reset_status],
         ["Reset Date", d.reset_date],

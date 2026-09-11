@@ -1,7 +1,20 @@
 import { describe, it, expect } from "vitest";
 import {
-  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs,
+  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats,
 } from "../src/kpi.js";
+import { APPOINTMENT_OUTCOMES, DQ_NO_DEMO_OUTCOME } from "../src/constants.js";
+
+describe("No Demo — DQ / Do Not Reset", () => {
+  it("is an outcome the form offers, and counts as an attended no-demo like the other No Demo outcomes", () => {
+    expect(APPOINTMENT_OUTCOMES).toContain(DQ_NO_DEMO_OUTCOME);
+    const aq = appointmentQualityStats([
+      { appointment_type: "First Appointment", appointment_outcome: DQ_NO_DEMO_OUTCOME, dq_reason: "Renter, not the homeowner" },
+      { appointment_type: "First Appointment", appointment_outcome: "Demo Completed — Sale" },
+      { appointment_type: "First Appointment", appointment_outcome: "DQ — Disqualified" }, // the old DQ: excluded from the pool
+    ]);
+    expect(aq).toMatchObject({ aqOpportunities: 2, aqAttended: 2, aqDemos: 1, aqNoDemo: 1 });
+  });
+});
 
 const retail = (over = {}) => ({
   product: "Roofing", appointment_type: "First Appointment",

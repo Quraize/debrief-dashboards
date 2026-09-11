@@ -18,6 +18,7 @@ export const APPOINTMENT_OUTCOMES = [
   "Demo Completed — Sale / Cancellation",
   "No Demo — Reset Needed",
   "No Demo — Do Not Reset",
+  "No Demo — DQ / Do Not Reset",
   "No C / No Show — Reset Needed",
   "No C / No Show — Do Not Reset",
   "Cancelled Before Appointment",
@@ -100,6 +101,8 @@ export const RESET_OUTCOMES = [
 ];
 
 export const DEMO_NO_SALE_OUTCOME = "Demo Completed — Demo No Sale";
+/** The rep went, gave no demo, and disqualified the lead. The form requires a reason (dq_reason). */
+export const DQ_NO_DEMO_OUTCOME = "No Demo — DQ / Do Not Reset";
 export const SALE_CREDIT_DECLINE_OUTCOME = "Demo Completed — Sale / Credit Decline";
 export const SALE_CANCELLATION_OUTCOME = "Demo Completed — Sale / Cancellation";
 export const DQ_OUTCOME = "DQ — Disqualified";
