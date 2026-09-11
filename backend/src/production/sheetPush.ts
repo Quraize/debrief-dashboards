@@ -246,6 +246,24 @@ async function closeRun(id: string, status: "completed" | "failed", counts: Reco
   }, "sheet-push:close-run", { quiet: true });
 }
 
+export interface SheetPushRun {
+  id: string; startedAt: string; finishedAt: string | null; status: string; mode: string; startedBy: string | null;
+  counts: Record<string, unknown> | null; errorMessage: string | null;
+}
+
+/** Recent pushes and previews, newest first, for the page's run table. */
+export async function recentSheetPushes(limit = 30): Promise<SheetPushRun[]> {
+  return withServiceRole(async (c) => {
+    const { rows } = await c.query<{ id: string; started_at: Date; finished_at: Date | null; status: string; mode: string; started_by: string | null; counts: Record<string, unknown> | null; error_message: string | null }>(
+      `SELECT id, started_at, finished_at, status, mode, started_by, counts, error_message
+         FROM sync_run WHERE kind = 'sheet_push' ORDER BY started_at DESC LIMIT $1`, [limit]);
+    return rows.map((r) => ({
+      id: r.id, startedAt: r.started_at.toISOString(), finishedAt: r.finished_at ? r.finished_at.toISOString() : null,
+      status: r.status, mode: r.mode, startedBy: r.started_by, counts: r.counts, errorMessage: r.error_message,
+    }));
+  }, "sheet-push:recent", { quiet: true });
+}
+
 /** The latest push, for the page's status line. */
 export async function lastSheetPush(): Promise<{ startedAt: string; finishedAt: string | null; status: string; mode: string; counts: Record<string, unknown> | null; errorMessage: string | null } | null> {
   return withServiceRole(async (c) => {

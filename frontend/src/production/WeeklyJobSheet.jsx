@@ -248,6 +248,49 @@ export default function WeeklyJobSheet() {
             </button>
           </div>
         </div>
+        {push?.runs?.length > 0 && (
+          <div className="border-t border-border pt-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Push history — what each run changed in the Google Sheet</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-max">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b border-border">
+                    <th className="px-2 py-1.5">When</th>
+                    <th className="px-2 py-1.5">Run</th>
+                    <th className="px-2 py-1.5">By</th>
+                    <th className="px-2 py-1.5">Weeks</th>
+                    <th className="px-2 py-1.5 text-right" title="Job rows newly added to the tab">Rows added</th>
+                    <th className="px-2 py-1.5 text-right" title="Existing job rows whose synced columns were refreshed">Rows updated</th>
+                    <th className="px-2 py-1.5 text-right" title="Rows kept but stamped: the feed no longer places the job in that week">Not this week</th>
+                    <th className="px-2 py-1.5 text-right" title="New week blocks laid out">Blocks</th>
+                    <th className="px-2 py-1.5 text-right" title="Individual cells written">Cells</th>
+                    <th className="px-2 py-1.5">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {push.runs.map((r) => {
+                    const c = r.counts ?? {};
+                    const weeks = (c.weeks ?? []).map((w) => w.label);
+                    return (
+                      <tr key={r.id} className="border-b border-border/50">
+                        <td className="px-2 py-1.5 whitespace-nowrap">{new Date(r.startedAt).toLocaleString(undefined, { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">{r.mode === "dry_run" ? <span className="px-1.5 py-0.5 rounded bg-secondary">preview</span> : <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">push</span>}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">{r.startedBy === "sheet-scheduler" ? "hourly schedule" : (r.startedBy || "—")}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap" title={weeks.join("\n")}>{weeks.length ? `${weeks[weeks.length - 1]} → ${weeks[0]}` : "—"}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{c.jobsAdded ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{c.jobsUpdated ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{c.jobsNotThisWeek ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{(c.blocksCreated ?? []).length}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{c.cellsWritten ?? "—"}</td>
+                        <td className={`px-2 py-1.5 ${r.status === "completed" ? "text-green-700" : "text-red-600"}`} title={r.errorMessage || ""}>{r.status}{r.errorMessage ? ` — ${r.errorMessage.slice(0, 60)}` : ""}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>

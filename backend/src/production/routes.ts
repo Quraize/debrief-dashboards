@@ -11,7 +11,7 @@ import { refreshSchedules } from "./syncSchedules.js";
 import { jobsBoard } from "./jobsBoard.js";
 import { weeklyJobSheet, parseWeekFilter, filterSheetRows } from "./weeklyJobSheet.js";
 import { buildWeeklySheetWorkbook } from "./weeklyJobSheetXlsx.js";
-import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush } from "./sheetPush.js";
+import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush, recentSheetPushes } from "./sheetPush.js";
 import { runJobStageSync } from "./syncJobStages.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
@@ -83,6 +83,7 @@ export function registerProductionRoutes(app: FastifyInstance): void {
         enabled: s.enabled, reason: s.reason, tab: s.tab, weeksBack: s.weeksBack, weeksAhead: s.weeksAhead, cron: s.cron,
         spreadsheetUrl: s.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${s.spreadsheetId}/edit` : null,
         last: await lastSheetPush(),
+        runs: await recentSheetPushes(30),
       });
     },
   );
