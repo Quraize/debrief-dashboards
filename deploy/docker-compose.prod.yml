@@ -123,6 +123,12 @@ services:
       SHEET_PUSH_WEEKS_BACK: ${SHEET_PUSH_WEEKS_BACK:-1}
       SHEET_PUSH_WEEKS_AHEAD: ${SHEET_PUSH_WEEKS_AHEAD:-3}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Map tiles for the production boards. Optional: without a key the maps
+      # fall back to a keyless provider. See backend/.env.example.
+      MAPTILER_KEY: ${MAPTILER_KEY:-}
+      MAPTILER_STYLE: ${MAPTILER_STYLE:-streets-v2}
+      MAP_TILE_URL: ${MAP_TILE_URL:-}
+      MAP_TILE_ATTRIBUTION: ${MAP_TILE_ATTRIBUTION:-}
     volumes:
       - uploads:/data/uploads
     depends_on:

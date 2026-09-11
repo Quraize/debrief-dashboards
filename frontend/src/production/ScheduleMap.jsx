@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { get } from "@/api/http";
 import { jobTypeColor } from "@allied/shared/production";
 
 // North Jersey service area — where the map rests when a day has no pins.
@@ -10,38 +12,18 @@ const HOME_ZOOM = 9;
 
 // Where the background map comes from.
 //
-// We used to draw tiles straight from tile.openstreetmap.org. That is the
-// volunteer-run server, and its usage policy does not cover an application
-// pulling tiles for its own users: in September 2026 it started answering 403
-// "App is not following the tile usage policy", which the map rendered as a
-// wall of blocked-tile images. These are CDN-hosted renderings of the same
-// OpenStreetMap data, meant to be embedded. Attribution is per provider and
-// stays on the map.
+// The provider list is served by the backend (/api/map-config) so the MapTiler
+// key lives in the env file next to every other credential and can be rotated
+// without rebuilding the frontend. This list is only the offline default: it
+// keeps the map working if that request fails, and it is what a developer sees
+// with no key configured.
 //
-// VITE_MAP_TILE_URL (with VITE_MAP_TILE_ATTRIBUTION) overrides the list, so a
-// paid key can be dropped in at build time without a code change. It is a URL,
-// not a secret — see the VITE_ rule in MIGRATION_PLAN.md §5.4 before putting a
-// keyed provider here, and prefer one that restricts the key by domain.
-const ENV_TILES = import.meta.env.VITE_MAP_TILE_URL
-  ? [{
-      name: "configured",
-      url: import.meta.env.VITE_MAP_TILE_URL,
-      attribution: import.meta.env.VITE_MAP_TILE_ATTRIBUTION
-        || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }]
-  : [];
-
-const TILE_SOURCES = [
-  ...ENV_TILES,
-  {
-    name: "carto",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    subdomains: "abcd",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, '
-      + '&copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-  },
+// Deliberately NOT tile.openstreetmap.org. That is the volunteer-run server
+// for openstreetmap.org itself; its usage policy does not cover an application
+// serving its own users, and in September 2026 it began answering 403 "App is
+// not following the tile usage policy", which the map drew as a wall of
+// blocked-tile images.
+const DEFAULT_TILE_SOURCES = [
   {
     name: "esri",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
@@ -62,11 +44,12 @@ const FAILURES_BEFORE_SWITCH = 6;
  * down the list and, if nothing works, leaves a plain canvas and says why
  * rather than tiling an error image across the screen.
  */
-function BaseTiles({ onExhausted }) {
+function BaseTiles({ sources, onExhausted }) {
   const [idx, setIdx] = useState(0);
   const failures = useRef(0);
-  const source = TILE_SOURCES[idx];
+  const source = sources[idx];
 
+  useEffect(() => { failures.current = 0; setIdx(0); }, [sources]);
   useEffect(() => { failures.current = 0; }, [idx]);
   if (!source) return null;
 
@@ -84,7 +67,7 @@ function BaseTiles({ onExhausted }) {
           failures.current += 1;
           if (failures.current < FAILURES_BEFORE_SWITCH) return;
           console.warn(`[map] tile source "${source.name}" is failing; falling back.`);
-          if (idx + 1 < TILE_SOURCES.length) setIdx(idx + 1);
+          if (idx + 1 < sources.length) setIdx(idx + 1);
           else onExhausted();
         },
       }}
@@ -155,6 +138,17 @@ export default function ScheduleMap({ items, selectedId, onSelect }) {
   const markerRefs = useRef({});
   const [noTiles, setNoTiles] = useState(false);
 
+  // The tile providers, newest config first. Cached for the session: the key
+  // behind it only changes when someone edits the env file and restarts.
+  const { data: sources = DEFAULT_TILE_SOURCES } = useQuery({
+    queryKey: ["map-config"],
+    queryFn: () => get("/api/map-config").then((r) => (r.sources?.length ? r.sources : DEFAULT_TILE_SOURCES))
+      .catch(() => DEFAULT_TILE_SOURCES),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  useEffect(() => { setNoTiles(false); }, [sources]);
+
   return (
     <div className="relative h-full w-full">
       {noTiles && (
@@ -164,7 +158,7 @@ export default function ScheduleMap({ items, selectedId, onSelect }) {
       )}
       <MapContainer center={HOME_CENTER} zoom={HOME_ZOOM} scrollWheelZoom
         className={`h-full w-full rounded-xl z-0 ${noTiles ? "bg-slate-100" : ""}`}>
-        <BaseTiles onExhausted={() => setNoTiles(true)} />
+        <BaseTiles sources={sources} onExhausted={() => setNoTiles(true)} />
         <FitToItems items={items} />
         <FocusSelected items={items} selectedId={selectedId} markerRefs={markerRefs} />
         {items.map((item) => (
