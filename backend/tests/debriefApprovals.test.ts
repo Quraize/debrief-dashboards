@@ -46,6 +46,7 @@ describe.skipIf(!reachable)("debrief approvals", () => {
     app = await buildApp();
     await seedUser("pm@allied.test", "project_manager", "Pat Manager");
     await seedUser("rep@allied.test", "outside_sales_rep", "Jason Malarchak");
+    await seedUser("admin@allied.test", "admin", "Ada Admin");
   });
   afterAll(async () => {
     await app?.close();
@@ -100,5 +101,23 @@ describe.skipIf(!reachable)("debrief approvals", () => {
     expect(all.counts).toEqual({ pending: 25, approved: 1, rejected: 1 });
     expect(all.rows[0].approval_status).toBe("pending"); // pending first
     expect(all.rows.at(-1).approval_status).not.toBe("pending");
+  });
+
+  it("counts the waiting queues per role, and hides the ones a role may not see", async () => {
+    // Leaves 25 pending DQ debriefs from the test above.
+    for (const [id, status] of [["c1", "pending"], ["c2", "pending"], ["c3", "applied"]] as const) {
+      await db.owner.query(
+        `INSERT INTO jp_price_candidate (jp_job_id, proposal_id, status) VALUES ($1, $1, $2)`, [id, status]);
+    }
+    const admin = (await app.inject({ method: "GET", url: "/api/pending-counts", ...as("admin@allied.test") })).json();
+    expect(admin.counts).toEqual({ priceReview: 2, debriefApprovals: 25 });
+    // A project manager approves debriefs but has no business with contract prices.
+    const pm = (await app.inject({ method: "GET", url: "/api/pending-counts", ...as("pm@allied.test") })).json();
+    expect(pm.counts).toEqual({ debriefApprovals: 25 });
+    // A rep has no queue at all — and is told nothing about anyone else's.
+    const rep = await app.inject({ method: "GET", url: "/api/pending-counts", ...as("rep@allied.test") });
+    expect(rep.statusCode).toBe(200);
+    expect(rep.json().counts).toEqual({});
+    expect((await app.inject({ method: "GET", url: "/api/pending-counts" })).statusCode).toBe(401);
   });
 });

@@ -77,6 +77,7 @@ export default function PriceReview() {
         description: `${r.jobs_scanned} job(s) checked, ${r.proposals_examined} document(s) read, ${r.candidates_created} result(s).`,
       });
       qc.invalidateQueries({ queryKey: ["price-candidates"] });
+      qc.invalidateQueries({ queryKey: ["pending-counts"] }); // the sidebar badge
     } catch (err) {
       toast({ title: "Scan failed", description: err.message, variant: "destructive" });
     } finally {
@@ -92,6 +93,7 @@ export default function PriceReview() {
         ? { title: "Price applied", description: `${money(res.data.amount)} written to job ${row.job_number || row.jp_job_id} in JobProgress.` }
         : { title: "Nothing written", description: res.data.reason });
       qc.invalidateQueries({ queryKey: ["price-candidates"] });
+      qc.invalidateQueries({ queryKey: ["pending-counts"] }); // the sidebar badge
     } catch (err) {
       toast({ title: "Approve failed", description: err.message, variant: "destructive" });
     } finally {
@@ -105,6 +107,7 @@ export default function PriceReview() {
       await base44.functions.invoke("rejectContractPrice", { candidate_id: row.id });
       toast({ title: "Rejected", description: "No price was written." });
       qc.invalidateQueries({ queryKey: ["price-candidates"] });
+      qc.invalidateQueries({ queryKey: ["pending-counts"] }); // the sidebar badge
     } catch (err) {
       toast({ title: "Reject failed", description: err.message, variant: "destructive" });
     } finally {

@@ -1,6 +1,7 @@
 import { Outlet, NavLink, Navigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { base44 } from "@/api/client";
+import { get } from "@/api/http";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
@@ -22,7 +23,8 @@ const OPERATIONS = [
   { to: "/appointments", label: "Appointment Records", icon: CalendarDays },
   { to: "/kpi", label: "KPI Dashboard", icon: BarChart3 },
   { to: "/results", label: "Results Review", icon: FileText },
-  { to: "/debrief-approvals", label: "Debrief Approvals", icon: ShieldCheck },
+  { to: "/debrief-approvals", label: "Debrief Approvals", icon: ShieldCheck, badge: "debriefApprovals",
+    badgeTitle: (n) => `${n} DQ debrief${n === 1 ? "" : "s"} waiting for a manager's approval` },
   { to: "/manager-report", label: "Manager Report", icon: ClipboardCheck },
   { to: "/exceptions", label: "Exceptions / Unmatched", icon: AlertTriangle },
   { to: "/import", label: "Import Appointments", icon: Upload },
@@ -32,7 +34,8 @@ const OPERATIONS = [
 
 const ADMIN_OPERATIONS = [
   { to: "/jobprogress-sync", label: "JobProgress Sync", icon: RefreshCw },
-  { to: "/price-review", label: "Price Review", icon: BadgeDollarSign },
+  { to: "/price-review", label: "Price Review", icon: BadgeDollarSign, badge: "priceReview",
+    badgeTitle: (n) => `${n} contract price${n === 1 ? "" : "s"} waiting to be approved or rejected` },
   { to: "/debrief-reminders", label: "Debrief Reminders", icon: BellRing },
   { to: "/users", label: "Users", icon: UsersIcon },
 ];
@@ -59,6 +62,19 @@ export default function AppLayout() {
     queryKey: ["me"],
     queryFn: () => base44.auth.me().catch(() => null)
   });
+
+  // Queues that are waiting on somebody. The server only returns the ones this
+  // role may see, so a missing key means "not your queue", not "nothing to do".
+  // Kept fresh in the background: the whole point is to be noticed unprompted.
+  const { data: pending = {} } = useQuery({
+    queryKey: ["pending-counts"],
+    queryFn: () => get("/api/pending-counts").then((r) => r.counts ?? {}).catch(() => ({})),
+    enabled: !!me,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  });
+  const pendingTotal = Object.values(pending).reduce((a, b) => a + (Number(b) || 0), 0);
 
   // The production role is production-ONLY. The server denies it every sales
   // table regardless; this keeps the UI honest about it: one section in the
@@ -92,8 +108,12 @@ export default function AppLayout() {
                 <span className="hidden sm:inline">{me.fullName || me.full_name || me.email}</span>
               </NavLink>
             )}
-            <button className="lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">
+            <button className="lg:hidden relative" onClick={() => setOpen(true)}
+              aria-label={pendingTotal > 0 ? `Open menu — ${pendingTotal} item(s) waiting for approval` : "Open menu"}>
               <Menu className="w-6 h-6" />
+              {pendingTotal > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-primary" />
+              )}
             </button>
           </div>
         </div>
@@ -109,7 +129,7 @@ export default function AppLayout() {
             <>
               <NavSection label="Dashboards" items={DASHBOARDS} />
               <div className="my-1 border-t border-border/60" />
-              <NavSection label="Operations" items={OPERATIONS} />
+              <NavSection label="Operations" items={OPERATIONS} pending={pending} />
             </>
           )}
           {showProduction && (
@@ -121,7 +141,7 @@ export default function AppLayout() {
           {me?.role === "admin" && (
             <>
               <div className="my-1 border-t border-border/60" />
-              <NavSection label="Admin" items={ADMIN_OPERATIONS} />
+              <NavSection label="Admin" items={ADMIN_OPERATIONS} pending={pending} />
             </>
           )}
         </aside>
@@ -140,7 +160,7 @@ export default function AppLayout() {
                   <>
                     <NavSection label="Dashboards" items={DASHBOARDS} onClick={() => setOpen(false)} />
                     <div className="my-1 border-t border-border/60" />
-                    <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} />
+                    <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} pending={pending} />
                   </>
                 )}
                 {showProduction && (
@@ -152,7 +172,7 @@ export default function AppLayout() {
                 {me?.role === "admin" && (
                   <>
                     <div className="my-1 border-t border-border/60" />
-                    <NavSection label="Admin" items={ADMIN_OPERATIONS} onClick={() => setOpen(false)} />
+                    <NavSection label="Admin" items={ADMIN_OPERATIONS} onClick={() => setOpen(false)} pending={pending} />
                   </>
                 )}
               </div>
@@ -189,18 +209,18 @@ export default function AppLayout() {
   );
 }
 
-function NavSection({ label, items, onClick }) {
+function NavSection({ label, items, onClick, pending = {} }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-3 pt-2 pb-1">{label}</span>
       {items.map((item) => (
-        <NavItem key={item.to} item={item} onClick={onClick} />
+        <NavItem key={item.to} item={item} onClick={onClick} count={item.badge ? Number(pending[item.badge]) || 0 : 0} />
       ))}
     </div>
   );
 }
 
-function NavItem({ item, onClick }) {
+function NavItem({ item, onClick, count = 0 }) {
   const Icon = item.icon;
   return (
     <NavLink to={item.to} end={item.end} onClick={onClick}
@@ -209,8 +229,16 @@ function NavItem({ item, onClick }) {
           isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-secondary"
         }`
       }>
-      <Icon className="w-4 h-4" />
-      {item.label}
+      <Icon className="w-4 h-4 shrink-0" />
+      <span className="min-w-0 flex-1">{item.label}</span>
+      {count > 0 && (
+        // Amber on both grounds: the badge has to read the same whether the row
+        // is active (dark) or not (white), because it is the thing being looked for.
+        <span title={item.badgeTitle ? item.badgeTitle(count) : `${count} waiting`}
+          className="shrink-0 min-w-5 px-1.5 h-5 rounded-full bg-amber-400 text-amber-950 text-[11px] font-bold tabular-nums flex items-center justify-center">
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
     </NavLink>
   );
 }

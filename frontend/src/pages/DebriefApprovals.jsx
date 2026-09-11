@@ -37,6 +37,7 @@ export default function DebriefApprovals() {
     onSuccess: (r, { decision }) => {
       qc.invalidateQueries({ queryKey: ["debrief-approvals"] });
       qc.invalidateQueries({ queryKey: ["debriefs"] });
+      qc.invalidateQueries({ queryKey: ["pending-counts"] }); // the sidebar badge
       toast({ title: decision === "approve" ? "Approved" : "Rejected", description: `${r.data.customer_name} — ${usDate(r.data.appointment_date)} by ${r.data.approved_by_name}.` });
     },
     onError: (err) => toast({ title: "Could not save the decision", description: err.message, variant: "destructive" }),
