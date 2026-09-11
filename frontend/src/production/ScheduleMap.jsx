@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -7,6 +7,90 @@ import { jobTypeColor } from "@allied/shared/production";
 // North Jersey service area — where the map rests when a day has no pins.
 const HOME_CENTER = [40.85, -74.2];
 const HOME_ZOOM = 9;
+
+// Where the background map comes from.
+//
+// We used to draw tiles straight from tile.openstreetmap.org. That is the
+// volunteer-run server, and its usage policy does not cover an application
+// pulling tiles for its own users: in September 2026 it started answering 403
+// "App is not following the tile usage policy", which the map rendered as a
+// wall of blocked-tile images. These are CDN-hosted renderings of the same
+// OpenStreetMap data, meant to be embedded. Attribution is per provider and
+// stays on the map.
+//
+// VITE_MAP_TILE_URL (with VITE_MAP_TILE_ATTRIBUTION) overrides the list, so a
+// paid key can be dropped in at build time without a code change. It is a URL,
+// not a secret — see the VITE_ rule in MIGRATION_PLAN.md §5.4 before putting a
+// keyed provider here, and prefer one that restricts the key by domain.
+const ENV_TILES = import.meta.env.VITE_MAP_TILE_URL
+  ? [{
+      name: "configured",
+      url: import.meta.env.VITE_MAP_TILE_URL,
+      attribution: import.meta.env.VITE_MAP_TILE_ATTRIBUTION
+        || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }]
+  : [];
+
+const TILE_SOURCES = [
+  ...ENV_TILES,
+  {
+    name: "carto",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    subdomains: "abcd",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, '
+      + '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom: 20,
+  },
+  {
+    name: "esri",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri — Esri, DeLorme, NAVTEQ, USGS, Intermap",
+    maxZoom: 19,
+  },
+];
+
+// A blocked or missing tile draws this instead of the browser's broken-image
+// icon — the difference between a faint gap and a screen full of "403".
+const BLANK_TILE = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+// One tile failing is a gap; a screenful failing is a blocked provider.
+const FAILURES_BEFORE_SWITCH = 6;
+
+/**
+ * The basemap, with failover. Providers block or disappear without warning,
+ * and when that happens the pins and the job list still matter — so this walks
+ * down the list and, if nothing works, leaves a plain canvas and says why
+ * rather than tiling an error image across the screen.
+ */
+function BaseTiles({ onExhausted }) {
+  const [idx, setIdx] = useState(0);
+  const failures = useRef(0);
+  const source = TILE_SOURCES[idx];
+
+  useEffect(() => { failures.current = 0; }, [idx]);
+  if (!source) return null;
+
+  return (
+    <TileLayer
+      key={source.name}
+      url={source.url}
+      attribution={source.attribution}
+      subdomains={source.subdomains ?? "abc"}
+      maxZoom={source.maxZoom ?? 19}
+      errorTileUrl={BLANK_TILE}
+      eventHandlers={{
+        tileload: () => { failures.current = 0; },
+        tileerror: () => {
+          failures.current += 1;
+          if (failures.current < FAILURES_BEFORE_SWITCH) return;
+          console.warn(`[map] tile source "${source.name}" is failing; falling back.`);
+          if (idx + 1 < TILE_SOURCES.length) setIdx(idx + 1);
+          else onExhausted();
+        },
+      }}
+    />
+  );
+}
 
 /**
  * One pin per scheduled job. Colour = job type, shape = status: solid for an
@@ -69,40 +153,44 @@ function FocusSelected({ items, selectedId, markerRefs }) {
  */
 export default function ScheduleMap({ items, selectedId, onSelect }) {
   const markerRefs = useRef({});
+  const [noTiles, setNoTiles] = useState(false);
 
   return (
-    <MapContainer center={HOME_CENTER} zoom={HOME_ZOOM} scrollWheelZoom className="h-full w-full rounded-xl z-0">
-      {/* Standard OpenStreetMap tiles: free, keyless, reliable. */}
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-        maxZoom={19}
-      />
-      <FitToItems items={items} />
-      <FocusSelected items={items} selectedId={selectedId} markerRefs={markerRefs} />
-      {items.map((item) => (
-        <Marker
-          key={item.id}
-          position={[item.location.lat, item.location.lng]}
-          icon={pinIcon({
-            color: jobTypeColor(item.parsed.code), status: item.status,
-            label: item.index, selected: item.id === selectedId,
-          })}
-          zIndexOffset={item.id === selectedId ? 1000 : 0}
-          ref={(ref) => { if (ref) markerRefs.current[item.id] = ref; }}
-          eventHandlers={{ click: () => onSelect(item.id) }}
-        >
-          <Popup>
-            <div className="text-xs space-y-0.5 min-w-[180px]">
-              <div className="font-bold text-sm">{item.customerName || item.parsed.customer || item.title}</div>
-              <div className="text-muted-foreground">{item.parsed.label}{item.jobNumber ? ` · ${item.jobNumber}` : ""}</div>
-              <div>{[item.location.address, item.location.city].filter(Boolean).join(", ")}</div>
-              <div>{item.fullDay ? "All day" : `${item.startTime12} – ${item.endTime12}`}</div>
-              <div>{item.crews.length ? item.crews.map((c) => c.name).join(", ") : "No crew assigned"}</div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-    </MapContainer>
+    <div className="relative h-full w-full">
+      {noTiles && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 border border-border rounded-lg px-3 py-1.5 shadow-sm text-xs text-muted-foreground max-w-xs text-center">
+          Background map unavailable right now. Pins and addresses are still accurate.
+        </div>
+      )}
+      <MapContainer center={HOME_CENTER} zoom={HOME_ZOOM} scrollWheelZoom
+        className={`h-full w-full rounded-xl z-0 ${noTiles ? "bg-slate-100" : ""}`}>
+        <BaseTiles onExhausted={() => setNoTiles(true)} />
+        <FitToItems items={items} />
+        <FocusSelected items={items} selectedId={selectedId} markerRefs={markerRefs} />
+        {items.map((item) => (
+          <Marker
+            key={item.id}
+            position={[item.location.lat, item.location.lng]}
+            icon={pinIcon({
+              color: jobTypeColor(item.parsed.code), status: item.status,
+              label: item.index, selected: item.id === selectedId,
+            })}
+            zIndexOffset={item.id === selectedId ? 1000 : 0}
+            ref={(ref) => { if (ref) markerRefs.current[item.id] = ref; }}
+            eventHandlers={{ click: () => onSelect(item.id) }}
+          >
+            <Popup>
+              <div className="text-xs space-y-0.5 min-w-[180px]">
+                <div className="font-bold text-sm">{item.customerName || item.parsed.customer || item.title}</div>
+                <div className="text-muted-foreground">{item.parsed.label}{item.jobNumber ? ` · ${item.jobNumber}` : ""}</div>
+                <div>{[item.location.address, item.location.city].filter(Boolean).join(", ")}</div>
+                <div>{item.fullDay ? "All day" : `${item.startTime12} – ${item.endTime12}`}</div>
+                <div>{item.crews.length ? item.crews.map((c) => c.name).join(", ") : "No crew assigned"}</div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+    </div>
   );
 }

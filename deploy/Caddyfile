@@ -27,7 +27,14 @@
 		header {
 			X-Content-Type-Options nosniff
 			X-Frame-Options DENY
-			Referrer-Policy same-origin
+			# Cross-origin requests send the ORIGIN only (never the path, and
+			# never anything over plain HTTP). Map tile providers identify an
+			# embedding site by this header - with `same-origin` they see an
+			# anonymous client, which is how the app ended up blocked by
+			# OpenStreetMap, and it is what a domain-restricted tile key would
+			# be validated against. The API keeps `same-origin`, set by the
+			# backend itself (backend/src/app.ts).
+			Referrer-Policy strict-origin-when-cross-origin
 			-Server
 		}
 		# Vite emits content-hashed filenames under /assets — cache forever.
