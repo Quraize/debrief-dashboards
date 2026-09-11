@@ -221,7 +221,7 @@ export default function ResultsReview() {
             className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
               insFilter === f ? "bg-accent text-white" : "bg-white border border-border text-secondary-foreground"
             }`}>
-            {f === "all" ? "All Records" : f === "insurance" ? "Insurance Only" : "Retail / Commercial Only"}
+            {f === "all" ? "All Debriefs" : f === "insurance" ? "Insurance Only" : "Retail / Commercial Only"}
           </button>
         ))}
       </div>
@@ -244,12 +244,12 @@ export default function ResultsReview() {
 
       {/* Summary */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        <SummaryStat label="Records" value={summary.total} />
-        <SummaryStat label="Demos" value={summary.demos} />
-        <SummaryStat label="Sales" value={summary.sales} />
-        <SummaryStat label="Two-Leg" value={summary.twoLegDenom > 0 ? summary.twoLeg : 0} />
-        <SummaryStat label="Two-Leg %" value={summary.twoLegDenom > 0 ? summary.twoLegPct + "%" : "N/A"} title="Roofing, Siding, Roofing + Siding eligible subset only" />
-        <SummaryStat label="Revenue" value={"$" + summary.revenue.toLocaleString()} />
+        <SummaryStat label="Debriefs" value={summary.total} title="Debrief forms filed by the reps that match the current date range and Insurance / Retail filter. One debrief = one appointment a rep reported on. Appointments with no debrief filed are not counted here — see the Open Debrief Queue." />
+        <SummaryStat label="Demos" value={summary.demos} title="Debriefs whose outcome is a completed demo (with or without a sale)." />
+        <SummaryStat label="Sales" value={summary.sales} title="Debriefs marked as a sale, including later sales recorded after the visit." />
+        <SummaryStat label="Two-Leg" value={summary.twoLegDenom > 0 ? summary.twoLeg : 0} title="Debriefs where both decision makers were present (Roofing, Siding, Roofing + Siding only)." />
+        <SummaryStat label="Two-Leg %" value={summary.twoLegDenom > 0 ? summary.twoLegPct + "%" : "N/A"} title="Two-Leg ÷ eligible attended appointments (Roofing, Siding, Roofing + Siding only)." />
+        <SummaryStat label="Revenue" value={"$" + summary.revenue.toLocaleString()} title="Sum of the sale amounts the reps entered on these debriefs. Compare with CRM Revenue below, which is the JobProgress contract value for the same debriefs." />
       </div>
 
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">

@@ -315,8 +315,18 @@ export default function MarketingDashboard() {
               <table className="w-full text-xs min-w-max">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50 text-left text-muted-foreground">
-                    {["Category", "Records", "Eligible Appts", "Demos", "Demo Rate", "Sales", "Sales Rate", "Revenue", "Avg Sale"].map((h) => (
-                      <th key={h} className="px-2.5 py-2 font-semibold whitespace-nowrap uppercase tracking-wide">{h}</th>
+                    {[
+                      ["Category", "Marketing category, derived from the exact source the rep entered on the debrief."],
+                      ["Debriefs", "Debrief forms filed by the reps whose marketing source falls in this category, within the date range. Not JobProgress appointments and not sales."],
+                      ["Eligible Appts", "Of those debriefs, the appointments that actually ran (No Shows, cancellations and resets excluded). The denominator for Demo Rate."],
+                      ["Demos", "Debriefs whose outcome is a completed demo."],
+                      ["Demo Rate", "Demos ÷ Eligible Appts."],
+                      ["Sales", "Debriefs marked as a sale, including later sales."],
+                      ["Sales Rate", "Sales ÷ Demos."],
+                      ["Revenue", "Sum of the sale amounts the reps entered."],
+                      ["Avg Sale", "Revenue ÷ Sales."],
+                    ].map(([h, tip]) => (
+                      <th key={h} title={tip} className="px-2.5 py-2 font-semibold whitespace-nowrap uppercase tracking-wide cursor-help">{h}</th>
                     ))}
                   </tr>
                 </thead>
