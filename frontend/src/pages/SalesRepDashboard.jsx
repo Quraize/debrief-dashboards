@@ -18,6 +18,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Loader2 } from "lucide-react";
 import { JpRepSection, DebriefSectionHeader } from "@/components/JpCrmSection";
 import { countedDebriefs } from "@allied/shared/debriefApproval";
+import { applyDebriefFilters, debriefFilterOptions, activeFilterCount, EMPTY_DEBRIEF_FILTERS } from "@allied/shared/debriefFilters";
+import DebriefFilterBar from "@/components/DebriefFilterBar";
 
 const NAVY = "#1e293b";
 const GOLD = "#b45309";
@@ -30,6 +32,7 @@ export default function SalesRepDashboard() {
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
   const [reportingGroup, setReportingGroup] = useState("all");
+  const [filters, setFilters] = useState({ ...EMPTY_DEBRIEF_FILTERS });
 
   const { data: debriefs = [], isLoading } = useQuery({ queryKey: ["debriefs", "counted"], queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs) });
   const { data: appointments = [] } = useQuery({ queryKey: ["appointments-all"], queryFn: () => base44.entities.Appointment.list("-created_date", 500) });
@@ -47,13 +50,22 @@ export default function SalesRepDashboard() {
   const allPeriodDb = useMemo(() => filterByDate(enrichedDb, "appointment_date", filter, cs, ce), [enrichedDb, filter, cs, ce]);
   const classCounts = useMemo(() => classificationCounts(allPeriodDb), [allPeriodDb]);
 
+  // The dropdowns offer what is in the period BEFORE the filter bar narrows it,
+  // so picking a rep does not empty the setter list.
+  const inRangeDb = useMemo(() => filterByDate(groupFiltered, "appointment_date", filter, cs, ce), [groupFiltered, filter, cs, ce]);
+  const filterOptions = useMemo(() => debriefFilterOptions(inRangeDb), [inRangeDb]);
+
+  // Everything on the debrief side hangs off this one list: the KPI strip, the
+  // four charts and the rep table. The CRM section below never sees it.
+  const sectionDb = useMemo(() => applyDebriefFilters(groupFiltered, filters), [groupFiltered, filters]);
+
   // Group-filtered KPIs
-  const apptDb = useMemo(() => filterByDate(groupFiltered, "appointment_date", filter, cs, ce), [groupFiltered, filter, cs, ce]);
+  const apptDb = useMemo(() => filterByDate(sectionDb, "appointment_date", filter, cs, ce), [sectionDb, filter, cs, ce]);
   // Two-Leg scoped to the selected group (Residential Install eligible only — 0 denominator for Other/MISC and Insurance)
   const tl = useMemo(() => twoLegStats(apptDb), [apptDb]);
-  const saleDb = useMemo(() => filterByEffectiveSaleDate(groupFiltered, filter, cs, ce).filter(isSale), [groupFiltered, filter, cs, ce]);
-  const periodStats = useMemo(() => repStatsFromDebriefs(groupFiltered, filter, cs, ce), [groupFiltered, filter, cs, ce]);
-  const ytdStats = useMemo(() => repStatsFromDebriefs(groupFiltered, "Year to Date", "", ""), [groupFiltered]);
+  const saleDb = useMemo(() => filterByEffectiveSaleDate(sectionDb, filter, cs, ce).filter(isSale), [sectionDb, filter, cs, ce]);
+  const periodStats = useMemo(() => repStatsFromDebriefs(sectionDb, filter, cs, ce), [sectionDb, filter, cs, ce]);
+  const ytdStats = useMemo(() => repStatsFromDebriefs(sectionDb, "Year to Date", "", ""), [sectionDb]);
 
   // Team totals (selected period)
   const aq = useMemo(() => appointmentQualityStats(apptDb), [apptDb]);
@@ -67,6 +79,8 @@ export default function SalesRepDashboard() {
   const teamAvgJob = teamSales > 0 ? Math.round(teamRevenue / teamSales) : 0;
 
   const isMonth = filter === "This Month";
+  // Was hardcoded to "August" and quietly wrong from September onwards.
+  const thisMonthName = new Date().toLocaleString("en-US", { month: "long" });
 
   // Chart data (descending)
   const revenueData = [...periodStats].sort((a, b) => b.revenue - a.revenue).map((s) => ({ name: s.name, value: s.revenue }));
@@ -118,10 +132,16 @@ export default function SalesRepDashboard() {
 
       <DebriefSectionHeader />
 
+      <DebriefFilterBar value={filters} onChange={setFilters} options={filterOptions} count={apptDb.length} />
+
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : periodStats.length === 0 && teamSales === 0 ? (
-        <div className="text-center text-muted-foreground py-8 text-sm">No debriefs or sales in this period.</div>
+        <div className="text-center text-muted-foreground py-8 text-sm">
+          {activeFilterCount(filters) > 0
+            ? "No debriefs match these filters in this period. Clear a filter or widen the date range."
+            : "No debriefs or sales in this period."}
+        </div>
       ) : (
         <>
           {/* Primary KPI strip — exact order */}
@@ -184,7 +204,7 @@ export default function SalesRepDashboard() {
             <div className="p-3 border-b border-border/60">
               <h2 className="font-heading font-bold text-sm text-primary">Rep Performance — Selected Period vs Year to Date</h2>
               <p className="text-xs text-muted-foreground">
-                {isMonth ? "Comparing This Month (currently August) with Year to Date." : `Comparing ${filter} with Year to Date.`}
+                {isMonth ? `Comparing This Month (${thisMonthName}) with Year to Date.` : `Comparing ${filter} with Year to Date.`}
               </p>
             </div>
             <div className="overflow-x-auto">
