@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   crmKey, indexJpAppointments, indexById, jobProgressJobUrl, crmStatus, enrichQueueItem,
   daysSince, queueDisposition, localDay, EXCLUDED_CRM_STATUSES, isImportant, OVERDUE_DAYS,
-  debriefIndex, hasDebriefFor,
+  debriefIndex, hasDebriefFor, daysUntil, debriefableAt, recentlyRescheduledLeads, MISSING_GRACE_HOURS,
 } from "../src/debriefQueue.js";
 
 const NOW = new Date("2026-09-08T10:00:00");
@@ -161,5 +161,54 @@ describe("queueDisposition", () => {
     expect(queueDisposition(appt({ appointment_date: null }), null, false, NOW)).toBe("upcoming");
     expect(queueDisposition(appt({ debrief_status: "Needs Review" }), crm("run"), false, NOW)).toBe("other");
     expect(queueDisposition(appt({ debrief_status: "Unmatched" }), null, false, NOW)).toBe("missing");
+  });
+
+  // NOW is 2026-09-08 10:00. Today's 2pm appointment has not happened; today's
+  // 7am one finished hours ago.
+  it("waits until the appointment has had time to happen before calling it missing", () => {
+    const today = (time) => appt({ appointment_date: "2026-09-08", appointment_time: time });
+    expect(queueDisposition(today("14:00"), null, false, NOW)).toBe("upcoming");
+    expect(queueDisposition(today("9:30 AM"), null, false, NOW)).toBe("upcoming"); // inside the grace period
+    expect(queueDisposition(today("07:00"), null, false, NOW)).toBe("missing");
+    expect(queueDisposition(today("8:00 AM"), null, false, NOW)).toBe("missing");
+    // No time on the record: unchanged from before — it surfaces on its own day.
+    expect(queueDisposition(today(null), null, false, NOW)).toBe("missing");
+    // A rep who files the moment they leave settles it, grace period or not.
+    expect(queueDisposition(today("14:00"), null, true, NOW)).toBe("debriefed");
+  });
+
+  it("puts the start time plus the grace period on the clock", () => {
+    expect(debriefableAt({ appointment_date: "2026-09-08", appointment_time: "14:00" }))
+      .toEqual(new Date(`2026-09-08T${String(14 + MISSING_GRACE_HOURS).padStart(2, "0")}:00:00`));
+    expect(debriefableAt({ appointment_date: "2026-09-08", appointment_time: "12:00 AM" }))
+      .toEqual(new Date("2026-09-08T02:00:00"));
+    expect(debriefableAt({ appointment_date: "", appointment_time: "14:00" })).toBe(null);
+    expect(debriefableAt({ appointment_date: "2026-09-08", appointment_time: "garbage" }))
+      .toEqual(new Date("2026-09-08T02:00:00")); // falls back to midnight + grace
+  });
+});
+
+describe("upcoming helpers", () => {
+  it("counts the days ahead, and nothing for today or the past", () => {
+    expect(daysUntil("2026-09-09", NOW)).toBe(1);
+    expect(daysUntil("2026-09-15", NOW)).toBe(7);
+    expect(daysUntil("2026-09-08", NOW)).toBe(null);
+    expect(daysUntil("2026-09-01", NOW)).toBe(null);
+    expect(daysUntil(null, NOW)).toBe(null);
+  });
+
+  it("finds the leads whose appointment was moved recently, by their retired rows", () => {
+    const rows = [
+      { crm_lead_id: "J-100", retired_at: "2026-09-07T23:00:00Z" },   // moved yesterday
+      { crm_lead_id: "J-200", retired_at: "2026-08-01T10:00:00Z" },   // moved long ago
+      { crm_lead_id: "J-300" },                                       // live, never moved
+      { retired_at: "2026-09-07T23:00:00Z" },                         // retired with no lead id
+    ];
+    const moved = recentlyRescheduledLeads(rows, NOW);
+    expect(moved.has("j-100")).toBe(true);
+    expect(moved.has("j-200")).toBe(false);
+    expect(moved.has("j-300")).toBe(false);
+    expect(moved.size).toBe(1);
+    expect(recentlyRescheduledLeads(undefined, NOW).size).toBe(0);
   });
 });

@@ -177,17 +177,77 @@ export function daysSince(date, now = new Date()) {
   return diff >= 0 ? diff : null;
 }
 
+/** Whole days from now until the appointment; null for missing/past dates. */
+export function daysUntil(date, now = new Date()) {
+  const d = String(date ?? "").slice(0, 10);
+  if (!d) return null;
+  const diff = Math.floor((Date.parse(`${d}T00:00:00`) - Date.parse(`${localDay(now)}T00:00:00`)) / 86_400_000);
+  return diff > 0 ? diff : null;
+}
+
 /**
- * Where a past sales appointment stands, from the queue's point of view.
+ * How long after an appointment starts before a missing debrief is worth
+ * chasing. Matches DEBRIEF_REMINDER_DELAY_HOURS so the queue and the reminder
+ * emails agree: without it a 2pm appointment is listed as missing from
+ * midnight, and managers see this morning's work flagged before it happens.
+ */
+export const MISSING_GRACE_HOURS = 2;
+
+/** Minutes past midnight for "14:00" or "2:00 PM"; null when unparseable. */
+function minutesOfDay(raw) {
+  const m = String(raw ?? "").trim().match(/^(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?$/i);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  const ampm = m[3]?.toLowerCase().replace(/\./g, "");
+  if (ampm === "pm" && h < 12) h += 12;
+  if (ampm === "am" && h === 12) h = 0;
+  return h > 23 || min > 59 ? null : h * 60 + min;
+}
+
+/**
+ * When this appointment has had enough time to happen — its start plus the
+ * grace period. An appointment with no time on it falls back to midnight, so
+ * it behaves as it always has and surfaces on its own day.
+ */
+export function debriefableAt(appt, graceHours = MISSING_GRACE_HOURS) {
+  const date = String(appt?.appointment_date ?? "").slice(0, 10);
+  if (!date) return null;
+  const base = Date.parse(`${date}T00:00:00`);
+  if (Number.isNaN(base)) return null;
+  return new Date(base + (minutesOfDay(appt.appointment_time) ?? 0) * 60_000 + graceHours * 3_600_000);
+}
+
+/**
+ * Leads whose appointment was moved in the last `days`: the old row is retired
+ * and a live one took its place. Worth flagging on the board — a moved
+ * appointment is the one most likely to catch a rep out.
+ */
+export function recentlyRescheduledLeads(appointments, now = new Date(), days = 3) {
+  const since = now.getTime() - days * 86_400_000;
+  const out = new Set();
+  for (const a of appointments ?? []) {
+    if (!a?.retired_at || !a.crm_lead_id) continue;
+    const t = Date.parse(a.retired_at);
+    if (Number.isFinite(t) && t >= since) out.add(String(a.crm_lead_id).toLowerCase().trim());
+  }
+  return out;
+}
+
+/**
+ * Where a sales appointment stands, from the queue's point of view.
  *   missing   — happened (per the CRM, or the CRM has no record) and no debrief yet
  *   debriefed — a debrief exists
  *   excluded  — the CRM says it was a No See / cancelled / never got a result
- *   upcoming  — not yet
+ *   upcoming  — not yet, or not yet had time to happen
  */
-export function queueDisposition(appt, crm, hasDebrief, now = new Date()) {
+export function queueDisposition(appt, crm, hasDebrief, now = new Date(), graceHours = MISSING_GRACE_HOURS) {
   const date = String(appt.appointment_date ?? "").slice(0, 10);
-  if (!date || date > localDay(now)) return "upcoming";
+  if (!date) return "upcoming";
+  // A debrief filed the moment the rep leaves settles it, grace period or not.
   if (hasDebrief) return "debriefed";
+  const due = debriefableAt(appt, graceHours);
+  if (due ? now.getTime() < due.getTime() : date > localDay(now)) return "upcoming";
   if (crm && EXCLUDED_CRM_STATUSES.has(crm.status)) return "excluded";
   const status = appt.debrief_status;
   return status === "Missing" || status === "Unmatched" ? "missing" : "other";

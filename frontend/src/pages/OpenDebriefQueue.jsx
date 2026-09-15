@@ -9,17 +9,18 @@ import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
 import { isInsuranceAppointment } from "@allied/shared/insurance";
 import {
   indexJpAppointments, indexById, enrichQueueItem, queueDisposition, localDay, CRM_STATUS_LABELS, isImportant, OVERDUE_DAYS,
-  debriefIndex, hasDebriefFor,
+  debriefIndex, hasDebriefFor, recentlyRescheduledLeads, daysUntil, MISSING_GRACE_HOURS,
 } from "@allied/shared/debriefQueue";
 import { useJpMirror, useJpCustomers } from "@/components/JpCrmSection";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import { usDate, simpleTime } from "@/lib/format";
 
 // What to list. Combines with the date range and the people filters below.
-const VIEWS = ["Missing Debrief","Excluded by CRM","Needs Review","All Appointments","Estimates in Progress"];
+const VIEWS = ["Missing Debrief","Upcoming","Excluded by CRM","Needs Review","All Appointments","Estimates in Progress"];
 
 const VIEW_HELP = {
-  "Missing Debrief": "Sales appointments that have happened and have no debrief yet. Appointments the CRM marked No See, cancelled, or that never got a CRM result are not counted — see Excluded by CRM.",
+  "Missing Debrief": `Sales appointments that have happened and have no debrief yet. An appointment appears here ${MISSING_GRACE_HOURS} hours after its start time, so this morning's work is not flagged before it happens. Appointments the CRM marked No See, cancelled, or that never got a CRM result are not counted — see Excluded by CRM.`,
+  "Upcoming": `What is booked and has not happened yet, soonest first — today's later appointments included until ${MISSING_GRACE_HOURS} hours after they start. Anything moved in the last few days is marked Rescheduled.`,
   "Excluded by CRM": "Past appointments without a debrief that the CRM says were not run: No See, cancelled, or no result form after 14 days. Nothing to debrief, listed so nothing disappears silently.",
   "Needs Review": "Appointments a manager flagged for a second look.",
   "All Appointments": "Every sales appointment in the date range, debriefed or not, so a manager can review a day or a week.",
@@ -72,12 +73,22 @@ export default function OpenDebriefQueue() {
   const debriefKeys = useMemo(() => debriefIndex(debriefs), [debriefs]);
   const hasDebrief = (a) => hasDebriefFor(a, debriefKeys);
 
+  // Leads whose appointment moved recently — computed from the RETIRED rows,
+  // which salesAppts has already dropped, so it reads the full list.
+  const rescheduled = useMemo(() => recentlyRescheduledLeads(appointments, now), [appointments, todayStr]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Every sales appointment, joined to the CRM and classified once.
   const items = useMemo(() => salesAppts.map((a) => {
     const extra = enrichQueueItem(a, crmCtx, now);
-    return { a, ...extra, debriefed: hasDebrief(a), disposition: queueDisposition(a, extra.crm, hasDebrief(a), now) };
+    return {
+      a, ...extra,
+      debriefed: hasDebrief(a),
+      disposition: queueDisposition(a, extra.crm, hasDebrief(a), now),
+      daysAhead: daysUntil(a.appointment_date, now),
+      wasRescheduled: !!a.crm_lead_id && rescheduled.has(String(a.crm_lead_id).toLowerCase().trim()),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [salesAppts, crmCtx, debriefKeys, todayStr]);
+  }), [salesAppts, crmCtx, debriefKeys, todayStr, rescheduled]);
 
   // Date range and people filters apply to every view; the view picks the status.
   const scoped = useMemo(() => {
@@ -90,6 +101,7 @@ export default function OpenDebriefQueue() {
   const inView = (item, v) => {
     switch (v) {
       case "Missing Debrief": return item.disposition === "missing";
+      case "Upcoming": return item.disposition === "upcoming";
       case "Excluded by CRM": return item.disposition === "excluded";
       case "Needs Review": return item.a.debrief_status === "Needs Review";
       case "All Appointments": return true;
@@ -105,9 +117,12 @@ export default function OpenDebriefQueue() {
   }, [scoped]);
 
   const queue = useMemo(() => {
-    return scoped
-      .filter((i) => inView(i, view) && (!importantOnly || isImportant(i)))
-      .sort((x, y) => (y.a.appointment_date || "").localeCompare(x.a.appointment_date || ""));
+    const rows = scoped.filter((i) => inView(i, view) && (!importantOnly || isImportant(i)));
+    // Upcoming reads forwards — the next appointment first. Everything else is
+    // a backlog and reads newest first.
+    const dir = view === "Upcoming" ? 1 : -1;
+    return rows.sort((x, y) => dir * (x.a.appointment_date || "").localeCompare(y.a.appointment_date || "")
+      || dir * String(x.a.appointment_time || "").localeCompare(String(y.a.appointment_time || "")));
   }, [scoped, view, importantOnly]);
 
   const estimatesInProgress = useMemo(() => {
@@ -151,7 +166,7 @@ export default function OpenDebriefQueue() {
       <div>
         <h1 className="text-2xl font-heading font-bold text-primary">Open Debrief Queue</h1>
         <p className="text-sm text-muted-foreground">
-          Appointments that have happened and have no debrief yet.
+          {view === "Upcoming" ? "Appointments booked and not yet run." : "Appointments that have happened and have no debrief yet."}
           {!loading && !showEstimates && <> <span className="font-semibold text-foreground">{queue.length}</span> in this view.</>}
         </p>
       </div>
@@ -169,7 +184,7 @@ export default function OpenDebriefQueue() {
             )}
           </button>
         ))}
-        {!showEstimates && (
+        {!showEstimates && view !== "Upcoming" && (
           <button onClick={() => setImportantOnly((v) => !v)} title={IMPORTANT_HELP}
             className={`ml-auto px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
               importantOnly ? "bg-red-600 text-white" : "bg-white border border-red-200 text-red-700"
@@ -256,7 +271,9 @@ export default function OpenDebriefQueue() {
       ) : queue.length === 0 ? (
         <div className="bg-white rounded-xl border border-border p-8 text-center text-muted-foreground">
           <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-40" />
-          {importantOnly ? "Nothing important outstanding in this range." : "All caught up — no items in this view."}
+          {view === "Upcoming" ? "Nothing booked ahead in this range."
+            : importantOnly ? "Nothing important outstanding in this range."
+            : "All caught up — no items in this view."}
         </div>
       ) : (
         <div className="space-y-2">
@@ -283,6 +300,11 @@ function ago(days) {
   if (days === 1) return "yesterday";
   return `${days} days ago`;
 }
+function ahead(days) {
+  if (days == null) return "later today";
+  if (days === 1) return "tomorrow";
+  return `in ${days} days`;
+}
 
 function crmResultBadge(crm) {
   if (!crm) return null;
@@ -294,7 +316,8 @@ function crmResultBadge(crm) {
 }
 
 function QueueCard({ item }) {
-  const { a, crm, lead, job, daysSince, debriefed, disposition } = item;
+  const { a, crm, lead, job, daysSince, debriefed, disposition, daysAhead, wasRescheduled } = item;
+  const upcoming = disposition === "upcoming";
   const result = crmResultBadge(crm);
   const missing = disposition === "missing";
   const jobType = crm?.jobType && crm.jobType !== "Unassigned" ? crm.jobType : null;
@@ -309,6 +332,7 @@ function QueueCard({ item }) {
           <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2">
             <span>{usDate(a.appointment_date) || "No date"}{a.appointment_time ? ` • ${simpleTime(a.appointment_time)}` : ""}</span>
             {ago(daysSince) && <span className={isImportant(item) ? "text-red-600 font-semibold" : ""}>{ago(daysSince)}</span>}
+            {upcoming && ahead(daysAhead) && <span className="font-semibold text-sky-700">{ahead(daysAhead)}</span>}
             {crm?.title && !crm.title.toLowerCase().startsWith(String(a.customer_name || "").toLowerCase()) && (
               <span className="truncate max-w-[16rem]" title={crm.title}>{crm.title}</span>
             )}
@@ -348,6 +372,12 @@ function QueueCard({ item }) {
         {(isInsuranceAppointment(a) || crm?.isInsurance) && (
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Insurance</span>
         )}
+        {wasRescheduled && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800"
+            title="This lead's appointment was moved in the last few days. The original slot was retired, so nobody is chased for a visit that did not happen.">
+            Rescheduled
+          </span>
+        )}
         {crm?.isReset && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Reset</span>}
         {crm?.isRehash && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Rehash</span>}
         {result && (
@@ -360,7 +390,7 @@ function QueueCard({ item }) {
         )}
         {!crm && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-secondary text-muted-foreground" title="No matching appointment in the JobProgress mirror for this Lead ID and date.">Not in CRM mirror</span>}
         <Badge text={a.appointment_status || "Set"} />
-        <Badge text={debriefed ? "Submitted" : (a.debrief_status || "Missing")} highlight={missing} />
+        <Badge text={debriefed ? "Submitted" : upcoming ? "Scheduled" : (a.debrief_status || "Missing")} highlight={missing} />
       </div>
     </div>
   );
