@@ -135,6 +135,8 @@ function aqEligibleType(d) {
 }
 function aqIsDemo(d) { return DEMO_OUTCOMES.includes(d.appointment_outcome); }
 function aqIsNoDemo(d) { return AQ_NO_DEMO_OUTCOMES.includes(d.appointment_outcome); }
+/** The rep attended and gave no demo (any of the No Demo outcomes). For the lead funnel. */
+export const isNoDemoOutcome = (d) => aqIsNoDemo(d);
 function aqAttended(d) { return aqIsDemo(d) || aqIsNoDemo(d); }
 function aqResetNeeded(d) { return d.reset_needed === true || RESET_OUTCOMES.includes(d.appointment_outcome); }
 function aqCompletedResetDemo(d) { return normalizeAppointmentType(d.appointment_type) === APPT_TYPE_RESET_DEMO && aqAttended(d) && !aqCoreExcluded(d); }

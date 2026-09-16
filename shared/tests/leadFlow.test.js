@@ -1,49 +1,89 @@
 import { describe, it, expect } from "vitest";
-import { leadFlow, leadReason, LEAD_REASONS } from "../src/leadFlow.js";
+import { leadFlow, leadFunnel, leadReason, leadStatus, isLeadStage, LEAD_REASONS } from "../src/leadFlow.js";
 
-const lead = (stage, has_appointment = false) => ({ current_stage: stage, has_appointment });
+const lead = (stage, has_appointment = false, debriefs = []) => ({ current_stage: stage, has_appointment, debriefs });
+const d = (outcome, over = {}) => ({ appointment_type: "First Appointment", appointment_outcome: outcome, ...over });
 
-describe("leadReason", () => {
+describe("leadReason / isLeadStage", () => {
   it("maps the office's stage names, tolerant of their punctuation", () => {
     expect(leadReason("DQ (MGR APPROVAL)")).toBe("dq");
     expect(leadReason("dq (mgr approval)")).toBe("dq");
     expect(leadReason("Disqualified Lead")).toBe("dq");
     expect(leadReason("LEAD NOT CONTACTED!!!")).toBe("working");
     expect(leadReason("Contacted Needs Follow Up")).toBe("working");
+    expect(leadReason("Est In Progress(MGR APPROVAL)")).toBe("working"); // an estimate is out: being worked
     expect(leadReason("Project On Hold")).toBe("hold");
     expect(leadReason("Cancel: FOLLOW UP (MGR APPR)")).toBe("cancelled");
     expect(leadReason("Paid Don't Contact")).toBe("dnc");
     expect(leadReason("Rehash Monthly: DNS Follow UP")).toBe("other");
     expect(leadReason(null)).toBe("other");
   });
+
+  it("does not count warranty callbacks as leads", () => {
+    expect(isLeadStage("Open Warranty Claims/CallBacks")).toBe(false);
+    expect(isLeadStage("Warranty")).toBe(false);
+    expect(isLeadStage("LEAD NOT CONTACTED!!!")).toBe(true);
+    expect(isLeadStage(null)).toBe(true);
+  });
 });
 
-describe("leadFlow", () => {
+describe("leadStatus — one lead, from its debriefs", () => {
+  it("reads the best thing that happened to the lead across all its visits", () => {
+    expect(leadStatus([])).toBe("awaiting");
+    expect(leadStatus([d("No C / No Show — Reset Needed")])).toBe("noSee");
+    expect(leadStatus([d("No C / No Show — Reset Needed"), d("Demo Completed — Demo No Sale", { appointment_type: "Reset Demo" })])).toBe("demo");
+    expect(leadStatus([d("No Demo — Reset Needed")])).toBe("noDemo");
+    expect(leadStatus([d("Estimating in Progress — Proposal Not Yet Sent")])).toBe("pending");
+    expect(leadStatus([d("Rescheduled Before Appointment")])).toBe("awaiting");
+  });
+
+  it("ignores a DQ debrief that a manager has not approved yet", () => {
+    expect(leadStatus([d("No Demo — DQ / Do Not Reset", { approval_status: "pending" })])).toBe("awaiting");
+    expect(leadStatus([d("No Demo — DQ / Do Not Reset", { approval_status: "approved" })])).toBe("noDemo");
+  });
+});
+
+describe("leadFunnel", () => {
   const rows = [
-    lead("Appointment Set", true),
-    lead("Demo No Sale", true),
-    lead("Job Lost DNS (MGR APPROVAL)", true),
+    lead("Demo No Sale", true, [d("Demo Completed — Sale", { sale_amount: 20000 })]),
+    lead("Demo No Sale", true, [d("Demo Completed — Demo No Sale")]),
+    lead("Rehash Weekly: DNS Follow Up", true, [d("Demo Completed — Demo No Sale", { sale_amount: 14399, sale_signed_date: "2026-09-09" })]), // sold later
+    lead("No Demo: RESET APPOINTMENT", true, [d("No Demo — Reset Needed")]),
+    lead("Est In Progress(MGR APPROVAL)", true, [d("Estimating in Progress — Proposal Not Yet Sent")]),
+    lead("Job Lost No See (Mgr Approval)", true, [d("No C / No Show — Do Not Reset")]),
+    lead("Appointment Set", true, []),                                    // booked, not yet run
     lead("DQ (MGR APPROVAL)"),
     lead("DQ (MGR APPROVAL)"),
     lead("LEAD NOT CONTACTED!!!"),
     lead("Project On Hold"),
     lead("Cancel: NO FOLLOW UP(MGR APPR)"),
-    lead("Rehash Weekly: DNS Follow Up"),
-    // A stage that sounds set is not "set" without an actual appointment.
-    lead("Appointment Set", false),
+    lead("Appointment Set", false),                                       // sounds set; is not
+    lead("Open Warranty Claims/CallBacks"),                               // not a lead at all
   ];
 
-  it("splits leads into set and not set by the appointment, and buckets the rest by stage", () => {
-    const f = leadFlow(rows);
-    expect(f).toMatchObject({ leads: 10, set: 3, notSet: 7, setRate: 30, notSetRate: 70 });
-    const by = Object.fromEntries(f.reasons.map((r) => [r.key, r.count]));
-    expect(by).toEqual({ dq: 2, working: 2, hold: 1, cancelled: 1, dnc: 0, other: 1 });
+  it("counts leads once each and sums exactly at every level", () => {
+    const f = leadFunnel(rows);
+    expect(f.leads).toBe(13); // the warranty callback is gone
+    expect(f.set + f.notSet).toBe(f.leads);
+    expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
+    expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
+    expect(f.sold + f.notSold).toBe(f.demo);
+    expect(f).toMatchObject({ set: 7, notSet: 6, ran: 5, noSee: 1, awaiting: 1, demo: 3, noDemo: 1, pending: 1, sold: 2, notSold: 1, revenue: 34399 });
     expect(f.reasons.reduce((s, r) => s + r.count, 0)).toBe(f.notSet);
-    expect(f.reasons.find((r) => r.key === "dq").share).toBe(29); // 2 of 7 not set
+    expect(Object.fromEntries(f.reasons.map((r) => [r.key, r.count]))).toEqual({ dq: 2, working: 2, hold: 1, cancelled: 1, dnc: 0, other: 0 });
   });
 
-  it("keeps the reasons in display order and is zero-safe", () => {
+  it("states each box as a share of its parent", () => {
+    const f = leadFunnel(rows);
+    expect(f.setRate).toBe(54);   // 7 of 13
+    expect(f.ranRate).toBe(71);   // 5 of 7
+    expect(f.demoRate).toBe(60);  // 3 of 5
+    expect(f.soldRate).toBe(67);  // 2 of 3
+  });
+
+  it("is zero-safe and keeps the header view", () => {
+    expect(leadFunnel([])).toMatchObject({ leads: 0, set: 0, ran: 0, sold: 0, revenue: 0, setRate: 0, soldRate: 0 });
+    expect(leadFlow(rows)).toMatchObject({ leads: 13, set: 7, notSet: 6 });
     expect(leadFlow([]).reasons.map((r) => r.key)).toEqual(LEAD_REASONS.map((r) => r.key));
-    expect(leadFlow(undefined)).toMatchObject({ leads: 0, set: 0, notSet: 0, setRate: 0 });
   });
 });

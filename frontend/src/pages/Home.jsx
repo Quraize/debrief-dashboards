@@ -5,9 +5,9 @@ import { base44 } from "@/api/client";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
-import { computeKPIs, appointmentFlow, filterByDate } from "@allied/shared/kpi";
+import { computeKPIs } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
-import { nonInsuranceAppointments, nonInsuranceDebriefs } from "@allied/shared/insurance";
+import { nonInsuranceAppointments } from "@allied/shared/insurance";
 import { localDay } from "@allied/shared/debriefQueue";
 import { countedDebriefs } from "@allied/shared/debriefApproval";
 import { getDateRangeBounds } from "@allied/shared/constants";
@@ -34,7 +34,6 @@ export default function Home() {
 
   const salesAppts = salesAppointmentsOnly(nonInsuranceAppointments(appointments));
   const kpis = computeKPIs(debriefs, salesAppts, filter, cs, ce);
-  const flow = appointmentFlow(filterByDate(nonInsuranceDebriefs(debriefs), "appointment_date", filter, cs, ce));
   const bounds = getDateRangeBounds(filter, cs, ce);
   const rangeLabel = bounds?.start ? `${filter}: ${bounds.start}${bounds.end && bounds.end !== bounds.start ? ` – ${bounds.end}` : ""}` : filter;
   const resultsHref = `/results?filter=${encodeURIComponent(filter)}${cs ? `&cs=${cs}` : ""}${ce ? `&ce=${ce}` : ""}`;
@@ -56,7 +55,7 @@ export default function Home() {
 
       <DateRangeFilter filter={filter} setFilter={setFilter} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe} />
 
-      <AppointmentFlow flow={flow} rangeLabel={rangeLabel} resultsHref={resultsHref} from={bounds?.start} to={bounds?.end || bounds?.start} />
+      <AppointmentFlow rangeLabel={rangeLabel} resultsHref={resultsHref} from={bounds?.start} to={bounds?.end || bounds?.start} />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <QuickLink to="/submit" icon={ClipboardList} label="Submit Debrief" />
