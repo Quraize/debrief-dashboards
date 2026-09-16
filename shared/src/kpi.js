@@ -172,6 +172,46 @@ export function appointmentQualityStats(debriefs) {
   };
 }
 
+/**
+ * The appointment funnel for the Overview page:
+ *
+ *   Set ─┬─ Ran ─┬─ Demo ─┬─ Sold (to date)
+ *        │       │        └─ No sale
+ *        │       ├─ No demo
+ *        │       └─ Result pending
+ *        └─ No See
+ *
+ * Every level sums exactly to its parent, so an executive can check it by
+ * hand. The buckets are the same ones appointmentQualityStats uses — Set is
+ * Marketing's "Set Appointments", Ran is its Demo Rate denominator — so the
+ * Overview never disagrees with the dashboards over what an appointment is.
+ *
+ * "Sold" is measured on the demos in THIS range, whenever they signed: a July
+ * demo that closed by phone in September is a July sale here. That is the
+ * funnel question ("what happened to these appointments?"), not the revenue
+ * question, which the dashboards answer by signed month.
+ */
+export function appointmentFlow(debriefs) {
+  const ds = debriefs || [];
+  const ranRows = ds.filter((d) => aqEligibleType(d) && !aqCoreExcluded(d) && !isNoSeeRecord(d));
+  const noSeeRows = ds.filter((d) => isNoSeeRecord(d) && !aqCoreExcluded(d));
+  const demoRows = ranRows.filter(aqIsDemo);
+  const noDemoRows = ranRows.filter(aqIsNoDemo);
+  const pendingRows = ranRows.filter((d) => !aqIsDemo(d) && !aqIsNoDemo(d));
+  const soldRows = demoRows.filter(isSale);
+  const ran = ranRows.length, noSee = noSeeRows.length, set = ran + noSee;
+  const demo = demoRows.length, sold = soldRows.length;
+  return {
+    set, ran, noSee,
+    demo, noDemo: noDemoRows.length, pending: pendingRows.length,
+    sold, notSold: demo - sold,
+    revenue: soldRows.reduce((s, d) => s + num(d.sale_amount), 0),
+    ranRate: pct(ran, set), noSeeRate: pct(noSee, set),
+    demoRate: pct(demo, ran), noDemoRate: pct(noDemoRows.length, ran), pendingRate: pct(pendingRows.length, ran),
+    soldRate: pct(sold, demo), notSoldRate: pct(demo - sold, demo),
+  };
+}
+
 export function appointmentQualityByGroup(debriefs, field) {
   const map = {};
   (debriefs || []).forEach((d) => {

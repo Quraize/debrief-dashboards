@@ -5,20 +5,27 @@ import { base44 } from "@/api/client";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
-import { computeKPIs } from "@allied/shared/kpi";
+import { computeKPIs, appointmentFlow, filterByDate } from "@allied/shared/kpi";
 import { salesAppointmentsOnly } from "@allied/shared/salesAppointment";
-import { nonInsuranceAppointments } from "@allied/shared/insurance";
+import { nonInsuranceAppointments, nonInsuranceDebriefs } from "@allied/shared/insurance";
 import { localDay } from "@allied/shared/debriefQueue";
+import { countedDebriefs } from "@allied/shared/debriefApproval";
+import { getDateRangeBounds } from "@allied/shared/constants";
+import AppointmentFlow from "@/components/AppointmentFlow";
 import { ClipboardList, Inbox, AlertTriangle, TrendingUp, CalendarClock, Upload, FileText, ClipboardCheck } from "lucide-react";
 
 export default function Home() {
-  const [filter, setFilter] = useState("Today");
+  // A month is the span an overview is read at; the Today's Appointments list
+  // below ignores this and always shows today.
+  const [filter, setFilter] = useState("This Month");
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
 
+  // Counted debriefs only, like every dashboard: a DQ awaiting a manager's
+  // approval is not yet a result.
   const { data: debriefs = [] } = useQuery({
-    queryKey: ["debriefs"],
-    queryFn: () => base44.entities.Debrief.list("-created_date", 500)
+    queryKey: ["debriefs", "counted"],
+    queryFn: () => base44.entities.Debrief.list("-created_date", 500).then(countedDebriefs)
   });
   const { data: appointments = [] } = useQuery({
     queryKey: ["appointments-all"],
@@ -27,6 +34,10 @@ export default function Home() {
 
   const salesAppts = salesAppointmentsOnly(nonInsuranceAppointments(appointments));
   const kpis = computeKPIs(debriefs, salesAppts, filter, cs, ce);
+  const flow = appointmentFlow(filterByDate(nonInsuranceDebriefs(debriefs), "appointment_date", filter, cs, ce));
+  const bounds = getDateRangeBounds(filter, cs, ce);
+  const rangeLabel = bounds?.start ? `${filter}: ${bounds.start}${bounds.end && bounds.end !== bounds.start ? ` – ${bounds.end}` : ""}` : filter;
+  const resultsHref = `/results?filter=${encodeURIComponent(filter)}${cs ? `&cs=${cs}` : ""}${ce ? `&ce=${ce}` : ""}`;
   // Office-clock "today". toISOString() is UTC, which after 8 PM Eastern is
   // already tomorrow — that listed tomorrow's appointments under Today.
   const todayAppts = salesAppts.filter((a) => a.appointment_date === localDay());
@@ -39,11 +50,13 @@ export default function Home() {
     <div className="space-y-4">
       <DashboardSwitcher />
       <div>
-        <h1 className="text-2xl font-heading font-bold text-primary">Today</h1>
+        <h1 className="text-2xl font-heading font-bold text-primary">Overview</h1>
         <p className="text-sm text-muted-foreground">Allied Roofing & Construction — sales at a glance.</p>
       </div>
 
       <DateRangeFilter filter={filter} setFilter={setFilter} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe} />
+
+      <AppointmentFlow flow={flow} rangeLabel={rangeLabel} resultsHref={resultsHref} />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <QuickLink to="/submit" icon={ClipboardList} label="Submit Debrief" />

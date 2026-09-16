@@ -1,7 +1,53 @@
 import { describe, it, expect } from "vitest";
 import {
   effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats,
+  appointmentFlow,
 } from "../src/kpi.js";
+
+describe("appointmentFlow — the Overview funnel", () => {
+  const first = (outcome, over = {}) => ({ appointment_type: "First Appointment", appointment_outcome: outcome, ...over });
+  const rows = [
+    first("Demo Completed — Sale", { sale_amount: 20000 }),
+    first("Demo Completed — Demo No Sale"),
+    first("Demo Completed — Demo No Sale", { sale_amount: 14399, sale_signed_date: "2026-09-09" }), // sold later by phone
+    first("No Demo — Reset Needed"),
+    first("Estimating in Progress — Proposal Not Yet Sent"),     // ran, result not settled
+    first("No C / No Show — Reset Needed"),                      // set, did not run
+    first("Cancelled Before Appointment"),                       // set, did not run
+    first("Rescheduled Before Appointment"),                     // never resolved: not set
+    { appointment_type: "Reset Demo", appointment_outcome: "Demo Completed — Demo No Sale" }, // second visit: not a new opportunity
+    { appointment_type: "Follow-Up", appointment_outcome: "Demo Completed — Sale", sale_amount: 5000 },
+  ];
+
+  it("sums exactly to its parent at every level", () => {
+    const f = appointmentFlow(rows);
+    expect(f.set).toBe(7);
+    expect(f.ran + f.noSee).toBe(f.set);
+    expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
+    expect(f.sold + f.notSold).toBe(f.demo);
+    expect(f).toMatchObject({ set: 7, ran: 5, noSee: 2, demo: 3, noDemo: 1, pending: 1, sold: 2, notSold: 1 });
+  });
+
+  it("counts a demo that sold later as sold, and its money, on the appointment's side", () => {
+    const f = appointmentFlow(rows);
+    expect(f.revenue).toBe(34399);
+    expect(f.soldRate).toBe(67);   // 2 of 3 demos
+    expect(f.ranRate).toBe(71);    // 5 of 7 set
+    expect(f.demoRate).toBe(60);   // 3 of 5 ran
+  });
+
+  it("matches the Marketing dashboard's Set and Ran numbers", () => {
+    const f = appointmentFlow(rows);
+    const aq = appointmentQualityStats(rows);
+    expect(f.set).toBe(aq.aqOpportunities + aq.aqNoSee);
+    expect(f.ran).toBe(aq.aqOpportunities);
+    expect(f.demo).toBe(aq.aqDemos);
+  });
+
+  it("is all zeros, not NaN, on an empty range", () => {
+    expect(appointmentFlow([])).toMatchObject({ set: 0, ran: 0, sold: 0, revenue: 0, ranRate: 0, soldRate: 0 });
+  });
+});
 import {
   APPOINTMENT_OUTCOMES, DQ_NO_DEMO_OUTCOME, DQ_DEMO_OUTCOME, LEGACY_DQ_OUTCOME,
   DEMO_OUTCOMES, SALE_OUTCOMES, requiresDqReason, dqReasonPrompt,
