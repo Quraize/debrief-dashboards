@@ -121,11 +121,14 @@ function Column({ children }) {
   return <div className="flex flex-col gap-2">{children}</div>;
 }
 
+// The arrows are the flow. Indigo is deliberately a colour no card uses —
+// not the navy, green, red, amber, gold or grey of the boxes — so the eye
+// reads "step" and never "part of that card". Heavier stroke than an icon.
 function Connector() {
   return (
-    <div className="flex xl:flex-col items-center justify-center text-muted-foreground/60 xl:pt-6">
-      <ArrowDown className="w-5 h-5 xl:hidden" />
-      <ArrowRight className="w-5 h-5 hidden xl:block" />
+    <div className="flex xl:flex-col items-center justify-center text-indigo-600 xl:pt-7" aria-hidden="true">
+      <ArrowDown className="w-7 h-7 xl:hidden" strokeWidth={2.75} />
+      <ArrowRight className="w-7 h-7 hidden xl:block" strokeWidth={2.75} />
     </div>
   );
 }
