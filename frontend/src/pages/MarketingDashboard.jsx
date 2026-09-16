@@ -6,7 +6,7 @@ import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
 import FilterSelect from "@/components/FilterSelect";
 import {
-  marketingSourceStats, marketingCategoryStats, normalizeSource, uniqueLeadCount, filterByDate,
+  marketingSourceStats, marketingCategoryStats, normalizeSource, filterByDate,
   appointmentQualityStats, twoLegStats, isSale,
   DEMO_RATE_DEFINITION, NO_DEMO_RATE_DEFINITION, NO_SEE_RATE_DEFINITION, TWO_LEG_DEFINITION
 } from "@allied/shared/kpi";
@@ -69,7 +69,6 @@ export default function MarketingDashboard() {
   const salesRecs = useMemo(() => filtered.filter(isSale), [filtered]);
   const revenue = salesRecs.reduce((s, d) => s + num(d.sale_amount), 0);
   const firstCallCloses = filtered.filter((d) => d.sale_close_type === FIRST_CALL_CLOSE).length;
-  const leads = uniqueLeadCount(filtered);
   const eligible = aq.aqOpportunities + aq.aqNoSee;
   const missingLeadIds = filtered.filter((d) => !d.crm_lead_id).length;
   const unassignedCount = filtered.filter((d) => normalizeSource(d.marketing_source) === "Unassigned").length;
@@ -201,8 +200,10 @@ export default function MarketingDashboard() {
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            <KpiCard label="Unique Leads" value={leads} accent />
-            <KpiCard label="Eligible Appointments" value={eligible} />
+            <KpiCard label="Set Appointments" value={eligible} accent
+              title="Appointments that were booked and resolved: First Appointments and Rehashes that either ran or were a No See / cancelled. Reset Demos, Follow-Ups, rescheduled-before and still-pending are not counted. Built from filed debriefs." />
+            <KpiCard label="Appointments Ran" title="Set Appointments minus No See — the visits that actually happened. Demo Rate is measured against this number."
+              value={<>{aq.aqOpportunities} <span className="text-sm font-semibold text-muted-foreground">{eligible > 0 ? pct(aq.aqOpportunities, eligible) + "%" : ""}</span></>} />
             <KpiCard label="Demos" value={aq.aqDemos} />
             <KpiCard label="Demo Rate" value={aq.demoRate + "%"} />
             <KpiCard label="No Demo" value={aq.aqNoDemo} />
@@ -227,8 +228,8 @@ export default function MarketingDashboard() {
             {defsOpen && (
               <div className="px-4 pb-4 text-xs text-muted-foreground space-y-1 border-t border-border/50">
                 <p><strong className="text-foreground">Source Attribution:</strong> Leads are attributed by the Debrief <em>marketing_source</em> field (the customer's marketing/referral source). <em>self_gen_source</em> drills down Self-Gen. <em>result_source</em> (import batch) and <em>referral_source</em> (free-text detail) are not used for attribution.</p>
-                <p><strong className="text-foreground">Unique Leads:</strong> Distinct Lead IDs; debriefs with no Lead ID are each counted once (fallback).</p>
-                <p><strong className="text-foreground">Eligible Appointments:</strong> First Appointment + Rehash opportunities (attended + No See), excluding Reset Demos, Follow-Ups, DQ, and non-sales.</p>
+                <p><strong className="text-foreground">Set Appointments:</strong> First Appointment + Rehash opportunities that resolved — ran, or No See / cancelled. Excludes Reset Demos, Follow-Ups, rescheduled-before, still-pending and non-sales. Counted from filed debriefs.</p>
+                <p><strong className="text-foreground">Appointments Ran:</strong> Set Appointments minus No See. The Demo Rate denominator.</p>
                 <p><strong className="text-foreground">Demo Rate:</strong> {DEMO_RATE_DEFINITION}</p>
                 <p><strong className="text-foreground">No Demo Rate:</strong> {NO_DEMO_RATE_DEFINITION}</p>
                 <p><strong className="text-foreground">No See Rate:</strong> {NO_SEE_RATE_DEFINITION}</p>
@@ -319,9 +320,9 @@ export default function MarketingDashboard() {
                     {[
                       ["Category", "Marketing category, derived from the exact source the rep entered on the debrief."],
                       ["Debriefs", "Debrief forms filed by the reps whose marketing source falls in this category, within the date range. Not JobProgress appointments and not sales."],
-                      ["Eligible Appts", "Of those debriefs, the appointments that actually ran (No Shows, cancellations and resets excluded). The denominator for Demo Rate."],
+                      ["Set Appts", "Of those debriefs, the appointments that were set and resolved — ran, or No See / cancelled. Resets, Follow-Ups and rescheduled-before excluded."],
                       ["Demos", "Debriefs whose outcome is a completed demo."],
-                      ["Demo Rate", "Demos ÷ Eligible Appts."],
+                      ["Demo Rate", "Demos ÷ appointments that ran (Set Appts minus No See)."],
                       ["Sales", "Debriefs marked as a sale, including later sales."],
                       ["Sales Rate", "Sales ÷ Demos."],
                       ["Revenue", "Sum of the sale amounts the reps entered."],
@@ -372,7 +373,7 @@ export default function MarketingDashboard() {
               <table className="w-full text-xs min-w-max">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50 text-left text-muted-foreground">
-                    {["Source", "Unique Leads", "Eligible Appts", "Demos", "Demo Rate", "No Demo", "No Demo Rate", "No See", "No See Rate", "2L/Eligible", "2L Rate", "Sales", "Sales Rate", "Revenue", "Avg Sale", "FCC"].map((h) => (
+                    {["Source", "Unique Leads", "Set Appts", "Demos", "Demo Rate", "No Demo", "No Demo Rate", "No See", "No See Rate", "2L/Eligible", "2L Rate", "Sales", "Sales Rate", "Revenue", "Avg Sale", "FCC"].map((h) => (
                       <th key={h} className="px-2.5 py-2 font-semibold whitespace-nowrap uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
