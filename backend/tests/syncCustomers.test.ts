@@ -54,13 +54,14 @@ describe("mapCustomer", () => {
   });
 });
 
-interface Stub { referrals: Record<string, unknown>[]; customers: Record<string, unknown>[]; calls: string[] }
+interface Stub { referrals: Record<string, unknown>[]; customers: Record<string, unknown>[]; jobs?: Record<string, unknown>[]; calls: string[] }
 function stubClient(stub: Stub) {
   const impl = (async (url: string) => {
     const u = String(url);
     let data: unknown = [];
     if (u.includes("/referrals")) { stub.calls.push("referrals"); data = stub.referrals; }
     else if (u.includes("/customers")) { stub.calls.push("customers"); data = stub.customers; }
+    else if (u.includes("/jobs")) { stub.calls.push(u.includes("job_created_date") ? "jobs:created" : "jobs"); data = stub.jobs ?? []; }
     return { ok: true, status: 200, headers: { get: () => null },
       json: async () => ({ data, meta: { pagination: { total_pages: 1 } } }) } as unknown as Response;
   }) as unknown as typeof fetch;
@@ -119,6 +120,29 @@ describe.skipIf(!reachable)("runCustomerSync", () => {
     expect(result.counts).toMatchObject({ customers_created: 0, customers_updated: 2, marketing_sources_added: 0 });
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM jp_customer`)).rows[0].n).toBe(2);
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM list_option WHERE category = 'marketing_source'`)).rows[0].n).toBe(3);
+  });
+
+  it("sweeps lead-stage jobs into the mirror without touching the production board's tracked mark", async () => {
+    // A job the production sweep already tracks: its stage_seen_at is the board's "still here" mark.
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, current_stage, stage_seen_at, jp_created_at) VALUES ('7001', 'Production Started', '2026-09-15 12:00+00', '2026-09-01 10:00+00')`);
+    const withJobs: Stub = { ...stub, calls: [], jobs: [
+      { id: 7001, number: "2609-1", name: "Tracked", customer_id: 9001, created_at: "2026-09-01 10:00:00",
+        current_stage: { name: "Production Started", code: "PS", color: "cl-blue" }, stage_last_modified: "2026-09-14 09:00:00" },
+      { id: 7002, number: "2609-2", name: "Lead", customer_id: 9002, created_at: "2026-09-08 10:00:00",
+        current_stage: { name: "DQ (MGR APPROVAL)", code: "DQ", color: "cl-red" }, stage_last_modified: "2026-09-09 09:00:00" },
+    ] };
+    const result = await runCustomerSync({ client: stubClient(withJobs), startedBy: "test" });
+    expect(result.status).toBe("completed");
+    expect(result.counts).toMatchObject({ leads_examined: 2, leads_upserted: 2 });
+    expect(withJobs.calls).toContain("jobs:created");
+    const rows = (await db.owner.query(
+      `SELECT jp_job_id, current_stage, to_char(stage_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS stage_seen_at
+         FROM jp_job WHERE jp_job_id IN ('7001','7002') ORDER BY jp_job_id`)).rows;
+    expect(rows).toEqual([
+      { jp_job_id: "7001", current_stage: "Production Started", stage_seen_at: "2026-09-15 12:00" }, // untouched
+      { jp_job_id: "7002", current_stage: "DQ (MGR APPROVAL)", stage_seen_at: null },                      // a lead, not on the board
+    ]);
   });
 
   it("records a failed run when the API is down", async () => {

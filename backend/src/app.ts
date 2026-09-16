@@ -10,6 +10,7 @@ import { registerProductionRoutes } from "./production/routes.js";
 import { registerDebriefApprovalRoutes } from "./debriefs/approvalRoutes.js";
 import { registerPendingCountRoutes } from "./pending/routes.js";
 import { registerMapConfigRoutes } from "./config/mapRoutes.js";
+import { registerLeadRoutes } from "./leads/routes.js";
 import { loadColumns } from "./entities/registry.js";
 import { registerAuthHooks } from "./middleware/auth.js";
 
@@ -83,6 +84,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerDebriefApprovalRoutes(app);
   registerPendingCountRoutes(app);
   registerMapConfigRoutes(app);
+  registerLeadRoutes(app);
 
   // Never leak internals to the client; the detail goes to the log instead.
   // Errors we construct deliberately for the UI (e.g. a 502 carrying

@@ -15,6 +15,7 @@
 import { withServiceRole } from "../db/client.js";
 import { JobProgressClient, unwrap } from "../integrations/jobprogress/client.js";
 import { parseApiTimestamp } from "../production/syncSchedules.js";
+import { sweepLeadJobs } from "./syncLeads.js";
 
 export interface CustomerSyncCounts {
   referrals_examined: number;
@@ -25,6 +26,9 @@ export interface CustomerSyncCounts {
   customers_updated: number;
   customers_without_source: number;
   customers_skipped: number;
+  // The lead sweep (syncLeads.ts) rides along: jobs created this year, any stage.
+  leads_examined: number;
+  leads_upserted: number;
   api_requests: number;
   retries: number;
   rate_limit_hits: number;
@@ -66,7 +70,7 @@ export interface CustomerRow {
 const emptyCounts = (): CustomerSyncCounts => ({
   referrals_examined: 0, referrals_upserted: 0, marketing_sources_added: 0,
   customers_examined: 0, customers_created: 0, customers_updated: 0,
-  customers_without_source: 0, customers_skipped: 0,
+  customers_without_source: 0, customers_skipped: 0, leads_examined: 0, leads_upserted: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
 
@@ -230,6 +234,9 @@ export async function runCustomerSync(options: CustomerSyncOptions = {}): Promis
       else counts.customers_skipped++;
     }
     await upsertCustomers(rows, counts);
+
+    // Leads are jobs; sweep them after the customers they belong to exist.
+    await sweepLeadJobs(client, counts);
 
     await closeRun(syncRunId, "completed", counts);
     return { syncRunId, status: "completed", counts };

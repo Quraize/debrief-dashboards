@@ -354,6 +354,22 @@ export class JobProgressClient {
   }
 
   /**
+   * Every job CREATED in a window, whatever stage it is in now. In this
+   * account a lead is a job — the workflow starts at "LEAD NOT CONTACTED!!!"
+   * — so this is the lead list, and `current_stage` says what became of each
+   * one (DQ, on hold, cancelled, appointment set…). The stage sweep only sees
+   * production stages; this is how the lead pipeline reaches the mirror.
+   */
+  async listJobsCreatedBetween(from: string, to: string): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>("/jobs", {
+      date_range_type: "job_created_date",
+      start_date: from,
+      end_date: to,
+      "includes[]": ["division", "trades", "insurance_details"],
+    }, "jobs:created");
+  }
+
+  /**
    * Every payment recorded on a job (the office's Payment History tab):
    * amount, method code, date, status, canceled. Verified live 2026-09-10.
    */
