@@ -100,22 +100,22 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     const f = res.json();
     expect(f).toMatchObject({
       from: "2026-09-01", to: "2026-09-30",
-      leads: 14, set: 7, notSet: 7,
+      leads: 14, valid: 12, disqualified: 2, set: 7, notSet: 5,
       ran: 4, noSee: 1, awaiting: 2,          // j6 booked; j7's DQ still awaiting approval
       demo: 3, noDemo: 1, pending: 0,
       sold: 1, notSold: 2, revenue: 20000,
     });
-    expect(f.set + f.notSet).toBe(f.leads);
+    expect(f.valid + f.disqualified).toBe(f.leads);
+    expect(f.set + f.notSet).toBe(f.valid);
     expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
     expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
     const by = Object.fromEntries(f.reasons.map((r: { key: string; count: number }) => [r.key, r.count]));
-    expect(by).toEqual({ dq: 2, working: 3, hold: 1, cancelled: 1, dnc: 0, other: 0 });
+    expect(by).toEqual({ working: 3, hold: 1, cancelled: 1, dnc: 0, other: 0 });
   });
 
   it("puts the 11:30pm lead in August, not September", async () => {
     const aug = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-08-01&to=2026-08-31", ...auth })).json();
-    expect(aug).toMatchObject({ leads: 1, set: 0, notSet: 1 });
-    expect(aug.reasons.find((r: { key: string }) => r.key === "dq").count).toBe(1);
+    expect(aug).toMatchObject({ leads: 1, disqualified: 1, valid: 0, set: 0, notSet: 0 });
   });
 
   it("rejects bad ranges and anonymous callers", async () => {

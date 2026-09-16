@@ -8,13 +8,13 @@ const money = (v) => "$" + Math.round(Number(v) || 0).toLocaleString();
 /**
  * The executive's funnel, followed lead by lead:
  *
- *   Leads → Appointment Set / Not Set (why) → Ran / No See / Awaiting
- *         → Demo / No Demo / Pending → Sold / No Sale
+ *   Leads → Valid Leads / Disqualified → Appointment Set / Not Set (why)
+ *         → Ran / No See / Awaiting → Demo / No Demo / Pending → Sold / No Sale
  *
- * Every box is a count of LEADS created in the range, so each column sums to
- * the box that feeds it and a lead is counted once however many visits it
- * took. Five columns that read left to right on a desktop and top to bottom
- * on a phone. Numbers come from GET /api/leads/flow (shared/src/leadFlow.js).
+ * Valid = leads − disqualified (the CEO's definition). Every box is a count
+ * of LEADS created in the range, so each column sums to the box that feeds
+ * it and a lead is counted once however many visits it took. Six columns
+ * that read left to right on a wide screen and top to bottom below that. Numbers come from GET /api/leads/flow (shared/src/leadFlow.js).
  *
  * This is a different question from the Marketing and Sales dashboards, which
  * count appointments by appointment date — and the subtitle says so.
@@ -58,15 +58,22 @@ export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/
 function Funnel({ f }) {
   const reasons = f.reasons.filter((r) => r.count > 0);
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] gap-3 lg:gap-2 items-start">
+    <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] gap-3 xl:gap-2 items-start">
       <Column>
         <Box tone="navy" label="Leads" value={f.leads} note="Jobs created in JobProgress in this range" />
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of leads"
+        <Box tone="green" label="Valid Leads" value={f.valid} share={f.validRate} of="of leads"
+          note="Leads minus disqualified. Everything to the right is measured against this number." />
+        <Box tone="red" label="Disqualified" value={f.disqualified} share={f.disqualifiedRate} of="of leads"
+          note="Moved to a DQ stage in JobProgress by the call center or a manager" />
+      </Column>
+      <Connector />
+      <Column>
+        <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid"
           note="A sales appointment exists for the lead" />
-        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of leads" />
+        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid" />
         {reasons.length > 0 && (
           <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2 text-xs">
             {reasons.map((r) => (
@@ -116,9 +123,9 @@ function Column({ children }) {
 
 function Connector() {
   return (
-    <div className="flex lg:flex-col items-center justify-center text-muted-foreground/60 lg:pt-6">
-      <ArrowDown className="w-5 h-5 lg:hidden" />
-      <ArrowRight className="w-5 h-5 hidden lg:block" />
+    <div className="flex xl:flex-col items-center justify-center text-muted-foreground/60 xl:pt-6">
+      <ArrowDown className="w-5 h-5 xl:hidden" />
+      <ArrowRight className="w-5 h-5 hidden xl:block" />
     </div>
   );
 }

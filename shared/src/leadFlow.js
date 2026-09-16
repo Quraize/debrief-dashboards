@@ -25,9 +25,18 @@ export const NOT_A_LEAD_STAGES = ["Open Warranty Claims/CallBacks", "Closed Warr
 const NOT_A_LEAD = new Set(NOT_A_LEAD_STAGES.map(stageKey));
 export const isLeadStage = (stageName) => !NOT_A_LEAD.has(stageKey(stageName));
 
-/** Why a lead has no appointment, in display order; matched by normalised stage name. */
+/**
+ * Disqualified: the call center or a manager moved the job to a DQ stage.
+ * Pulled out of the pool FIRST, before anything about appointments — the
+ * CEO's definition is valid = leads − disqualified, and a DQ'd lead that
+ * somehow still has an appointment is disqualified, not set.
+ */
+export const DISQUALIFIED_STAGES = ["DQ (MGR APPROVAL)", "Disqualified Lead"];
+const DISQUALIFIED = new Set(DISQUALIFIED_STAGES.map(stageKey));
+export const isDisqualifiedStage = (stageName) => DISQUALIFIED.has(stageKey(stageName));
+
+/** Why a VALID lead has no appointment, in display order; matched by normalised stage name. */
 export const LEAD_REASONS = [
-  { key: "dq", label: "Disqualified", stages: ["DQ (MGR APPROVAL)", "Disqualified Lead"] },
   { key: "working", label: "Still being worked",
     stages: ["LEAD NOT CONTACTED!!!", "CONTACTED NEEDS FOLLOW UP!!!", "Need to Confirm Appointment", "Appointment Set",
       "Est In Progress(MGR APPROVAL)", "Salesperson Working (MGR APPR)"] },
@@ -72,8 +81,10 @@ export function leadStatus(debriefs) {
  */
 export function leadFunnel(rows) {
   const all = (rows ?? []).filter((r) => isLeadStage(r.current_stage));
-  const notSetRows = all.filter((r) => r.has_appointment !== true);
-  const setRows = all.filter((r) => r.has_appointment === true);
+  const dqRows = all.filter((r) => isDisqualifiedStage(r.current_stage));
+  const validRows = all.filter((r) => !isDisqualifiedStage(r.current_stage));
+  const notSetRows = validRows.filter((r) => r.has_appointment !== true);
+  const setRows = validRows.filter((r) => r.has_appointment === true);
 
   const reasonCounts = Object.fromEntries(LEAD_REASONS.map((r) => [r.key, 0]));
   for (const r of notSetRows) reasonCounts[leadReason(r.current_stage)]++;
@@ -89,11 +100,13 @@ export function leadFunnel(rows) {
     }
   }
 
-  const leads = all.length, set = setRows.length, notSet = notSetRows.length;
+  const leads = all.length, disqualified = dqRows.length, valid = validRows.length;
+  const set = setRows.length, notSet = notSetRows.length;
   const ran = status.demo + status.noDemo + status.pending;
   const demo = status.demo;
   return {
-    leads, set, notSet, setRate: pct(set, leads), notSetRate: pct(notSet, leads),
+    leads, valid, disqualified, validRate: pct(valid, leads), disqualifiedRate: pct(disqualified, leads),
+    set, notSet, setRate: pct(set, valid), notSetRate: pct(notSet, valid),
     reasons: LEAD_REASONS.map((r) => ({ key: r.key, label: r.label, count: reasonCounts[r.key], share: pct(reasonCounts[r.key], notSet) })),
     ran, noSee: status.noSee, awaiting: status.awaiting,
     ranRate: pct(ran, set), noSeeRate: pct(status.noSee, set), awaitingRate: pct(status.awaiting, set),
@@ -103,8 +116,9 @@ export function leadFunnel(rows) {
   };
 }
 
-/** Back-compatible header-only view (leads / set / not set + reasons). */
+/** Header-only view (leads / valid / disqualified / set / not set + reasons). */
 export function leadFlow(rows) {
   const f = leadFunnel(rows);
-  return { leads: f.leads, set: f.set, notSet: f.notSet, setRate: f.setRate, notSetRate: f.notSetRate, reasons: f.reasons };
+  const { leads, valid, disqualified, validRate, disqualifiedRate, set, notSet, setRate, notSetRate, reasons } = f;
+  return { leads, valid, disqualified, validRate, disqualifiedRate, set, notSet, setRate, notSetRate, reasons };
 }
