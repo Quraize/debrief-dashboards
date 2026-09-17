@@ -123,6 +123,7 @@ services:
       SHEET_PUSH_CRON: ${SHEET_PUSH_CRON:-20 * * * *}
       SHEET_PUSH_WEEKS_BACK: ${SHEET_PUSH_WEEKS_BACK:-1}
       SHEET_PUSH_WEEKS_AHEAD: ${SHEET_PUSH_WEEKS_AHEAD:-3}
+      SHEET_LOCK_ENABLED: ${SHEET_LOCK_ENABLED:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Map tiles for the production boards. Optional: without a key the maps
       # fall back to a keyless provider. See backend/.env.example.

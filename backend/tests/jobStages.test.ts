@@ -338,6 +338,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data, text: async () => "" }) as unknown as Response;
       if (u.endsWith("/token")) return json({ access_token: "t", expires_in: 3600 });
       if (u.includes("fields=sheets.properties")) return json({ sheets: [{ properties: { sheetId: 5, title: "[AUTOMATION]WEEKLY JOB SHEET" } }] });
+      if (u.includes("protectedRanges")) return json({ sheets: [{ properties: { sheetId: 5 }, protectedRanges: [] }] });
       if (u.includes("/values/")) return json({ values: [] }); // an empty tab
       if (u.endsWith(":batchUpdate")) { batches.push(JSON.parse(String(init!.body)).requests); return json({}); }
       return { ok: false, status: 404, json: async () => ({}), text: async () => "" } as unknown as Response;
@@ -360,6 +361,16 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(all.some((r) => r["insertDimension"])).toBe(true);
     expect(all.some((r) => JSON.stringify(r).includes("Wayne/2 Main St/Joseph Lorent"))).toBe(true);
     expect(all.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
+    // Friday 9/4: the week 8/31–9/6 is past its Thursday, so it is locked to the service account alone.
+    const lock = all.find((r) => r["addProtectedRange"]) as { addProtectedRange: { protectedRange: Record<string, unknown> } } | undefined;
+    expect(lock).toBeTruthy();
+    expect(lock!.addProtectedRange.protectedRange).toMatchObject({
+      description: "Automation lock — week 8/31/2026-9/6/2026", warningOnly: false,
+      editors: { users: ["sa@test"], domainUsersCanEdit: false },
+    });
+    expect(live.locksAdded).toBe(1);
+    expect(live.summary!.locks.map((l) => l.label)).toEqual(["8/31/2026-9/6/2026"]);
+    expect(all.some((r) => JSON.stringify(r).includes("Locked since Fri 9/4/2026"))).toBe(true);
 
     const runs = (await db.owner.query(`SELECT mode, status, counts->>'jobsAdded' AS added FROM sync_run WHERE kind = 'sheet_push' ORDER BY started_at`)).rows;
     expect(runs).toEqual([{ mode: "dry_run", status: "completed", added: "1" }, { mode: "commit", status: "completed", added: "1" }]);

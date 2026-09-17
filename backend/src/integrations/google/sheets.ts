@@ -18,6 +18,9 @@ export interface ServiceAccount { client_email: string; private_key: string; tok
 
 export type CellValue = string | number | boolean | null;
 
+export interface GridRange { sheetId?: number; startRowIndex?: number; endRowIndex?: number; startColumnIndex?: number; endColumnIndex?: number }
+export interface ProtectedRange { protectedRangeId?: number; description?: string; range?: GridRange; warningOnly?: boolean }
+
 const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const TOKEN_URI = "https://oauth2.googleapis.com/token";
@@ -63,6 +66,9 @@ export class GoogleSheetsClient {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
   private token: { value: string; expiresAt: number } | null = null;
+
+  /** The service account's own address — the one editor every lock keeps. */
+  get clientEmail(): string { return this.sa.client_email; }
 
   constructor(opts: SheetsClientOptions) {
     this.sa = opts.credentials;
@@ -122,6 +128,14 @@ export class GoogleSheetsClient {
   /** The numeric sheet id (the `gid`) of a tab, by its title; null when there is no such tab. */
   async sheetIdByTitle(title: string): Promise<number | null> {
     return (await this.sheetByTitle(title))?.sheetId ?? null;
+  }
+
+  /** The protected ranges on one tab: id, description and the rows/columns each covers. */
+  async listProtectedRanges(sheetId: number): Promise<ProtectedRange[]> {
+    const body = await this.request<{ sheets?: { properties?: { sheetId?: number }; protectedRanges?: ProtectedRange[] }[] }>(
+      `${SHEETS}/${this.spreadsheetId}?fields=sheets(properties.sheetId,protectedRanges(protectedRangeId,description,range,warningOnly))`,
+      "protectedRanges");
+    return (body.sheets ?? []).find((s) => s.properties?.sheetId === sheetId)?.protectedRanges ?? [];
   }
 
   /** Every non-empty row of a tab as raw values (dates as serial numbers, checkboxes as booleans). */

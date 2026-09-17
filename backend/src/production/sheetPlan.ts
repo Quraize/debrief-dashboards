@@ -49,6 +49,37 @@ export interface PlanSummary {
   weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[] }[];
   /** The month lines as written, for the dry-run report. */
   months: { label: string; jobs: number; gross: number }[];
+  /** Week blocks that are past their Thursday and must be read-only, with their final row span. */
+  locks: WeekLock[];
+}
+
+/**
+ * A week block to protect: rows `startRow` up to (not including) `endRow`,
+ * every column. `since` is the office day the lock took effect — the Friday
+ * of that week, i.e. the end of its Thursday.
+ */
+export interface WeekLock { label: string; from: string; to: string; startRow: number; endRow: number; since: string }
+
+/** The office day a week becomes read-only: end of its Thursday = 00:00 Friday. */
+export function lockDate(from: string): string {
+  const [y, m, d] = from.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + 4)).toISOString().slice(0, 10);
+}
+
+/** "Fri 9/18/2026" for the lock note. */
+export function lockNote(from: string): string {
+  const [y, m, d] = lockDate(from).split("-").map(Number);
+  return `🔒 Locked since Fri ${m}/${d}/${y} — read-only; JobProgress figures still update`;
+}
+
+/** Every block on the grid whose week is past its Thursday, with the rows it occupies now. */
+export function lockedBlocks(grid: CellValue[][], today: string): WeekLock[] {
+  return parseBlocks(grid)
+    .filter((b) => lockDate(b.from) <= today)
+    .map((b) => ({
+      label: weekLabel(b.from, b.to), from: b.from, to: b.to,
+      startRow: b.labelIdx, endRow: blockEnd(b) + 1, since: lockDate(b.from),
+    }));
 }
 
 export interface Plan { ops: PlanOp[]; summary: PlanSummary }
@@ -232,6 +263,8 @@ export interface PlanOptions {
   allRows?: SheetRow[];
   /** Skip the month block (tests of the week layout). */
   monthSummary?: boolean;
+  /** Compute week locks (blocks past their Thursday) and their label notes. Default true. */
+  lockWeeks?: boolean;
 }
 
 export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanOptions): Plan {
@@ -240,7 +273,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [],
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [],
   };
   // Writes are mirrored into the model too, so later steps see the labels and
   // job ids they just placed (a block inserted above shifts everything below).
@@ -373,6 +406,22 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   // is in place: a new earlier week changes the later weeks' running totals too.
   const months = new Set(ordered.map((w) => monthOf(w.from)));
   for (const b of parseBlocks(grid)) if (months.has(monthOf(b.from))) writeCumulative(b.from);
+
+  // Locks last, off the final grid, so the row spans are the ones the sheet
+  // will have once every insert above has run. Every block past its Thursday
+  // — not only the pushed weeks — so old weeks lock on the first run too.
+  // The note sits in column B of the label row (A holds the label the parser
+  // reads) and is written once; the protection itself is a sheet property
+  // the push applies from `summary.locks`.
+  if (opts.lockWeeks !== false) {
+    summary.locks = lockedBlocks(grid, opts.today ?? (opts.now ?? new Date()).toISOString().slice(0, 10));
+    const notes: CellWrite[] = [];
+    for (const l of summary.locks) {
+      const note = lockNote(l.from);
+      if (cellStr(grid[l.startRow]?.[1]) !== note) notes.push({ row: l.startRow, col: 1, value: note });
+    }
+    write(notes);
+  }
   return { ops, summary };
 
   /** Rewrites the Cumulative Monthly Total formulas of the block for `from` from the blocks now on the tab. */

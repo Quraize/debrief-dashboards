@@ -14,10 +14,10 @@
  * A dry run performs the read and the plan and reports what would change.
  */
 import { withServiceRole } from "../db/client.js";
-import { GoogleSheetsClient, a1, type CellValue } from "../integrations/google/sheets.js";
+import { GoogleSheetsClient, a1, type CellValue, type ProtectedRange } from "../integrations/google/sheets.js";
 import { MASTER_COLUMNS, FILLS, NUM_FMT } from "@allied/shared/weeklyJobSheetMaster";
 import { weeklyJobSheetAsService, filterSheetRows, type SheetRow } from "./weeklyJobSheet.js";
-import { planSheet, weekBounds, colIndex, type Plan, type PlanOp, type WeekInput } from "./sheetPlan.js";
+import { planSheet, weekBounds, colIndex, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
 import { BOARD_TIMEZONE } from "./board.js";
 
 export const DEFAULT_TAB = "[AUTOMATION]WEEKLY JOB SHEET";
@@ -26,6 +26,8 @@ const FORMAT_ROWS = 5000; // formats/validation cover this many rows; inserted r
 export interface SheetPushSettings {
   enabled: boolean; reason: string; tab: string; spreadsheetId: string | null;
   weeksBack: number; weeksAhead: number; cron: string;
+  /** Week blocks become read-only at the end of their Thursday. SHEET_LOCK_ENABLED=false turns it off. */
+  lockWeeks: boolean;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -37,6 +39,7 @@ export function sheetPushSettings(): SheetPushSettings {
     weeksBack: Number(process.env.SHEET_PUSH_WEEKS_BACK ?? 1),
     weeksAhead: Number(process.env.SHEET_PUSH_WEEKS_AHEAD ?? 3),
     cron: process.env.SHEET_PUSH_CRON ?? "20 * * * *",
+    lockWeeks: process.env.SHEET_LOCK_ENABLED !== "false",
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -63,6 +66,8 @@ export interface SheetPushResult {
   weeks: string[];
   summary: Plan["summary"] | null;
   requests: number;
+  /** Week blocks protected for the first time on this run. */
+  locksAdded?: number;
   errorMessage?: string;
 }
 
@@ -95,21 +100,69 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
-      now, today, allRows: feed.rows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null,
+      now, today, allRows: feed.rows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
     });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
+
+    // Locks after every row insert in the same batch: the spans are final.
+    const existing = plan.summary.locks.length ? await client.listProtectedRanges(sheetId) : [];
+    const locks = lockRequests(plan.summary.locks, existing, sheetId, client.clientEmail, plan.ops.some((o) => o.type === "insertRows"));
+    requests.push(...locks.requests);
+
     if (!options.dryRun && requests.length) await client.batchUpdate(requests);
 
     const weekLabels = plan.summary.weeks.map((w) => w.label);
-    await closeRun(syncRunId, "completed", { dryRun: options.dryRun, requests: requests.length, ...plan.summary });
+    const counts = { dryRun: options.dryRun, requests: requests.length, ...plan.summary, locks: plan.summary.locks.length, locksAdded: locks.added, locksUpdated: locks.updated };
+    await closeRun(syncRunId, "completed", counts);
     console.info(`[sheet-push] ${options.dryRun ? "dry run" : "pushed"}: ${plan.summary.jobsAdded} added, ${plan.summary.jobsUpdated} updated, `
-      + `${plan.summary.blocksCreated.length} week block(s) created, ${requests.length} request(s)`);
-    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length };
+      + `${plan.summary.blocksCreated.length} week block(s) created, ${plan.summary.locks.length} locked (${locks.added} new), ${requests.length} request(s)`);
+    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length, locksAdded: locks.added };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await closeRun(syncRunId, "failed", { dryRun: options.dryRun }, message);
     return { syncRunId, status: "failed", dryRun: options.dryRun, tab: settings.tab, weeks: [], summary: null, requests: 0, errorMessage: message };
   }
+}
+
+// ── Week locks ──────────────────────────────────────────────────────────────
+//
+// A locked week is a Google Sheets protected range over the block's rows with
+// exactly one editor: the service account. That keeps the JobProgress figures
+// flowing into a locked week while nobody at a keyboard can change, add or
+// move a row in it. (The spreadsheet's OWNER can always edit — that is Google,
+// not us.) Ranges are found again by description, so re-running is safe, and
+// their spans are re-asserted whenever rows were inserted above or the block
+// grew, so a lock always covers the whole block.
+
+export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
+
+export function lockRequests(
+  locks: WeekLock[], existing: ProtectedRange[], sheetId: number, editorEmail: string, rowsShifted: boolean,
+): { requests: unknown[]; added: number; updated: number } {
+  const requests: unknown[] = [];
+  let added = 0, updated = 0;
+  for (const l of locks) {
+    const range = { sheetId, startRowIndex: l.startRow, endRowIndex: l.endRow };
+    const description = LOCK_DESCRIPTION(l.label);
+    const have = existing.find((p) => p.description === description);
+    if (!have) {
+      requests.push({ addProtectedRange: { protectedRange: {
+        range, description, warningOnly: false,
+        editors: { users: [editorEmail], domainUsersCanEdit: false },
+      } } });
+      added++;
+      continue;
+    }
+    const same = have.range?.startRowIndex === l.startRow && have.range?.endRowIndex === l.endRow
+      && have.range?.startColumnIndex === undefined && have.range?.endColumnIndex === undefined;
+    if (same && !rowsShifted && have.warningOnly !== true) continue;
+    requests.push({ updateProtectedRange: {
+      protectedRange: { protectedRangeId: have.protectedRangeId, range, description, warningOnly: false },
+      fields: "range,description,warningOnly",
+    } });
+    updated++;
+  }
+  return { requests, added, updated };
 }
 
 // ── Plan → Sheets API requests ──────────────────────────────────────────────

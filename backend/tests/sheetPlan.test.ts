@@ -4,10 +4,10 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  planSheet, parseBlocks, parseWeekLabel, colIndex, dateSerial, weekBounds, monthLines,
+  planSheet, parseBlocks, parseWeekLabel, colIndex, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote,
   SYNC_STATUS_STALE, SUMMARY_MARKER, CUMULATIVE_LABEL, type CellWrite,
 } from "../src/production/sheetPlan.js";
-import { toRequests } from "../src/production/sheetPush.js";
+import { toRequests, lockRequests } from "../src/production/sheetPush.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
 import { MASTER_COLUMNS } from "@allied/shared/weeklyJobSheetMaster";
 
@@ -210,5 +210,59 @@ describe("toRequests", () => {
     expect(reqs.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("ONE_OF_LIST"))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("frozenRowCount"))).toBe(true);
+  });
+});
+
+describe("week locks — read-only from the end of Thursday", () => {
+  // A tab with three weeks: next week, this week (9/14–9/20), last week.
+  const grid = [
+    headerRow(), [SUMMARY_MARKER], ["September 2026 — Projected…"], [],
+    ["9/21/2026-9/27/2026"], ["job n"], ["Weekly Total"], [CUMULATIVE_LABEL], [],
+    ["9/14/2026-9/20/2026"], ["job a"], ["job b"], ["Weekly Total"], [CUMULATIVE_LABEL], [],
+    ["9/7/2026-9/13/2026"], ["job c"], ["Weekly Total"], [CUMULATIVE_LABEL],
+  ];
+
+  it("locks at 00:00 Friday of the week, office calendar", () => {
+    expect(lockDate("2026-09-14")).toBe("2026-09-18");
+    expect(lockNote("2026-09-14")).toMatch(/^🔒 Locked since Fri 9\/18\/2026/);
+    // Thursday evening: this week is still open. Friday: locked.
+    expect(lockedBlocks(grid, "2026-09-17").map((l) => l.label)).toEqual(["9/7/2026-9/13/2026"]);
+    expect(lockedBlocks(grid, "2026-09-18").map((l) => l.label)).toEqual(["9/14/2026-9/20/2026", "9/7/2026-9/13/2026"]);
+    // The span covers label through cumulative row, end exclusive.
+    expect(lockedBlocks(grid, "2026-09-18")[0]).toMatchObject({ startRow: 9, endRow: 14, since: "2026-09-18" });
+  });
+
+  it("locks every past week on the first run, not only the pushed ones, and notes it once on the label row", () => {
+    const week = { from: "2026-09-21", to: "2026-09-27", rows: [] as SheetRow[] };
+    const plan = planSheet(grid, [week], { ...NO_MONTH, today: "2026-09-18" });
+    expect(plan.summary.locks.map((l) => l.label)).toEqual(["9/14/2026-9/20/2026", "9/7/2026-9/13/2026"]);
+    const notes = cellsOf(plan).filter((c) => c.col === B && String(c.value).startsWith("🔒"));
+    expect(notes.map((c) => c.row)).toEqual([9, 15]);
+    // Already noted → not written again.
+    const noted = grid.map((r) => [...r]); noted[9]![1] = lockNote("2026-09-14"); noted[15]![1] = lockNote("2026-09-07");
+    expect(cellsOf(planSheet(noted, [week], { ...NO_MONTH, today: "2026-09-18" })).filter((c) => c.col === B)).toHaveLength(0);
+    // Off switch.
+    expect(planSheet(grid, [week], { ...NO_MONTH, today: "2026-09-18", lockWeeks: false }).summary.locks).toEqual([]);
+  });
+
+  it("re-asserts a lock's span after rows shift and leaves an unchanged one alone", () => {
+    const locks = lockedBlocks(grid, "2026-09-18");
+    const fresh = lockRequests(locks, [], 5, "sa@test", false);
+    expect(fresh.added).toBe(2); expect(fresh.updated).toBe(0);
+    expect((fresh.requests[0] as Record<string, Record<string, Record<string, unknown>>>)["addProtectedRange"]!["protectedRange"]).toMatchObject({
+      range: { sheetId: 5, startRowIndex: 9, endRowIndex: 14 }, description: "Automation lock — week 9/14/2026-9/20/2026",
+      warningOnly: false, editors: { users: ["sa@test"], domainUsersCanEdit: false },
+    });
+    const existing = [
+      { protectedRangeId: 1, description: "Automation lock — week 9/14/2026-9/20/2026", range: { sheetId: 5, startRowIndex: 9, endRowIndex: 14 } },
+      { protectedRangeId: 2, description: "Automation lock — week 9/7/2026-9/13/2026", range: { sheetId: 5, startRowIndex: 15, endRowIndex: 18 } }, // block grew
+    ];
+    const steady = lockRequests(locks, existing, 5, "sa@test", false);
+    expect(steady.added).toBe(0); expect(steady.updated).toBe(1);
+    expect((steady.requests[0] as Record<string, Record<string, unknown>>)["updateProtectedRange"]).toMatchObject({
+      protectedRange: { protectedRangeId: 2, range: { startRowIndex: 15, endRowIndex: 19 } }, fields: "range,description,warningOnly",
+    });
+    // Rows were inserted somewhere above this run: every span is re-asserted.
+    expect(lockRequests(locks, existing, 5, "sa@test", true).updated).toBe(2);
   });
 });

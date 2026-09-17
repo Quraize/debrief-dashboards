@@ -80,7 +80,7 @@ export function registerProductionRoutes(app: FastifyInstance): void {
     async (_req: FastifyRequest, reply: FastifyReply) => {
       const s = sheetPushSettings();
       return reply.send({
-        enabled: s.enabled, reason: s.reason, tab: s.tab, weeksBack: s.weeksBack, weeksAhead: s.weeksAhead, cron: s.cron,
+        enabled: s.enabled, reason: s.reason, tab: s.tab, weeksBack: s.weeksBack, weeksAhead: s.weeksAhead, cron: s.cron, lockWeeks: s.lockWeeks,
         spreadsheetUrl: s.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${s.spreadsheetId}/edit` : null,
         last: await lastSheetPush(),
         runs: await recentSheetPushes(30),

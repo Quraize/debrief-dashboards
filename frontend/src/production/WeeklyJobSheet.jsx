@@ -231,6 +231,7 @@ export default function WeeklyJobSheet() {
                   Writes into the <strong>{push.tab}</strong> tab of the production master sheet
                   {push.spreadsheetUrl && <> (<a href={push.spreadsheetUrl} target="_blank" rel="noreferrer" className="text-accent underline">open</a>)</>}: every hour,
                   the current week plus {push.weeksBack} before and {push.weeksAhead} ahead. Synced columns only; the team's cells are never touched.
+                  {push.lockWeeks !== false && <> Each week becomes <strong>read-only at the end of its Thursday</strong>: nobody can edit, add or move rows in it, while JobProgress figures keep updating.</>}
                   {push.last && <> Last {push.last.mode === "dry_run" ? "preview" : "push"} {relative(push.last.finishedAt || push.last.startedAt)}{push.last.status !== "completed" && <span className="text-red-600"> — {push.last.status}{push.last.errorMessage ? `: ${push.last.errorMessage}` : ""}</span>}.</>}
                 </p>
               ) : <p className="text-amber-700">Not configured on the server: {push.reason}.</p>
@@ -294,6 +295,11 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {(pushResult.summary.locks ?? []).length > 0 && (
+              <div className="text-muted-foreground" title="A week becomes read-only at the end of its Thursday. The automation keeps updating JobProgress figures in it; people cannot edit, add or move rows.">
+                🔒 {pushResult.summary.locks.length} week(s) read-only{pushResult.locksAdded ? ` (${pushResult.locksAdded} locked on this run)` : ""}: {pushResult.summary.locks.map((l) => l.label).join(", ")}
+              </div>
+            )}
             {(pushResult.summary.months ?? []).map((m) => <div key={m.label} className="text-muted-foreground">Month at a glance — {m.label}</div>)}
             {pushResult.summary.weeks.map((w) => (
               <div key={w.label} className="text-muted-foreground">
