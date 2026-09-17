@@ -75,15 +75,21 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 7, HU)).toBe("1");
     expect(at(cells, 8, HU)).toBe("2");
     expect(at(cells, 9, AB)).toEqual({ formula: 'SUMIF(HY8:HY9,"<>Not on the JobProgress calendar this week",AB8:AB9)' });
-    // Both weeks are September: the 9/14 block's cumulative spans from its first job row (3) down to the
-    // 9/7 block's cumulative row (11), each job once; the 9/7 block's spans its own rows (8..11).
+    // Both weeks are September: the 9/14 block's cumulative covers its own job row (3) and everything below its
+    // cumulative row (6..11), never its own total/cumulative cells (that would be circular), each job once across
+    // both ranges; the 9/7 block's covers its own job rows (8..9) only.
     const cum = (at(cells, 4, R) as { formula: string }).formula;
-    expect(cum).toContain("SUMPRODUCT(");
-    expect(cum).toContain('(A3:A11<>"Weekly Total")');
-    expect(cum).toContain(`(HY3:HY11<>"Not on the JobProgress calendar this week")`);
-    expect(cum).toContain("IFERROR(1*R3:R11,0)");
-    expect(cum).toContain('COUNTIF(AC3:AC11,AC3:AC11&"")');
-    expect((at(cells, 10, R) as { formula: string }).formula).toContain("IFERROR(1*R8:R11,0)");
+    expect(cum.split("SUMPRODUCT(")).toHaveLength(3);
+    expect(cum).toContain("IFERROR(1*R3:R3,0)");
+    expect(cum).toContain("IFERROR(1*R6:R11,0)");
+    expect(cum).toContain(`(HY6:HY11<>"Not on the JobProgress calendar this week")`);
+    expect(cum).toContain('COUNTIF(AC3:AC3,AC3:AC3&"")+COUNTIF(AC6:AC11,AC3:AC3&"")');
+    expect(cum).toContain('COUNTIF(AC3:AC3,AC6:AC11&"")+COUNTIF(AC6:AC11,AC6:AC11&"")');
+    expect(cum).not.toMatch(/R4\b|R5\b/); // its own total and cumulative rows are not referenced
+    const older = (at(cells, 10, R) as { formula: string }).formula;
+    expect(older.split("SUMPRODUCT(")).toHaveLength(2);
+    expect(older).toContain("IFERROR(1*R8:R9,0)");
+    expect(older).not.toContain("R10");
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 1, count: 5 }, { type: "insertRows", at: 6, count: 6 }]);
   });
 });
@@ -115,7 +121,8 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(at(cells, 4, B)).toBe(false);
     expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
     expect(at(cells, 6, 0)).toBe(CUMULATIVE_LABEL);
-    expect((at(cells, 6, R) as { formula: string }).formula).toContain("IFERROR(1*R3:R7,0)");
+    expect((at(cells, 6, R) as { formula: string }).formula).toContain("IFERROR(1*R3:R5,0)");
+    expect((at(cells, 6, R) as { formula: string }).formula).not.toContain("R6"); // not its own row
     // Denike (row 3) is not in the feed's week: stamped, kept, greyed — and out of the totals via the SUMIF.
     expect(at(cells, 3, HY)).toBe(SYNC_STATUS_STALE);
     expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 3 && r.style === "stale"))).toBe(true);

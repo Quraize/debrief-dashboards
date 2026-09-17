@@ -179,28 +179,39 @@ function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellW
 }
 
 /**
- * Cumulative Monthly Total (through this week): every job row from this
- * block down to the month's oldest block, each JOB counted once. A roof that
- * installs Thursday–Monday sits in two week blocks and both weekly totals;
- * summing the weekly totals counted it twice, which is how the tab came to
- * show $728K for a $381K month.
+ * Cumulative Monthly Total (through this week): this block's job rows plus
+ * every row below its cumulative row down to the month's oldest block, each
+ * JOB counted once. A roof that installs Thursday–Monday sits in two week
+ * blocks and both weekly totals; summing the weekly totals counted it twice,
+ * which is how the tab came to show $728K for a $381K month.
  *
- * Over the span `startRow..endRow` (0-based, inclusive), per money column:
- *   - skip the Weekly Total and Cumulative rows (they hold sums, not jobs);
+ * Two ranges, not one: the span must skip the block's own Weekly Total and
+ * Cumulative rows — a range that includes the cell the formula lives in is a
+ * circular reference to Sheets, whatever the arithmetic does with it. Per
+ * money column, over each range:
+ *   - skip the other blocks' Weekly Total and Cumulative rows (sums, not jobs);
  *   - skip rows stamped not-this-week;
  *   - a number in the money column counts, anything else is 0;
- *   - divide by how many times the row's Job # (AC) appears in the span, so a
- *     job in two blocks contributes half from each; a row with no Job # (a
- *     hand-added job) divides by 1.
+ *   - divide by how many times the row's Job # (AC) appears across BOTH
+ *     ranges, so a job in two blocks contributes half from each; a row with
+ *     no Job # (a hand-added job) divides by 1.
+ *
+ * `ownJobs` and `below` are 0-based inclusive row spans; `below` is null for
+ * the month's oldest block.
  */
-function cumulativeRowCells(rowIdx: number, startRow: number, endRow: number): CellWrite[] {
+function cumulativeRowCells(rowIdx: number, ownJobs: [number, number] | null, below: [number, number] | null): CellWrite[] {
   const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: CUMULATIVE_LABEL }];
-  const s = startRow + 1, e = endRow + 1;
-  const A = `A${s}:A${e}`, HY = `HY${s}:HY${e}`, AC = `AC${s}:AC${e}`;
+  const spans = [ownJobs, below].filter((x): x is [number, number] => x !== null && x[1] >= x[0]);
+  const ac = (sp: [number, number]) => `AC${sp[0] + 1}:AC${sp[1] + 1}`;
   for (const L of TOTALLED) {
-    const formula = `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")*(${HY}<>"${SYNC_STATUS_STALE}")`
-      + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*COUNTIF(${AC},${AC}&"")+(${AC}="")))`;
-    out.push({ row: rowIdx, col: IDX[L]!, value: { formula } });
+    const terms = spans.map((sp) => {
+      const s = sp[0] + 1, e = sp[1] + 1;
+      const A = `A${s}:A${e}`, HY = `HY${s}:HY${e}`, AC = ac(sp);
+      const counts = spans.map((other) => `COUNTIF(${ac(other)},${AC}&"")`).join("+");
+      return `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")*(${HY}<>"${SYNC_STATUS_STALE}")`
+        + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*(${counts})+(${AC}="")))`;
+    });
+    out.push({ row: rowIdx, col: IDX[L]!, value: terms.length ? { formula: terms.join("+") } : 0 });
   }
   return out;
 }
@@ -462,9 +473,11 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     if (!me || me.totalIdx === null) return;
     const cumulativeIdx = me.cumulativeIdx ?? me.totalIdx + 1;
     // Older weeks of the same month sit below this block (the tab is newest-first).
-    const sameMonth = blocks.filter((b) => monthOf(b.from) === monthOf(from) && b.from <= from);
-    const endRow = Math.max(cumulativeIdx, ...sameMonth.map(blockEnd));
-    write(cumulativeRowCells(cumulativeIdx, me.labelIdx + 1, endRow));
+    const older = blocks.filter((b) => monthOf(b.from) === monthOf(from) && b.from < from);
+    const endRow = Math.max(cumulativeIdx, ...older.map(blockEnd));
+    const ownJobs: [number, number] | null = me.totalIdx > me.labelIdx + 1 ? [me.labelIdx + 1, me.totalIdx - 1] : null;
+    const below: [number, number] | null = endRow > cumulativeIdx ? [cumulativeIdx + 1, endRow] : null;
+    write(cumulativeRowCells(cumulativeIdx, ownJobs, below));
   }
 }
 
