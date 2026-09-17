@@ -30,7 +30,7 @@ type Column = { col: string; header: string; key?: string; type: string; hidden?
 export interface WeekInput { from: string; to: string; rows: SheetRow[] }
 
 export interface CellWrite { row: number; col: number; value: CellValue | { formula: string } }
-export type RowStyleName = "label" | "total" | "cumulative" | "summary";
+export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale";
 export interface RowStyle { row: number; style: RowStyleName }
 export type PlanOp =
   | { type: "insertRows"; at: number; count: number }
@@ -87,7 +87,10 @@ export interface Plan { ops: PlanOp[]; summary: PlanSummary }
 export const SYNC_STATUS_OK = "Synced from JobProgress";
 export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
 export const SUMMARY_MARKER = "MONTH AT A GLANCE";
-export const CUMULATIVE_LABEL = "Cumulative Monthly Total";
+// "(through this week)" because the row on the newest block adds the weeks
+// that have not happened yet — it is the month's schedule to that point, not
+// its production, and the old name was read as the latter.
+export const CUMULATIVE_LABEL = "Cumulative Monthly Total (through this week)";
 
 /** "A" → 0, "AC" → 28, "HU" → 228. */
 export function colIndex(letters: string): number {
@@ -159,20 +162,45 @@ function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null):
   return out;
 }
 
+/**
+ * The block's Weekly Total: the money columns summed over its job rows, except
+ * rows stamped "not on the calendar this week". Those rows stay on the tab so
+ * the team's hand-filled cells survive, but a job whose install moved to
+ * another week is not this week's production.
+ */
 function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellWrite[] {
   const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: "Weekly Total" }];
+  const f = firstJob + 1, l = lastJob + 1;
   for (const L of TOTALLED) {
-    const value = lastJob >= firstJob ? { formula: `SUM(${L}${firstJob + 1}:${L}${lastJob + 1})` } : 0;
+    const value = lastJob >= firstJob ? { formula: `SUMIF(HY${f}:HY${l},"<>${SYNC_STATUS_STALE}",${L}${f}:${L}${l})` } : 0;
     out.push({ row: rowIdx, col: IDX[L]!, value });
   }
   return out;
 }
 
-/** This week's total plus the totals of the same month's earlier weeks already on the tab. */
-function cumulativeRowCells(rowIdx: number, totalRows: number[]): CellWrite[] {
+/**
+ * Cumulative Monthly Total (through this week): every job row from this
+ * block down to the month's oldest block, each JOB counted once. A roof that
+ * installs Thursday–Monday sits in two week blocks and both weekly totals;
+ * summing the weekly totals counted it twice, which is how the tab came to
+ * show $728K for a $381K month.
+ *
+ * Over the span `startRow..endRow` (0-based, inclusive), per money column:
+ *   - skip the Weekly Total and Cumulative rows (they hold sums, not jobs);
+ *   - skip rows stamped not-this-week;
+ *   - a number in the money column counts, anything else is 0;
+ *   - divide by how many times the row's Job # (AC) appears in the span, so a
+ *     job in two blocks contributes half from each; a row with no Job # (a
+ *     hand-added job) divides by 1.
+ */
+function cumulativeRowCells(rowIdx: number, startRow: number, endRow: number): CellWrite[] {
   const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: CUMULATIVE_LABEL }];
+  const s = startRow + 1, e = endRow + 1;
+  const A = `A${s}:A${e}`, HY = `HY${s}:HY${e}`, AC = `AC${s}:AC${e}`;
   for (const L of TOTALLED) {
-    out.push({ row: rowIdx, col: IDX[L]!, value: { formula: totalRows.map((r) => `${L}${r + 1}`).join("+") } });
+    const formula = `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")*(${HY}<>"${SYNC_STATUS_STALE}")`
+      + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*COUNTIF(${AC},${AC}&"")+(${AC}="")))`;
+    out.push({ row: rowIdx, col: IDX[L]!, value: { formula } });
   }
   return out;
 }
@@ -188,7 +216,7 @@ export function parseBlocks(grid: CellValue[][]): Block[] {
     const label = parseWeekLabel(a);
     if (label) { cur = { labelIdx: i, ...label, jobIdx: [], totalIdx: null, cumulativeIdx: null }; blocks.push(cur); continue; }
     const text = cellStr(a);
-    if (/^cumulative monthly total$/i.test(text)) { const last = blocks[blocks.length - 1]; if (last && last.totalIdx !== null && last.cumulativeIdx === null) last.cumulativeIdx = i; continue; }
+    if (/^cumulative monthly total\b/i.test(text)) { const last = blocks[blocks.length - 1]; if (last && last.totalIdx !== null && last.cumulativeIdx === null) last.cumulativeIdx = i; continue; }
     if (!cur) continue;
     if (/^weekly total$/i.test(text)) { cur.totalIdx = i; cur = null; continue; }
     const rowHasContent = (grid[i] ?? []).some((v) => cellStr(v) !== "" && v !== false);
@@ -380,15 +408,18 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     blocks = parseBlocks(grid);
     block = blocks.find((b) => b.from === week.from && b.to === week.to)!;
     const stale: CellWrite[] = [];
+    const staleRows: RowStyle[] = [];
     for (const idx of block.jobIdx) {
       const id = cellStr(grid[idx]?.[JOB_ID_COL]);
       if (id && !seen.has(id) && !additions.some((r) => r.jobId === id)) {
         stale.push({ row: idx, col: IDX["HY"]!, value: SYNC_STATUS_STALE });
         if (opts.syncedAt) stale.push({ row: idx, col: IDX["HX"]!, value: dateTimeSerial(opts.syncedAt) });
         summary.jobsNotThisWeek++; report.notThisWeek.push(cellStr(grid[idx]?.[0]) || id);
+        staleRows.push({ row: idx, style: "stale" });
       }
     }
     write(stale);
+    style(staleRows);
     // The total row's ranges follow the block as it grows.
     if (block.totalIdx !== null && block.jobIdx.length) {
       write(totalRowCells(block.totalIdx, block.jobIdx[0]!, block.jobIdx[block.jobIdx.length - 1]!));
@@ -430,8 +461,10 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const me = blocks.find((b) => b.from === from);
     if (!me || me.totalIdx === null) return;
     const cumulativeIdx = me.cumulativeIdx ?? me.totalIdx + 1;
-    const sameMonth = blocks.filter((b) => b.totalIdx !== null && monthOf(b.from) === monthOf(from) && b.from <= from);
-    write(cumulativeRowCells(cumulativeIdx, sameMonth.map((b) => b.totalIdx!).sort((a, b) => a - b)));
+    // Older weeks of the same month sit below this block (the tab is newest-first).
+    const sameMonth = blocks.filter((b) => monthOf(b.from) === monthOf(from) && b.from <= from);
+    const endRow = Math.max(cumulativeIdx, ...sameMonth.map(blockEnd));
+    write(cumulativeRowCells(cumulativeIdx, me.labelIdx + 1, endRow));
   }
 }
 

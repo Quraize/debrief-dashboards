@@ -233,6 +233,10 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   cumulative: { backgroundColor: rgb("92D050"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
   // The month block is the platform's own; navy on white so it never reads as a week.
   summary: { backgroundColor: rgb("2E4877"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("FFFFFF") } },
+  // A job row whose install moved to another week: kept for the team's cells,
+  // out of the totals, and greyed so the eye skips it. Text only — the row's
+  // own fills (a hand-applied red, say) are left as they are.
+  stale: { textFormat: { italic: true, foregroundColor: rgb("9CA3AF") } },
 };
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
@@ -255,7 +259,7 @@ function opRequests(op: PlanOp, sheetId: number, lastCol: number, reqs: unknown[
       reqs.push({ repeatCell: {
         range: { sheetId, startRowIndex: r.row, endRowIndex: r.row + 1, startColumnIndex: 0, endColumnIndex: lastCol },
         cell: { userEnteredFormat: ROW_STYLES[r.style] ?? ROW_STYLES["total"] },
-        fields: "userEnteredFormat(backgroundColor,textFormat)",
+        fields: "backgroundColor" in (ROW_STYLES[r.style] ?? ROW_STYLES["total"]!) ? "userEnteredFormat(backgroundColor,textFormat)" : "userEnteredFormat.textFormat",
       } });
     }
     return;

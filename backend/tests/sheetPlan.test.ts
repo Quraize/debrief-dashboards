@@ -69,16 +69,21 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 2, B)).toBe(false);
     expect(at(cells, 2, T)).toEqual({ formula: "R3+S3" });
     expect(at(cells, 3, 0)).toBe("Weekly Total");
-    expect(at(cells, 3, R)).toEqual({ formula: "SUM(R3:R3)" });
+    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIF(HY3:HY3,"<>Not on the JobProgress calendar this week",R3:R3)' });
     expect(at(cells, 4, 0)).toBe(CUMULATIVE_LABEL);
     expect(at(cells, 6, 0)).toBe("9/7/2026-9/13/2026");
     expect(at(cells, 7, HU)).toBe("1");
     expect(at(cells, 8, HU)).toBe("2");
-    expect(at(cells, 9, AB)).toEqual({ formula: "SUM(AB8:AB9)" });
-    // Both weeks are September: the 9/14 block's cumulative adds its own total (row 4 → R4) and the 9/7 total (R10);
-    // the 9/7 block's cumulative is its own total only.
-    expect(at(cells, 4, R)).toEqual({ formula: "R4+R10" });
-    expect(at(cells, 10, R)).toEqual({ formula: "R10" });
+    expect(at(cells, 9, AB)).toEqual({ formula: 'SUMIF(HY8:HY9,"<>Not on the JobProgress calendar this week",AB8:AB9)' });
+    // Both weeks are September: the 9/14 block's cumulative spans from its first job row (3) down to the
+    // 9/7 block's cumulative row (11), each job once; the 9/7 block's spans its own rows (8..11).
+    const cum = (at(cells, 4, R) as { formula: string }).formula;
+    expect(cum).toContain("SUMPRODUCT(");
+    expect(cum).toContain('(A3:A11<>"Weekly Total")');
+    expect(cum).toContain(`(HY3:HY11<>"Not on the JobProgress calendar this week")`);
+    expect(cum).toContain("IFERROR(1*R3:R11,0)");
+    expect(cum).toContain('COUNTIF(AC3:AC11,AC3:AC11&"")');
+    expect((at(cells, 10, R) as { formula: string }).formula).toContain("IFERROR(1*R8:R11,0)");
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 1, count: 5 }, { type: "insertRows", at: 6, count: 6 }]);
   });
 });
@@ -108,11 +113,12 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 4, count: 1 }, { type: "insertRows", at: 6, count: 1 }]);
     expect(at(cells, 4, HU)).toBe("2");
     expect(at(cells, 4, B)).toBe(false);
-    expect(at(cells, 5, R)).toEqual({ formula: "SUM(R3:R5)" });
+    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
     expect(at(cells, 6, 0)).toBe(CUMULATIVE_LABEL);
-    expect(at(cells, 6, R)).toEqual({ formula: "R6" });
-    // Denike (row 3) is not in the feed's week: stamped, kept.
+    expect((at(cells, 6, R) as { formula: string }).formula).toContain("IFERROR(1*R3:R7,0)");
+    // Denike (row 3) is not in the feed's week: stamped, kept, greyed — and out of the totals via the SUMIF.
     expect(at(cells, 3, HY)).toBe(SYNC_STATUS_STALE);
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 3 && r.style === "stale"))).toBe(true);
     expect(plan.summary.weeks[0]).toMatchObject({ existing: true, added: ["Wayne/2 Main St/Customer 2"], updated: ["Wayne/1 Main St/Customer 1"], notThisWeek: ["Old Tappan/84 Willow/Denike"] });
   });
   it("puts a missing older week after the existing block and a newer one before it", () => {
