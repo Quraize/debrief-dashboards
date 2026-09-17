@@ -233,10 +233,11 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   cumulative: { backgroundColor: rgb("92D050"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
   // The month block is the platform's own; navy on white so it never reads as a week.
   summary: { backgroundColor: rgb("2E4877"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("FFFFFF") } },
-  // A job row whose install moved to another week: kept for the team's cells,
-  // out of the totals, and greyed so the eye skips it. Text only — the row's
-  // own fills (a hand-applied red, say) are left as they are.
-  stale: { textFormat: { italic: true, foregroundColor: rgb("9CA3AF") } },
+  // A job row whose install moved to another week: kept for the team's cells
+  // and out of the totals. Plain black text — a grey was tried and vanished
+  // against the team's hand-applied fills; this also restores rows greyed by
+  // that earlier push. Fills are never touched.
+  stale: { textFormat: { italic: false, foregroundColor: rgb("000000") } },
 };
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {

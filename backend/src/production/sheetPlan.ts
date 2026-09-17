@@ -192,9 +192,9 @@ function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellW
  *   - skip the other blocks' Weekly Total and Cumulative rows (sums, not jobs);
  *   - skip rows stamped not-this-week;
  *   - a number in the money column counts, anything else is 0;
- *   - divide by how many times the row's Job # (AC) appears across BOTH
- *     ranges, so a job in two blocks contributes half from each; a row with
- *     no Job # (a hand-added job) divides by 1.
+ *   - divide by how many LIVE rows (not stamped) carry the row's Job # (AC)
+ *     across BOTH ranges, so a job in two blocks contributes half from each;
+ *     a row with no Job # (a hand-added job) divides by 1.
  *
  * `ownJobs` and `below` are 0-based inclusive row spans; `below` is null for
  * the month's oldest block.
@@ -203,13 +203,19 @@ function cumulativeRowCells(rowIdx: number, ownJobs: [number, number] | null, be
   const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: CUMULATIVE_LABEL }];
   const spans = [ownJobs, below].filter((x): x is [number, number] => x !== null && x[1] >= x[0]);
   const ac = (sp: [number, number]) => `AC${sp[0] + 1}:AC${sp[1] + 1}`;
+  const hy = (sp: [number, number]) => `HY${sp[0] + 1}:HY${sp[1] + 1}`;
   for (const L of TOTALLED) {
     const terms = spans.map((sp) => {
       const s = sp[0] + 1, e = sp[1] + 1;
       const A = `A${s}:A${e}`, HY = `HY${s}:HY${e}`, AC = ac(sp);
-      const counts = spans.map((other) => `COUNTIF(${ac(other)},${AC}&"")`).join("+");
+      // How many LIVE rows carry this Job #, across both ranges. Stamped rows
+      // must not count: a job that moved from last week to this one has a live
+      // row here and a stamped twin there, and counting the twin halved it.
+      const counts = spans.map((other) => `COUNTIFS(${ac(other)},${AC}&"",${hy(other)},"<>${SYNC_STATUS_STALE}")`).join("+");
+      // Denominator is never 0: a blank Job # divides by 1, and a stamped row
+      // (numerator already 0) gets +1 so a job with no live row is not 0/0.
       return `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")*(${HY}<>"${SYNC_STATUS_STALE}")`
-        + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*(${counts})+(${AC}="")))`;
+        + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*(${counts})+(${AC}="")+(${HY}="${SYNC_STATUS_STALE}")))`;
     });
     out.push({ row: rowIdx, col: IDX[L]!, value: terms.length ? { formula: terms.join("+") } : 0 });
   }

@@ -83,8 +83,10 @@ describe("planSheet on an empty tab", () => {
     expect(cum).toContain("IFERROR(1*R3:R3,0)");
     expect(cum).toContain("IFERROR(1*R6:R11,0)");
     expect(cum).toContain(`(HY6:HY11<>"Not on the JobProgress calendar this week")`);
-    expect(cum).toContain('COUNTIF(AC3:AC3,AC3:AC3&"")+COUNTIF(AC6:AC11,AC3:AC3&"")');
-    expect(cum).toContain('COUNTIF(AC3:AC3,AC6:AC11&"")+COUNTIF(AC6:AC11,AC6:AC11&"")');
+    // Only LIVE rows count toward a job's occurrences: a stamped twin must not halve the live row.
+    expect(cum).toContain('COUNTIFS(AC3:AC3,AC3:AC3&"",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC3:AC3&"",HY6:HY11,"<>Not on the JobProgress calendar this week")');
+    expect(cum).toContain('COUNTIFS(AC3:AC3,AC6:AC11&"",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC6:AC11&"",HY6:HY11,"<>Not on the JobProgress calendar this week")');
+    expect(cum).toContain('+(HY6:HY11="Not on the JobProgress calendar this week")))'); // a stamped row never divides by zero
     expect(cum).not.toMatch(/R4\b|R5\b/); // its own total and cumulative rows are not referenced
     const older = (at(cells, 10, R) as { formula: string }).formula;
     expect(older.split("SUMPRODUCT(")).toHaveLength(2);
