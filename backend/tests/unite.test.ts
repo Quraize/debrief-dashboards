@@ -51,7 +51,10 @@ describe("uniteConfig", () => {
   it("needs both halves of the credential and defaults the URLs", () => {
     expect(uniteConfig({})).toMatchObject({ configured: false, reason: "INTERMEDIA_CLIENT_ID not set" });
     expect(uniteConfig({ INTERMEDIA_CLIENT_ID: "a" })).toMatchObject({ configured: false, reason: "INTERMEDIA_CLIENT_SECRET not set" });
-    const c = uniteConfig({ INTERMEDIA_CLIENT_ID: "a", INTERMEDIA_CLIENT_SECRET: "b", INTERMEDIA_API_BASE: "https://api.intermedia.net/" });
+    // compose passes unset variables as "": that must mean the vendor's defaults.
+    const c = uniteConfig({ INTERMEDIA_CLIENT_ID: "a", INTERMEDIA_CLIENT_SECRET: "b", INTERMEDIA_TOKEN_URL: "", INTERMEDIA_API_BASE: "https://api.intermedia.net/" });
+    expect(uniteConfig({ INTERMEDIA_CLIENT_ID: "a", INTERMEDIA_CLIENT_SECRET: "b", INTERMEDIA_TOKEN_URL: "", INTERMEDIA_API_BASE: "" }).config)
+      .toMatchObject({ tokenUrl: "https://login.intermedia.net/user/connect/token", apiBase: "https://api.intermedia.net" });
     expect(c.configured).toBe(true);
     expect(c.config).toMatchObject({ tokenUrl: "https://login.intermedia.net/user/connect/token", apiBase: "https://api.intermedia.net" });
     expect(iso(new Date("2026-09-17T00:00:00Z"))).toBe("2026-09-17T00:00:00.000Z");

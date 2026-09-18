@@ -46,8 +46,10 @@ export function uniteConfig(env: NodeJS.ProcessEnv = process.env): { configured:
   const config: UniteConfig = {
     clientId: (env.INTERMEDIA_CLIENT_ID ?? "").trim(),
     clientSecret: (env.INTERMEDIA_CLIENT_SECRET ?? "").trim(),
-    tokenUrl: (env.INTERMEDIA_TOKEN_URL ?? DEFAULT_TOKEN_URL).trim(),
-    apiBase: (env.INTERMEDIA_API_BASE ?? DEFAULT_API_BASE).trim().replace(/\/+$/, ""),
+    // `||`, not `??`: docker compose passes an unset variable as "" and an
+    // empty address must mean "the vendor's default", not "sign in at ''".
+    tokenUrl: ((env.INTERMEDIA_TOKEN_URL ?? "").trim() || DEFAULT_TOKEN_URL),
+    apiBase: ((env.INTERMEDIA_API_BASE ?? "").trim() || DEFAULT_API_BASE).replace(/\/+$/, ""),
   };
   if (!config.clientId) return { configured: false, reason: "INTERMEDIA_CLIENT_ID not set", config };
   if (!config.clientSecret) return { configured: false, reason: "INTERMEDIA_CLIENT_SECRET not set", config };
