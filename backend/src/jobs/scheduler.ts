@@ -27,6 +27,8 @@ import { runJobStageSync } from "../production/syncJobStages.js";
 import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 import { runDebriefReminders, reminderSchedule, type ReminderRunResult } from "../reminders/debriefReminders.js";
 import { pushWeeklyJobSheet, sheetPushSettings, type SheetPushResult } from "../production/sheetPush.js";
+import { runUniteCallSync, type UniteSyncCounts } from "../integrations/intermedia/syncCalls.js";
+import { uniteConfig } from "../integrations/intermedia/client.js";
 
 export const SYNC_QUEUE = "leap-sync";
 /** Production calendar mirror: short window, frequent, independent of the
@@ -53,6 +55,13 @@ const SHEET_PUSH_JOB_OPTS: PgBoss.SendOptions = {
   retryLimit: 1,
   retryDelay: 300,
   expireInSeconds: 900,
+};
+/** Phone system (Intermedia Unite): outside calls into the mirror, every 15 min. */
+export const UNITE_CALLS_QUEUE = "unite-calls";
+const UNITE_CALLS_DEFAULT_CRON = "*/15 * * * *";
+const UNITE_CALLS_JOB_OPTS: PgBoss.SendOptions = {
+  retryLimit: 0,          // the next tick is the retry; upserts make re-runs harmless
+  expireInSeconds: 600,
 };
 /** Debrief reminder emails: every 15 min, independent of the syncs. */
 export const DEBRIEF_REMINDER_QUEUE = "debrief-reminders";
@@ -231,6 +240,27 @@ export function customerSyncSchedule(): { enabled: boolean; cron: string; reason
   }
   if (!process.env.LEAP_API_TOKEN) return { enabled: false, cron, reason: "LEAP_API_TOKEN not set" };
   return { enabled: true, cron, reason: "" };
+}
+
+/** On when the Unite service account is on file; UNITE_SYNC_ENABLED=false turns it off. */
+export function uniteSyncSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const cron = process.env.UNITE_SYNC_CRON ?? UNITE_CALLS_DEFAULT_CRON;
+  const c = uniteConfig();
+  if (!c.configured) return { enabled: false, cron, reason: c.reason };
+  if (process.env.UNITE_SYNC_ENABLED === "false") return { enabled: false, cron, reason: "UNITE_SYNC_ENABLED is false" };
+  return { enabled: true, cron, reason: "" };
+}
+
+export async function handleUniteCallSyncJob(
+  deps: { sync?: typeof runUniteCallSync } = {},
+): Promise<UniteSyncCounts> {
+  const sync = deps.sync ?? runUniteCallSync;
+  const result = await sync({ startedBy: "unite-scheduler" });
+  if (result.status === "failed") throw new Error(result.errorMessage ?? "unite call sync failed");
+  console.info(
+    `[scheduler] unite calls: ${result.counts.calls_examined} examined, ${result.counts.calls_upserted} stored, `
+    + `${result.counts.calls_internal_skipped} internal skipped, ${result.counts.calls_matched_now} matched now, ${result.counts.calls_unmatched_total} still unmatched`);
+  return result.counts;
 }
 
 export async function handleCustomerSyncJob(
@@ -444,6 +474,27 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       CUSTOMER_SYNC_QUEUE,
       { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
       async () => handleCustomerSyncJob(),
+    );
+  }
+
+  // ── Phone system (Intermedia Unite) ──
+  const uniteQueue = await instance.getQueue(UNITE_CALLS_QUEUE);
+  if (!uniteQueue) {
+    await instance.createQueue(UNITE_CALLS_QUEUE, { name: UNITE_CALLS_QUEUE, policy: "singleton" });
+  }
+  const unite = uniteSyncSchedule();
+  if (unite.enabled) {
+    await instance.schedule(UNITE_CALLS_QUEUE, unite.cron, { startedBy: "unite-scheduler" }, { ...UNITE_CALLS_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${UNITE_CALLS_QUEUE} scheduled: "${unite.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(UNITE_CALLS_QUEUE);
+    console.info(`[scheduler] unite call sync disabled (${unite.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(
+      UNITE_CALLS_QUEUE,
+      { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
+      async () => handleUniteCallSyncJob(),
     );
   }
 

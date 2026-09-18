@@ -19,6 +19,8 @@ import { runCustomerSync } from "../jobs/syncCustomers.js";
 import { runDebriefReminders, sendTestReminder, reminderStatus, sendMissingDebriefDigest } from "../reminders/debriefReminders.js";
 import { uniteConfig } from "../integrations/intermedia/client.js";
 import { probeUnite } from "../integrations/intermedia/probe.js";
+import { runUniteCallSync, uniteMirrorStatus } from "../integrations/intermedia/syncCalls.js";
+import { uniteSyncSchedule } from "../jobs/scheduler.js";
 import { EMAIL_RE } from "../reminders/mailer.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -147,7 +149,16 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
         // ── Phone system (Intermedia Unite) ──
         case "getUniteStatus": {
           const c = uniteConfig();
-          return reply.send({ configured: c.configured, reason: c.reason, apiBase: c.config.apiBase });
+          const mirror = await uniteMirrorStatus();
+          return reply.send({ configured: c.configured, reason: c.reason, apiBase: c.config.apiBase, schedule: uniteSyncSchedule(), mirror });
+        }
+
+        case "syncUniteCalls": {
+          // The same run the scheduler makes every 15 minutes, now.
+          console.info(`[functions] syncUniteCalls by=${actor} ip=${ctx.ip}`);
+          const result = await runUniteCallSync({ startedBy: `manual:${actor}` });
+          if (result.status === "failed") return reply.code(502).send({ error: "The Unite call sync failed.", detail: result.errorMessage, ...result });
+          return reply.send(result);
         }
 
         case "testUniteConnection": {

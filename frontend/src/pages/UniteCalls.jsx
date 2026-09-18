@@ -7,11 +7,11 @@
  * It stores nothing and shows no full phone numbers.
  */
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
-import { Phone, Loader2, PlugZap, CheckCircle2, XCircle, Lock } from "lucide-react";
+import { Phone, Loader2, PlugZap, CheckCircle2, XCircle, Lock, RefreshCw } from "lucide-react";
 
 export default function UniteCalls() {
   const { user } = useAuth();
@@ -19,6 +19,23 @@ export default function UniteCalls() {
   const isAdmin = !!user && user.role === "admin";
   const [probing, setProbing] = useState(false);
   const [result, setResult] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const qc = useQueryClient();
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const res = await base44.functions.invoke("syncUniteCalls", {});
+      setSyncResult(res.data);
+      qc.invalidateQueries({ queryKey: ["unite-status"] });
+      toast({ title: "Calls synced", description: `${res.data.counts.calls_upserted} call(s) stored, ${res.data.counts.calls_matched_now} matched to a lead on this run.` });
+    } catch (err) {
+      toast({ title: "Call sync failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const { data: status } = useQuery({
     queryKey: ["unite-status"],
@@ -49,8 +66,40 @@ export default function UniteCalls() {
         <div className="bg-primary rounded-lg w-10 h-10 flex items-center justify-center"><Phone className="w-5 h-5 text-primary-foreground" /></div>
         <div>
           <h1 className="text-2xl font-heading font-bold text-primary">Phone System — Intermedia Unite</h1>
-          <p className="text-sm text-muted-foreground">Call recordings and transcripts into the debrief platform. Phase 0: prove the connection.</p>
+          <p className="text-sm text-muted-foreground">Call recordings and transcripts into the debrief platform. Phase 1: every outside call, matched to its lead.</p>
         </div>
+      </div>
+
+      {/* The mirror: what the platform holds, and the sync that fills it. */}
+      <div className="bg-white rounded-xl border border-border p-4 shadow-sm space-y-3">
+        <div className="flex items-center gap-2"><RefreshCw className="w-4 h-4 text-primary" /><h2 className="font-heading font-bold text-sm text-primary">Call mirror</h2></div>
+        {status?.mirror ? (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <Card label="Extensions" value={String(status.mirror.users)} lines={["people and lines on Unite"]} />
+              <Card label="Outside calls stored" value={String(status.mirror.calls)}
+                lines={[status.mirror.oldest ? `since ${new Date(status.mirror.oldest).toLocaleDateString()}` : "none yet", status.mirror.newest ? `newest ${new Date(status.mirror.newest).toLocaleString()}` : ""].filter(Boolean)} />
+              <Card label="Matched to a lead" value={status.mirror.calls ? `${Math.round((status.mirror.matched / status.mirror.calls) * 100)}%` : "—"}
+                lines={[`${status.mirror.matched} call(s) · ${status.mirror.customersWithCalls} lead(s)`, "by the customer's phone number in JobProgress"]} />
+              <Card label="Schedule" value={status.schedule?.enabled ? "every 15 min" : "off"}
+                lines={[status.schedule?.enabled ? "re-reads the last 48 hours each run" : status.schedule?.reason || "", status.mirror.lastRun ? `last run ${new Date(status.mirror.lastRun.started_at).toLocaleString()} (${status.mirror.lastRun.status})` : "never run"].filter(Boolean)} />
+            </div>
+            {status.mirror.lastRun?.error_message && <p className="text-xs text-red-700">Last run failed: {status.mirror.lastRun.error_message}</p>}
+          </>
+        ) : <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />}
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={syncNow} disabled={syncing || !status?.configured}
+            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Sync calls now
+          </button>
+          <span className="text-xs text-muted-foreground">Users, then every outside call of the last 48 hours, then matching to leads. Internal extension-to-extension calls are not kept.</span>
+        </div>
+        {syncResult && (
+          <p className="text-xs text-muted-foreground">
+            Last manual run: {syncResult.counts.calls_examined} call(s) read · {syncResult.counts.calls_upserted} stored · {syncResult.counts.calls_internal_skipped} internal skipped ·
+            {" "}{syncResult.counts.calls_without_number} with no usable number · {syncResult.counts.calls_matched_now} matched on this run · {syncResult.counts.calls_unmatched_total} still unmatched overall.
+          </p>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-border p-4 shadow-sm space-y-3">
