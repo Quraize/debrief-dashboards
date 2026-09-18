@@ -128,6 +128,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Map tiles for the production boards. Optional: without a key the maps
       # fall back to a keyless provider. See backend/.env.example.
+      INTERMEDIA_CLIENT_ID: ${INTERMEDIA_CLIENT_ID:-}
+      INTERMEDIA_CLIENT_SECRET: ${INTERMEDIA_CLIENT_SECRET:-}
+      INTERMEDIA_TOKEN_URL: ${INTERMEDIA_TOKEN_URL:-}
+      INTERMEDIA_API_BASE: ${INTERMEDIA_API_BASE:-}
       MAPTILER_KEY: ${MAPTILER_KEY:-}
       MAPTILER_STYLE: ${MAPTILER_STYLE:-streets-v2}
       MAP_TILE_URL: ${MAP_TILE_URL:-}

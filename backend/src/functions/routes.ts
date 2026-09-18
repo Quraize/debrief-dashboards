@@ -17,6 +17,8 @@ import { runSyncExclusive, enqueueBackfill, syncStatus, lastQueueRun, DEBRIEF_RE
 import { scanContractPrices, approveCandidate, rejectCandidate } from "../jobs/contractPrices.js";
 import { runCustomerSync } from "../jobs/syncCustomers.js";
 import { runDebriefReminders, sendTestReminder, reminderStatus, sendMissingDebriefDigest } from "../reminders/debriefReminders.js";
+import { uniteConfig } from "../integrations/intermedia/client.js";
+import { probeUnite } from "../integrations/intermedia/probe.js";
 import { EMAIL_RE } from "../reminders/mailer.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -140,6 +142,18 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
             const e = err as Error & { statusCode?: number };
             return reply.code(e.statusCode ?? 502).send({ error: "The mail server did not accept the digest.", detail: e.message });
           }
+        }
+
+        // ── Phone system (Intermedia Unite) ──
+        case "getUniteStatus": {
+          const c = uniteConfig();
+          return reply.send({ configured: c.configured, reason: c.reason, apiBase: c.config.apiBase });
+        }
+
+        case "testUniteConnection": {
+          // Signs in to each Unite API and reports what is there. Stores nothing.
+          console.info(`[functions] testUniteConnection by=${actor} ip=${ctx.ip}`);
+          return reply.send(await probeUnite());
         }
 
         case "syncCustomers": {

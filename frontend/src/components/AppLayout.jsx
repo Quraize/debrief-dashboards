@@ -37,6 +37,7 @@ const ADMIN_OPERATIONS = [
   { to: "/price-review", label: "Price Review", icon: BadgeDollarSign, badge: "priceReview",
     badgeTitle: (n) => `${n} contract price${n === 1 ? "" : "s"} waiting to be approved or rejected` },
   { to: "/debrief-reminders", label: "Debrief Reminders", icon: BellRing },
+  { to: "/phone-system", label: "Phone System", icon: PhoneCall },
   { to: "/users", label: "Users", icon: UsersIcon },
 ];
 

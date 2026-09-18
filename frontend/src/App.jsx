@@ -33,6 +33,7 @@ import ProductionSchedule from '@/production/ProductionSchedule';
 import ProductionJobs from '@/production/ProductionJobs';
 import WeeklyJobSheet from '@/production/WeeklyJobSheet';
 import DebriefApprovals from '@/pages/DebriefApprovals';
+import UniteCalls from '@/pages/UniteCalls';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -97,6 +98,7 @@ const AuthenticatedApp = () => {
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
           <Route path="/price-review" element={<PriceReview />} />
           <Route path="/debrief-reminders" element={<DebriefReminders />} />
+          <Route path="/phone-system" element={<UniteCalls />} />
           <Route path="/production/schedule" element={<ProductionSchedule />} />
           <Route path="/production/jobs" element={<ProductionJobs />} />
           <Route path="/production/weekly-job-sheet" element={<WeeklyJobSheet />} />
