@@ -16,7 +16,7 @@ import { JobProgressClient } from "../integrations/jobprogress/client.js";
 import { runSyncExclusive, enqueueBackfill, syncStatus, lastQueueRun, DEBRIEF_REMINDER_QUEUE } from "../jobs/scheduler.js";
 import { scanContractPrices, approveCandidate, rejectCandidate } from "../jobs/contractPrices.js";
 import { runCustomerSync } from "../jobs/syncCustomers.js";
-import { runDebriefReminders, sendTestReminder, reminderStatus } from "../reminders/debriefReminders.js";
+import { runDebriefReminders, sendTestReminder, reminderStatus, sendMissingDebriefDigest } from "../reminders/debriefReminders.js";
 import { EMAIL_RE } from "../reminders/mailer.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -125,6 +125,21 @@ export function registerFunctionRoutes(app: FastifyInstance): void {
           const dryRun = body["dry_run"] !== false;
           console.info(`[functions] runDebriefReminders dry_run=${dryRun} by=${actor} ip=${ctx.ip}`);
           return reply.send(await runDebriefReminders({ dryRun, startedBy: dryRun ? actor : `manual:${actor}` }));
+        }
+
+        case "sendMissingDebriefDigest": {
+          // One email listing everything in the Missing Debrief queue. dry_run
+          // (default true) returns the list without sending.
+          const to = String(body["to"] ?? "").trim();
+          const dryRun = body["dry_run"] !== false;
+          if (!EMAIL_RE.test(to)) return reply.code(400).send({ error: "Enter a valid email address to send the digest to." });
+          console.info(`[functions] sendMissingDebriefDigest to=${to} dry_run=${dryRun} by=${actor} ip=${ctx.ip}`);
+          try {
+            return reply.send(await sendMissingDebriefDigest({ to, dryRun, sentBy: actor }));
+          } catch (err) {
+            const e = err as Error & { statusCode?: number };
+            return reply.code(e.statusCode ?? 502).send({ error: "The mail server did not accept the digest.", detail: e.message });
+          }
         }
 
         case "syncCustomers": {

@@ -21,7 +21,7 @@
  */
 import { withServiceRole } from "../db/client.js";
 import { officeDateTime, OFFICE_TIMEZONE } from "../integrations/jobprogress/time.js";
-import { createMailer, mailerConfig, type Mailer } from "./mailer.js";
+import { createMailer, mailerConfig, EMAIL_RE, type Mailer } from "./mailer.js";
 
 export const REMINDER_DEFAULT_CRON = "*/15 * * * *";
 export const DEFAULT_DELAY_HOURS = 2;
@@ -42,6 +42,9 @@ export function reminderSettings(env: NodeJS.ProcessEnv = process.env) {
     baseUrl: (env.APP_BASE_URL || "https://debrief.alliedroofingusa.com").replace(/\/+$/, ""),
     supportContact: env.DEBRIEF_REMINDER_SUPPORT_CONTACT || "IT / Automation Support",
     cron: env.DEBRIEF_REMINDER_CRON || REMINDER_DEFAULT_CRON,
+    // Copied on EVERY rep reminder (the ops manager). Comma-separated; bad
+    // addresses are dropped rather than failing every send.
+    copyTo: (env.DEBRIEF_REMINDER_CC ?? "").split(/[,;\s]+/).map((x) => x.trim()).filter((x) => EMAIL_RE.test(x)),
   };
 }
 
@@ -197,6 +200,8 @@ export interface ReminderRunResult {
   /** Rep names on due appointments with no active recipient email. */
   unmatchedReps: string[];
   items: { jp_appointment_id: string; customer_name: string | null; sales_rep: string; starts_at: string; to: string | null; outcome: string }[];
+  /** Who was copied on every message this run. */
+  copyTo: string[];
 }
 
 export async function runDebriefReminders(options: {
@@ -207,7 +212,7 @@ export async function runDebriefReminders(options: {
   const now = options.now ?? new Date();
   const dryRun = options.dryRun ?? false;
   const startedBy = options.startedBy ?? "scheduler";
-  const base: ReminderRunResult = { status: "completed", dryRun, due: 0, sent: 0, failed: 0, noRecipient: 0, deferred: 0, unmatchedReps: [], items: [] };
+  const base: ReminderRunResult = { status: "completed", dryRun, due: 0, sent: 0, failed: 0, noRecipient: 0, deferred: 0, unmatchedReps: [], items: [], copyTo: s.copyTo };
 
   if (!dryRun && !options.ignoreQuietHours && isQuietHours(now, s.quietStartHour, s.quietEndHour)) {
     return { ...base, status: "quiet_hours" };
@@ -231,17 +236,19 @@ export async function runDebriefReminders(options: {
     budget--;
     let status: "sent" | "failed" = "sent";
     let error: string | null = null;
+    // The manager's copy rides on the rep's message: one email, two inboxes.
+    const cc = s.copyTo.filter((x) => x.toLowerCase() !== to.toLowerCase()).join(", ") || undefined;
     try {
-      await mailer!.send({ to, subject: content.subject, text: content.text, html: content.html });
+      await mailer!.send({ to, ...(cc ? { cc } : {}), subject: content.subject, text: content.text, html: content.html });
     } catch (err) {
       status = "failed";
       error = (err as Error).message.slice(0, 500);
     }
     await withServiceRole(async (c) => {
       await c.query(
-        `INSERT INTO debrief_reminder (jp_appointment_id, appointment_id, rep_name, recipient_email, customer_name, starts_at, subject, status, error, sent_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [r.jp_appointment_id, r.appointment_id, r.sales_rep, to, r.customer_name, r.starts_at, content.subject, status, error, startedBy]);
+        `INSERT INTO debrief_reminder (jp_appointment_id, appointment_id, rep_name, recipient_email, cc, customer_name, starts_at, subject, status, error, sent_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [r.jp_appointment_id, r.appointment_id, r.sales_rep, to, cc ?? null, r.customer_name, r.starts_at, content.subject, status, error, startedBy]);
     }, "reminders:log", { quiet: true });
     if (status === "sent") base.sent++; else base.failed++;
     item.outcome = status === "sent" ? "sent" : `failed: ${error}`;
@@ -272,7 +279,7 @@ export async function sendTestReminder(to: string, sentBy: string, mailer: Maile
 export interface ReminderStatus {
   enabled: boolean; cron: string; reason: string;
   mail: { configured: boolean; reason: string; host: string; port: number; user: string; from: string };
-  settings: { delayHours: number; lookbackDays: number; quietStartHour: number; quietEndHour: number; perRunLimit: number; baseUrl: string; supportContact: string; startDate: string | null };
+  settings: { delayHours: number; lookbackDays: number; quietStartHour: number; quietEndHour: number; perRunLimit: number; baseUrl: string; supportContact: string; startDate: string | null; copyTo: string[] };
   quietHoursNow: boolean;
   dueNow: number;
   dueWithoutRecipient: number;
@@ -306,7 +313,7 @@ export async function reminderStatus(lastRun: ReminderStatus["lastRun"], env = p
   return {
     ...reminderSchedule(env),
     mail: { configured: mail.configured, reason: mail.reason, host: mail.host, port: mail.port, user: mail.user, from: mail.from },
-    settings: { delayHours: s.delayHours, lookbackDays: s.lookbackDays, quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, perRunLimit: s.perRunLimit, baseUrl: s.baseUrl, supportContact: s.supportContact, startDate: s.startDate },
+    settings: { delayHours: s.delayHours, lookbackDays: s.lookbackDays, quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, perRunLimit: s.perRunLimit, baseUrl: s.baseUrl, supportContact: s.supportContact, startDate: s.startDate, copyTo: s.copyTo },
     quietHoursNow: isQuietHours(now, s.quietStartHour, s.quietEndHour),
     dueNow: due.length,
     dueWithoutRecipient: due.filter((d) => !(d.recipient_active && d.recipient_email)).length,
@@ -315,4 +322,136 @@ export async function reminderStatus(lastRun: ReminderStatus["lastRun"], env = p
     last7Days,
     lastRun,
   };
+}
+
+/* ── The missing-debrief digest ── */
+
+/** Past the no-CRM-result window the queue treats an appointment as never run (see shared/debriefQueue.js). */
+export const NO_RESULT_DAYS = 14;
+
+export interface MissingDebrief {
+  jp_appointment_id: string; starts_at: Date; customer_name: string | null; sales_rep: string | null;
+  crm_lead_id: string | null; division: string | null; city: string | null; address: string | null; location: string | null;
+  appointment_id: string | null; reminded: boolean; recipient_email: string | null;
+}
+
+/**
+ * Everything the Open Debrief Queue's "Missing Debrief" view shows right now,
+ * for the digest: sales appointments that have had time to happen (start +
+ * delay), no debrief, not No See / cancelled in the CRM, and not "no result
+ * after 14 days" (the queue treats those as never run). Unlike the reminder
+ * rule it ignores the look-back, the start date, whether a reminder already
+ * went, and whether the rep has an email — the digest is the whole backlog.
+ */
+export async function findMissingDebriefs(now: Date, opts: { delayHours: number; sinceDays?: number }): Promise<MissingDebrief[]> {
+  return withServiceRole(async (c) => {
+    const { rows } = await c.query<MissingDebrief>(
+      `SELECT ja.jp_appointment_id, ja.starts_at, ja.customer_name, ja.sales_rep, ja.crm_lead_id, ja.division, ja.location,
+              a.id AS appointment_id, a.address, a.city,
+              EXISTS (SELECT 1 FROM debrief_reminder r WHERE r.jp_appointment_id = ja.jp_appointment_id AND r.status = 'sent') AS reminded,
+              CASE WHEN rec.active THEN rec.email END AS recipient_email
+         FROM jp_appointment ja
+         LEFT JOIN LATERAL (
+           SELECT a.id, a.address, a.city, a.debrief_status FROM appointment a
+            WHERE ja.crm_lead_id IS NOT NULL AND a.crm_lead_id IS NOT NULL
+              AND allied_norm(a.crm_lead_id) = allied_norm(ja.crm_lead_id)
+              AND a.appointment_date = ja.appointment_date
+            ORDER BY (a.debrief_status IN ('Submitted','Approved','Needs Review')) DESC, a.created_at
+            LIMIT 1) a ON true
+         LEFT JOIN debrief_reminder_recipient rec ON rec.rep_key = allied_norm(ja.sales_rep)
+        WHERE ja.is_sales_type
+          AND ja.deleted_at IS NULL
+          AND ja.starts_at IS NOT NULL
+          AND ja.starts_at <= $1::timestamptz - make_interval(hours => $2)
+          AND ja.starts_at >= $1::timestamptz - make_interval(days => $3)
+          AND NOT (ja.has_result AND coalesce(ja.result_option_name, '') ~* 'no\\s*see|no\\s*show|cancel')
+          AND coalesce(ja.title, '') !~* 'cancel'
+          AND NOT (NOT ja.has_result AND ja.starts_at < $1::timestamptz - make_interval(days => $4))
+          AND coalesce(a.debrief_status, 'Missing') IN ('Missing', 'Unmatched')
+          AND NOT EXISTS (
+            SELECT 1 FROM debrief d
+             WHERE (a.id IS NOT NULL AND d.appointment_id = a.id)
+                OR (d.appointment_record_id IS NOT NULL AND lower(trim(d.appointment_record_id)) = ja.jp_appointment_id)
+                OR (d.appointment_id IS NULL AND coalesce(d.appointment_record_id, '') = ''
+                    AND ja.crm_lead_id IS NOT NULL AND d.crm_lead_id IS NOT NULL
+                    AND lower(trim(d.crm_lead_id)) = lower(trim(ja.crm_lead_id))
+                    AND d.appointment_date = ja.appointment_date))
+        ORDER BY ja.starts_at`,
+      [now, opts.delayHours, opts.sinceDays ?? 120, NO_RESULT_DAYS]);
+    return rows;
+  }, "reminders:find-missing", { quiet: true });
+}
+
+export interface DigestContent { subject: string; text: string; html: string; count: number }
+
+export function composeDigest(rows: MissingDebrief[], settings: { baseUrl: string }, now: Date): DigestContent {
+  const today = officeDateTime(now).date;
+  const dayOf = (d: Date) => officeDateTime(d).date;
+  const daysOpen = (d: Date) => Math.max(0, Math.round((Date.parse(today) - Date.parse(dayOf(d))) / 86_400_000));
+  const queueUrl = `${settings.baseUrl}/queue`;
+  const subject = `Missing debriefs: ${rows.length} open as of ${usDate(today)}`;
+  const line = (r: MissingDebrief) => {
+    const { date, time } = officeDateTime(r.starts_at);
+    const place = [r.address || r.location, r.city].filter(Boolean).join(", ");
+    return { when: `${usDate(date)} ${clock(time)}`, customer: r.customer_name || "—", rep: r.sales_rep || "— (no rep)", place, job: r.crm_lead_id || "", days: daysOpen(r.starts_at), reminded: r.reminded, noEmail: !r.recipient_email };
+  };
+  const lines = rows.map(line);
+  const text = [
+    `Missing debriefs — ${rows.length} open as of ${usDate(today)}`,
+    ``,
+    ...lines.map((l) => `${l.when}  ${l.customer}  ·  ${l.rep}${l.place ? `  ·  ${l.place}` : ""}${l.job ? `  ·  Job ${l.job}` : ""}  ·  ${l.days} day${l.days === 1 ? "" : "s"} open${l.reminded ? "" : "  ·  rep not yet reminded"}${l.noEmail ? "  ·  rep has no email on file" : ""}`),
+    ``,
+    `Open the queue: ${queueUrl}`,
+    ``,
+    `— Allied Roofing Debriefs (digest sent on request; the reps are reminded individually two hours after each appointment)`,
+  ].join("\n");
+  const cell = "padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:13px;vertical-align:top";
+  const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937">
+  <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:28px">
+    <p style="margin:0 0 6px;font-size:18px;font-weight:bold">Missing debriefs — ${rows.length} open</p>
+    <p style="margin:0 0 18px;font-size:13px;color:#6b7280">As of ${esc(usDate(today))}. Sales appointments that have happened and have no debrief filed. No Sees, cancellations and appointments with no CRM result after ${NO_RESULT_DAYS} days are not listed.</p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="text-align:left;color:#6b7280;font-size:11px;text-transform:uppercase">
+        <th style="${cell}">Appointment</th><th style="${cell}">Customer</th><th style="${cell}">Rep</th><th style="${cell}">Where</th><th style="${cell}">Job #</th><th style="${cell};text-align:right">Days open</th>
+      </tr></thead>
+      <tbody>${lines.map((l) => `<tr>
+        <td style="${cell};white-space:nowrap">${esc(l.when)}</td><td style="${cell}"><strong>${esc(l.customer)}</strong></td>
+        <td style="${cell}">${esc(l.rep)}${l.noEmail ? `<br><span style="color:#b45309;font-size:11px">no email on file</span>` : ""}${l.reminded ? "" : `<br><span style="color:#6b7280;font-size:11px">not yet reminded</span>`}</td>
+        <td style="${cell}">${esc(l.place)}</td><td style="${cell};white-space:nowrap">${esc(l.job)}</td>
+        <td style="${cell};text-align:right;font-weight:bold;color:${l.days >= 7 ? "#b91c1c" : "#1f2937"}">${l.days}</td></tr>`).join("")}</tbody>
+    </table>
+    <p style="margin:24px 0;text-align:center"><a href="${esc(queueUrl)}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 28px;border-radius:8px">Open the Debrief Queue</a></p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+    <p style="margin:0;font-size:12px;color:#9ca3af">Allied Roofing Debriefs — digest sent on request. Reps are reminded individually two hours after each appointment.</p>
+  </div></body></html>`;
+  return { subject, text, html, count: rows.length };
+}
+
+export interface DigestResult {
+  dryRun: boolean; to: string; count: number; subject: string;
+  items: { jp_appointment_id: string; starts_at: string; customer_name: string | null; sales_rep: string | null; reminded: boolean; recipient_email: string | null }[];
+}
+
+/** One email to `to` listing every missing debrief in the queue right now; logged as 'digest'. */
+export async function sendMissingDebriefDigest(options: {
+  to: string; dryRun?: boolean; sentBy: string; mailer?: Mailer | null; env?: NodeJS.ProcessEnv; now?: Date;
+}): Promise<DigestResult> {
+  const env = options.env ?? process.env;
+  const s = reminderSettings(env);
+  const now = options.now ?? new Date();
+  const dryRun = options.dryRun ?? true;
+  const rows = await findMissingDebriefs(now, { delayHours: s.delayHours });
+  const content = composeDigest(rows, s, now);
+  const items = rows.map((r) => ({ jp_appointment_id: r.jp_appointment_id, starts_at: r.starts_at.toISOString(), customer_name: r.customer_name, sales_rep: r.sales_rep, reminded: r.reminded, recipient_email: r.recipient_email }));
+  if (dryRun) return { dryRun, to: options.to, count: rows.length, subject: content.subject, items };
+  const mailer = options.mailer === undefined ? createMailer(env) : options.mailer;
+  if (!mailer) throw Object.assign(new Error(`Email is not configured: ${mailerConfig(env).reason}`), { statusCode: 501 });
+  await mailer.send({ to: options.to, subject: content.subject, text: content.text, html: content.html });
+  await withServiceRole(async (c) => {
+    await c.query(
+      `INSERT INTO debrief_reminder (jp_appointment_id, rep_name, recipient_email, customer_name, starts_at, subject, status, sent_by)
+       VALUES ('digest', NULL, $1, $2, now(), $3, 'digest', $4)`,
+      [options.to, `${rows.length} missing debrief(s)`, content.subject, options.sentBy]);
+  }, "reminders:log-digest", { quiet: true });
+  return { dryRun, to: options.to, count: rows.length, subject: content.subject, items };
 }

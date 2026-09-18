@@ -40,6 +40,9 @@ export default function DebriefReminders() {
   });
 
   const [testTo, setTestTo] = useState("");
+  const [digestTo, setDigestTo] = useState("");
+  const [digest, setDigest] = useState(null);
+  const [digesting, setDigesting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
@@ -103,6 +106,21 @@ export default function DebriefReminders() {
     } finally { setSendingNow(false); }
   }
 
+  const digestAddress = digestTo.trim() || (status?.settings?.copyTo?.[0] ?? "");
+  async function runDigest(dryRun) {
+    setDigesting(true);
+    try {
+      const res = await base44.functions.invoke("sendMissingDebriefDigest", { to: digestAddress, dry_run: dryRun });
+      setDigest(res.data);
+      if (!dryRun) toast({ title: "Digest sent", description: `"${res.data.subject}" was accepted by the mail server for ${digestAddress}.` });
+      qc.invalidateQueries({ queryKey: ["reminder-log"] });
+    } catch (err) {
+      toast({ title: dryRun ? "Could not build the digest" : "Digest failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDigesting(false);
+    }
+  }
+
   const s = status;
   return (
     <div className="space-y-4">
@@ -133,6 +151,9 @@ export default function DebriefReminders() {
               </div>
               <div><span className="font-semibold">Quiet hours:</span> {clock(s.settings.quietStartHour)} – {clock(s.settings.quietEndHour)} Eastern{s.quietHoursNow ? <span className="text-amber-700 font-medium"> (now)</span> : ""}</div>
               <div><span className="font-semibold">Last run:</span> {s.lastRun ? `${fmtWhen(s.lastRun.completed_on)} (${s.lastRun.state})` : "never"}</div>
+              <div title="Set DEBRIEF_REMINDER_CC in the server's env file; comma-separated."><span className="font-semibold">Copied on every reminder:</span>{" "}
+                {s.settings.copyTo?.length ? <span className="font-medium">{s.settings.copyTo.join(", ")}</span> : <span className="text-muted-foreground">nobody</span>}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
               <div><span className="font-semibold">Due now:</span> <span className={s.dueNow > 0 ? "font-bold text-primary" : "text-muted-foreground"}>{s.dueNow}</span>
@@ -194,6 +215,54 @@ export default function DebriefReminders() {
                         <td className="px-3 py-1.5">{i.sales_rep}</td>
                         <td className="px-3 py-1.5">{i.to || <span className="text-amber-700">no recipient</span>}</td>
                         <td className={`px-3 py-1.5 ${i.outcome.startsWith("failed") ? "text-red-600" : i.outcome === "no recipient" ? "text-amber-700" : ""}`}>{i.outcome}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Missing-debrief digest */}
+      <div className="bg-white rounded-xl border border-border p-4 shadow-sm space-y-3">
+        <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /><h2 className="font-heading font-bold text-sm text-primary">Missing-debrief digest</h2></div>
+        <p className="text-xs text-muted-foreground">
+          One email listing everything in the Open Debrief Queue's Missing Debrief view right now — every rep, whether or not they have been reminded. For a manager catching up on the backlog. Preview first; nothing is sent until you press Send.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground block mb-1">Send the digest to</label>
+            <input type="email" value={digestTo} onChange={(e) => setDigestTo(e.target.value)} placeholder={s?.settings?.copyTo?.[0] || "manager@alliednj.com"}
+              className="border border-input rounded-lg px-3 py-2 text-sm font-medium bg-white w-72" />
+          </div>
+          <button onClick={() => runDigest(true)} disabled={digesting || !EMAIL_RE.test(digestAddress)}
+            className="bg-white border border-border rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
+            {digesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} Preview the list
+          </button>
+          <button onClick={() => runDigest(false)} disabled={digesting || !digest || digest.count === 0 || !EMAIL_RE.test(digestAddress) || !s?.mail?.configured}
+            title={digest ? `Send ${digest.count} item(s) to ${digestAddress}` : "Preview first"}
+            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
+            {digesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send digest
+          </button>
+        </div>
+        {digest && (
+          <div className="text-sm">
+            <div className="text-xs text-muted-foreground mb-1">
+              {digest.dryRun ? "Preview" : "Sent"}: <span className="font-semibold text-foreground">{digest.count}</span> missing debrief(s) · subject "{digest.subject}"
+            </div>
+            {digest.items.length > 0 && (
+              <div className="overflow-x-auto border border-border rounded-lg max-h-80 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-muted-foreground bg-secondary/50"><th className="px-3 py-1.5">Appointment</th><th className="px-3 py-1.5">Customer</th><th className="px-3 py-1.5">Rep</th><th className="px-3 py-1.5">Rep reminded?</th></tr></thead>
+                  <tbody>
+                    {digest.items.map((i) => (
+                      <tr key={i.jp_appointment_id} className="border-t border-border/50">
+                        <td className="px-3 py-1.5 whitespace-nowrap">{fmtWhen(i.starts_at)}</td>
+                        <td className="px-3 py-1.5">{i.customer_name || "—"}</td>
+                        <td className="px-3 py-1.5">{i.sales_rep || <span className="text-amber-700">no rep</span>}{!i.recipient_email && i.sales_rep ? <span className="text-amber-700"> (no email on file)</span> : ""}</td>
+                        <td className="px-3 py-1.5">{i.reminded ? "yes" : <span className="text-muted-foreground">not yet</span>}</td>
                       </tr>
                     ))}
                   </tbody>

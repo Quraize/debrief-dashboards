@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   isQuietHours, composeReminder, reminderSchedule, findDueReminders, runDebriefReminders, sendTestReminder, reminderStatus,
+  reminderSettings, findMissingDebriefs, composeDigest, sendMissingDebriefDigest,
 } from "../src/reminders/debriefReminders.js";
 import { mailerConfig, type Mailer, type MailMessage } from "../src/reminders/mailer.js";
 import { createTestDb, pgReachable, requirePg, type TestDb } from "./helpers/db.js";
@@ -215,6 +216,72 @@ describe.skipIf(!reachable)("runDebriefReminders", () => {
     const r = await runDebriefReminders({ now: NOW, mailer, env: { DEBRIEF_REMINDER_PER_RUN_LIMIT: "3" } });
     expect(r).toMatchObject({ due: 4, sent: 3, deferred: 1 });
     expect(await runDebriefReminders({ now: NOW, mailer })).toMatchObject({ due: 1, sent: 1 });
+  });
+
+  it("copies the manager on every rep reminder, never on herself, and logs who was copied", async () => {
+    expect(reminderSettings({ DEBRIEF_REMINDER_CC: "Ashley@alliednj.com, bad-address ;ops@alliednj.com" }).copyTo).toEqual(["Ashley@alliednj.com", "ops@alliednj.com"]);
+    expect(reminderSettings({}).copyTo).toEqual([]);
+    await recipient("Jason Malarchak", "jason@example.com");
+    await recipient("Ashley Pascual", "ashley@alliednj.com"); // the manager also runs appointments
+    await jp("j1");
+    await jp("a1", { sales_rep: "Ashley Pascual" });
+    const mailer = fakeMailer();
+    const r = await runDebriefReminders({ now: NOW, mailer, startedBy: "test", env: { DEBRIEF_REMINDER_CC: "ashley@alliednj.com" } });
+    expect(r).toMatchObject({ sent: 2, copyTo: ["ashley@alliednj.com"] });
+    const byTo = Object.fromEntries(mailer.sent.map((m) => [m.to, m.cc ?? null]));
+    expect(byTo).toEqual({ "jason@example.com": "ashley@alliednj.com", "ashley@alliednj.com": null });
+    const { rows } = await db.owner.query(`SELECT recipient_email, cc FROM debrief_reminder ORDER BY recipient_email`);
+    expect(rows).toEqual([{ recipient_email: "ashley@alliednj.com", cc: null }, { recipient_email: "jason@example.com", cc: "ashley@alliednj.com" }]);
+    // No CC configured: the message carries no cc field at all.
+    await jp("j2");
+    await runDebriefReminders({ now: NOW, mailer, startedBy: "test", env: {} });
+    expect("cc" in mailer.sent.at(-1)!).toBe(false);
+  });
+
+  it("digests the whole Missing Debrief queue for a manager, and only sends when asked", async () => {
+    await recipient("Jason Malarchak", "jason@example.com");
+    await jp("open");                                                           // due, not yet reminded
+    await jp("reminded");                                                       // reminded already: still missing, still listed
+    await db.owner.query(`INSERT INTO debrief_reminder (jp_appointment_id, status, sent_by) VALUES ('reminded','sent','t')`);
+    await jp("old-open", { starts_at: hoursAgo(24 * 20), has_result: true, result_option_name: "Demo No Sale" }); // outside the reminder look-back, ran, no debrief
+    await jp("no-rep", { sales_rep: null });                                    // the queue shows it; the reminder rule cannot
+    await jp("unknown-rep", { sales_rep: "Somebody New" });
+    await jp("too-recent", { starts_at: hoursAgo(1) });                         // not yet had time to happen
+    await jp("no-see", { has_result: true, result_option_name: "No See" });
+    await jp("cancelled", { title: "CANCELLED ROOF EST" });
+    await jp("no-result-old", { starts_at: hoursAgo(24 * 20), has_result: false }); // no CRM result after 14 days: the queue drops it
+    await jp("debriefed");
+    await db.owner.query(
+      `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_outcome, crm_lead_id, created_by)
+       VALUES ('t','x',$1,'Jason','Ashley','Demo Completed — Sale','l-debriefed','t')`, [hoursAgo(3).toISOString().slice(0, 10)]);
+
+    const missing = await findMissingDebriefs(NOW, { delayHours: 2 });
+    expect(missing[0]!.jp_appointment_id).toBe("old-open"); // oldest first
+    expect(missing.map((m) => m.jp_appointment_id).sort()).toEqual(["no-rep", "old-open", "open", "reminded", "unknown-rep"]);
+    expect(missing.find((m) => m.jp_appointment_id === "reminded")!.reminded).toBe(true);
+    expect(missing.find((m) => m.jp_appointment_id === "unknown-rep")!.recipient_email).toBeNull();
+
+    const content = composeDigest(missing, { baseUrl: "https://debrief.example.com" }, NOW);
+    expect(content.subject).toBe("Missing debriefs: 5 open as of 09/08/2026");
+    expect(content.text).toContain("Customer open");
+    expect(content.text).toContain("— (no rep)");
+    expect(content.text).toContain("rep not yet reminded");
+    expect(content.html).toContain("https://debrief.example.com/queue");
+    expect(content.html).toContain(">20<"); // days open for the 20-day-old one
+
+    const mailer = fakeMailer();
+    const dry = await sendMissingDebriefDigest({ to: "ashley@alliednj.com", dryRun: true, sentBy: "admin", mailer, now: NOW });
+    expect(dry).toMatchObject({ dryRun: true, count: 5 });
+    expect(mailer.sent).toHaveLength(0);
+    const sent = await sendMissingDebriefDigest({ to: "ashley@alliednj.com", dryRun: false, sentBy: "admin", mailer, now: NOW });
+    expect(sent.count).toBe(5);
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]).toMatchObject({ to: "ashley@alliednj.com", subject: content.subject });
+    const { rows } = await db.owner.query(`SELECT jp_appointment_id, status, recipient_email, customer_name, sent_by FROM debrief_reminder WHERE status = 'digest'`);
+    expect(rows).toEqual([{ jp_appointment_id: "digest", status: "digest", recipient_email: "ashley@alliednj.com", customer_name: "5 missing debrief(s)", sent_by: "admin" }]);
+    // The digest never marks an appointment as reminded: the rep's own reminder still goes out.
+    expect((await findDueReminders(NOW, { delayHours: 2, lookbackDays: 14 })).map((d) => d.jp_appointment_id)).toContain("open");
+    await expect(sendMissingDebriefDigest({ to: "a@b.co", dryRun: false, sentBy: "admin", mailer: null, env: {}, now: NOW })).rejects.toMatchObject({ statusCode: 501 });
   });
 
   it("sends a labelled test message and logs it; reports status for the admin page", async () => {

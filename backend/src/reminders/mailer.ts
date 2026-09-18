@@ -10,6 +10,8 @@ import nodemailer from "nodemailer";
 
 export interface MailMessage {
   to: string;
+  /** Copied addresses, e.g. the ops manager on every rep reminder. */
+  cc?: string;
   subject: string;
   text: string;
   html: string;
