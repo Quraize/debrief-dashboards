@@ -41,8 +41,10 @@ export async function probeUnite(options: { env?: NodeJS.ProcessEnv; client?: Un
 
   // 1. Users — also the source of the unified user ids the recordings API needs.
   let users: UniteContact[] = [];
+  let signedIn = false;
   try {
     await client.token(SCOPES.addressBook);
+    signedIn = true;
     step("Sign in — Address Book", true, `scope ${SCOPES.addressBook}`);
     const all = await client.listAccountContacts();
     users = all.filter((u) => u.pbx?.extension);
@@ -52,7 +54,7 @@ export async function probeUnite(options: { env?: NodeJS.ProcessEnv; client?: Un
     };
     step("List account users", true, `${all.length} contact(s), ${users.length} with an extension`);
   } catch (err) {
-    step(users.length ? "List account users" : "Sign in — Address Book", false, (err as Error).message);
+    step(signedIn ? "List account users" : "Sign in — Address Book", false, (err as Error).message);
   }
 
   // 2. Yesterday's calls, one record per call.

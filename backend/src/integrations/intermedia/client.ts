@@ -147,7 +147,9 @@ export class UniteClient {
     for (let page = 0; page < 50; page++) {
       const body = await this.request<{ results?: UniteContact[]; nextPageOffsetToken?: string }>(
         SCOPES.addressBook, "/address-book/v3/accounts/_me/contacts", "address-book:contacts",
-        { query: { count: 1000, offsetToken, fields: "id,type,displayName,email,phoneNumbers,pbx" } });
+        // No `fields` filter: the live API rejected a name from the spec's own
+        // list ("The given value is not supported"), and the full contact is small.
+        { query: { count: 1000, offsetToken } });
       out.push(...(body.results ?? []));
       offsetToken = body.nextPageOffsetToken || undefined;
       if (!offsetToken) break;
