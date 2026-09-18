@@ -19,6 +19,7 @@ const apiCustomer = (over: Record<string, unknown> = {}) => ({
   referred_by: { id: 34041, name: "Networx Direct Calls" },
   call_center_rep_type: "user", call_center_rep: "", canvasser_type: "", canvasser: "",
   address: { id: 1, address: "29 Carter Road", city: "West Orange", state: { id: 30, code: "NJ" }, zip: "07052" },
+  phones: [{ id: 1, label: "cell", number: "(201) 555-0134" }, { id: 2, label: "home", number: "+1 201-555-0134" }, { id: 3, label: "office", number: "973.555.0100 x4" }, { id: 4, label: "other", number: "n/a" }],
   created_at: "2026-08-30 14:02:11", updated_at: "2026-09-02 09:15:40",
   ...over,
 });
@@ -33,6 +34,13 @@ describe("mapCustomer", () => {
     });
     expect(row.jp_created_at?.toISOString()).toBe("2026-08-30T14:02:11.000Z");
     expect(hasNoSource(row)).toBe(false);
+    // Phones: keyed, de-duplicated across spellings, junk dropped, extension stripped.
+    expect(row.phones).toEqual([
+      { key: "2015550134", label: "cell", raw: "(201) 555-0134" },
+      { key: "9735550100", label: "office", raw: "973.555.0100 x4" },
+    ]);
+    expect(mapCustomer(apiCustomer({ phones: [] }))!.phones).toEqual([]);
+    expect(mapCustomer(apiCustomer({ phones: undefined }))!.phones).toEqual([]);
   });
 
   it("handles existing-customer referrals, notes, trailing spaces, and objects for reps", () => {
@@ -107,7 +115,13 @@ describe.skipIf(!reachable)("runCustomerSync", () => {
     expect(result.counts).toMatchObject({
       referrals_examined: 3, referrals_upserted: 3, marketing_sources_added: 2, // Networx + Home Avengers; Bing already there
       customers_examined: 2, customers_created: 2, customers_updated: 0, customers_without_source: 1,
+      phones_upserted: 4, customers_without_phone: 0,
     });
+    const phones = await db.owner.query(`SELECT jp_customer_id, phone_key, label FROM jp_customer_phone ORDER BY jp_customer_id, phone_key`);
+    expect(phones.rows).toEqual([
+      { jp_customer_id: "9001", phone_key: "2015550134", label: "cell" }, { jp_customer_id: "9001", phone_key: "9735550100", label: "office" },
+      { jp_customer_id: "9002", phone_key: "2015550134", label: "cell" }, { jp_customer_id: "9002", phone_key: "9735550100", label: "office" },
+    ]);
     const opts = await db.owner.query(`SELECT value, created_by FROM list_option WHERE category = 'marketing_source' ORDER BY value`);
     expect(opts.rows.map((r) => r.value)).toEqual(["Bing Paid - WR", "Home Avengers", "Networx Direct Calls"]);
     expect(opts.rows.find((r) => r.value === "Home Avengers")?.created_by).toBe("jobprogress-sync");
@@ -115,10 +129,15 @@ describe.skipIf(!reachable)("runCustomerSync", () => {
     expect(run.rows[0]).toEqual({ kind: "customers", status: "completed" });
   });
 
-  it("is idempotent", async () => {
+  it("is idempotent, and drops a number the CRM no longer has", async () => {
     const result = await runCustomerSync({ client: stubClient(stub), startedBy: "test" });
     expect(result.counts).toMatchObject({ customers_created: 0, customers_updated: 2, marketing_sources_added: 0 });
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM jp_customer`)).rows[0].n).toBe(2);
+    expect((await db.owner.query(`SELECT count(*)::int AS n FROM jp_customer_phone`)).rows[0].n).toBe(4);
+    // The office line is removed from customer 9002 in the CRM: gone from the mirror on the next sweep.
+    const trimmed: Stub = { ...stub, calls: [], customers: [stub.customers[0]!, { ...stub.customers[1]!, phones: [{ id: 1, label: "cell", number: "201-555-0134" }] }] };
+    await runCustomerSync({ client: stubClient(trimmed), startedBy: "test" });
+    expect((await db.owner.query(`SELECT phone_key FROM jp_customer_phone WHERE jp_customer_id = '9002'`)).rows).toEqual([{ phone_key: "2015550134" }]);
     expect((await db.owner.query(`SELECT count(*)::int AS n FROM list_option WHERE category = 'marketing_source'`)).rows[0].n).toBe(3);
   });
 

@@ -16,6 +16,7 @@ import { withServiceRole } from "../db/client.js";
 import { JobProgressClient, unwrap } from "../integrations/jobprogress/client.js";
 import { parseApiTimestamp } from "../production/syncSchedules.js";
 import { sweepLeadJobs } from "./syncLeads.js";
+import { phoneKey } from "@allied/shared/phone";
 
 export interface CustomerSyncCounts {
   referrals_examined: number;
@@ -26,6 +27,9 @@ export interface CustomerSyncCounts {
   customers_updated: number;
   customers_without_source: number;
   customers_skipped: number;
+  // Phone numbers stored for call matching, and customers with none usable.
+  phones_upserted: number;
+  customers_without_phone: number;
   // The lead sweep (syncLeads.ts) rides along: jobs created this year, any stage.
   leads_examined: number;
   leads_upserted: number;
@@ -65,12 +69,35 @@ export interface CustomerRow {
   jp_created_at: Date | null;
   jp_updated_at: Date | null;
   raw: Record<string, unknown>;
+  /** Every usable number on the customer, keyed (shared/phone.js), de-duplicated. */
+  phones: CustomerPhone[];
+}
+
+export interface CustomerPhone { key: string; label: string | null; raw: string }
+
+/**
+ * The customer's `phones` array (label + number) reduced to matching keys. A
+ * number that is not a North American ten-digit number is dropped — it can
+ * never match a call, and the raw payload keeps it anyway.
+ */
+export function customerPhones(api: Record<string, unknown>): CustomerPhone[] {
+  const list = Array.isArray(api["phones"]) ? api["phones"] as unknown[] : [];
+  const out: CustomerPhone[] = [];
+  for (const item of list) {
+    const p = unwrap(item);
+    const raw = p ? str(p["number"]) : str(item);
+    const key = raw ? phoneKey(raw) : null;
+    if (!key || out.some((x) => x.key === key)) continue;
+    out.push({ key, label: p ? str(p["label"]) : null, raw: raw! });
+  }
+  return out;
 }
 
 const emptyCounts = (): CustomerSyncCounts => ({
   referrals_examined: 0, referrals_upserted: 0, marketing_sources_added: 0,
   customers_examined: 0, customers_created: 0, customers_updated: 0,
   customers_without_source: 0, customers_skipped: 0, leads_examined: 0, leads_upserted: 0,
+  phones_upserted: 0, customers_without_phone: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
 
@@ -115,6 +142,7 @@ export function mapCustomer(api: Record<string, unknown>): CustomerRow | null {
     jp_created_at: parseApiTimestamp(api["created_at"]),
     jp_updated_at: parseApiTimestamp(api["updated_at"]),
     raw: api,
+    phones: customerPhones(api),
   };
 }
 
@@ -205,6 +233,19 @@ async function upsertCustomers(rows: CustomerRow[], counts: CustomerSyncCounts):
         if (out[0]?.inserted) counts.customers_created++;
         else counts.customers_updated++;
         if (hasNoSource(r)) counts.customers_without_source++;
+        // Phones: upsert what the CRM has now, drop what it no longer has.
+        if (r.phones.length === 0) counts.customers_without_phone++;
+        for (const p of r.phones) {
+          await c.query(
+            `INSERT INTO jp_customer_phone (jp_customer_id, phone_key, label, raw_number, last_seen_at)
+             VALUES ($1,$2,$3,$4,now())
+             ON CONFLICT (jp_customer_id, phone_key) DO UPDATE SET label = EXCLUDED.label, raw_number = EXCLUDED.raw_number, last_seen_at = now()`,
+            [r.jp_customer_id, p.key, p.label, p.raw]);
+          counts.phones_upserted++;
+        }
+        await c.query(
+          `DELETE FROM jp_customer_phone WHERE jp_customer_id = $1 AND NOT (phone_key = ANY($2::text[]))`,
+          [r.jp_customer_id, r.phones.map((p) => p.key)]);
       }
     }, "customers:upsert", { quiet: true });
   }

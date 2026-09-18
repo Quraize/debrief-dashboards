@@ -319,7 +319,8 @@ export class JobProgressClient {
    */
   async listCustomers(): Promise<Record<string, unknown>[]> {
     return this.collect<Record<string, unknown>>("/customers", {
-      "includes[]": ["referred_by", "address"],
+      // phones: the numbers a call is matched to a lead by (jp_customer_phone).
+      "includes[]": ["referred_by", "address", "phones"],
     }, "customers");
   }
 
