@@ -68,7 +68,7 @@ interface Row {
   division: string | null; trades: string | null; is_insurance: boolean;
   current_stage: string | null; stage_last_modified: Date | null;
   rep_names: string | null; appointment_rep: string | null; sub_contractor_names: string | null;
-  contract_signed_date: string | null; completion_date: string | null; first_install_day: string | null;
+  contract_signed_date: string | null; completion_date: string | null;
   install_days: string[] | null; today: string; visits: { day: string; code: string | null }[] | null;
   crews: string[] | null;
   total_job_price: string | null; total_change_order_amount: string | null; total_job_revenue: string | null;
@@ -141,7 +141,6 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
             j.division, j.trades, j.is_insurance, j.current_stage, j.stage_last_modified,
             j.rep_names, NULL::text AS appointment_rep, j.sub_contractor_names,
             j.contract_signed_date::text, j.completion_date::text,
-            (sch.first_start AT TIME ZONE $1)::date::text AS first_install_day,
             sch.days AS install_days, sch.visits, (now() AT TIME ZONE $1)::date::text AS today,
             crew.names AS crews,
             j.total_job_price::text, j.total_change_order_amount::text, j.total_job_revenue::text,
@@ -152,8 +151,7 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
        LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
        LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
        LEFT JOIN LATERAL (
-         SELECT min(s.start_at) AS first_start,
-                array_agg(DISTINCT (s.start_at AT TIME ZONE $1)::date::text ORDER BY (s.start_at AT TIME ZONE $1)::date::text) AS days,
+         SELECT array_agg(DISTINCT (s.start_at AT TIME ZONE $1)::date::text ORDER BY (s.start_at AT TIME ZONE $1)::date::text) AS days,
                 json_agg(json_build_object('day', (s.start_at AT TIME ZONE $1)::date::text, 'code', s.job_type_code) ORDER BY s.start_at) AS visits
            FROM jp_schedule s
           WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
@@ -199,6 +197,7 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
     const totalPayments = money(r.total_payment_received);
     const pay = paymentBreakdown(r.payments ?? []);
     const bill = billBreakdown(r.bills ?? []);
+    const installVisitDays = [...new Set((r.visits ?? []).filter((v) => isInstallCode(v.code)).map((v) => v.day))].sort();
     const base = {
       jobId: r.jp_job_id, customerId: r.jp_customer_id, jobNumber: r.job_number, jobName: r.job_name,
       customer: r.customer_name, address: r.address, city: r.city,
@@ -211,9 +210,13 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
       stageSince: r.stage_last_modified ? r.stage_last_modified.toISOString() : null,
       salesRep: r.appointment_rep ?? r.rep_names,
       sub: r.sub_contractor_names ?? (r.crews && r.crews.length ? r.crews.join(", ") : null),
-      scheduledInstallDate: r.first_install_day, saleDate: r.contract_signed_date, completionDate: r.completion_date,
+      // Install dates come from INSTALL visits only (RR, SR, GUTTERS…). The
+      // calendar also carries site assessments and check-ins, which happen
+      // before the sale; taking the earliest visit of any kind put a site
+      // assessment in "Scheduled Install Date" and made it precede the sale.
+      scheduledInstallDate: installVisitDays[0] ?? null, saleDate: r.contract_signed_date, completionDate: r.completion_date,
       installDates: r.install_days ?? [],
-      nextInstallDate: (r.install_days ?? []).find((d) => d >= r.today) ?? null,
+      nextInstallDate: installVisitDays.find((d) => d >= r.today) ?? null,
       visits: r.visits ?? [],
       gross, changeOrders, totalRev,
       paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,

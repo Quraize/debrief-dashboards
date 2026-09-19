@@ -221,7 +221,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
               ('S2', '1', 'RR: day 2', 'RR', '2026-08-29 12:00+00', '2026-08-29 20:00+00', '{Lucy}'),
               ('S3', '2', 'RR: Wayne/2 Main St/Joseph Lorent', 'RR', '2026-09-03 12:00+00', '2026-09-03 20:00+00', '{DNC,Manny}'),
               ('S4', '2', 'RR: cancelled visit', 'RR', '2026-08-20 12:00+00', '2026-08-20 20:00+00', '{Ghost}'),
-              ('S5', '1', 'MS REPAIR: Wayne/1 Main St/George Golab', 'MS REPAIR', '2026-09-04 12:00+00', '2026-09-04 16:00+00', '{Matt}')`);
+              ('S5', '1', 'MS REPAIR: Wayne/1 Main St/George Golab', 'MS REPAIR', '2026-09-04 12:00+00', '2026-09-04 16:00+00', '{Matt}'),
+              ('S6', '2', 'MSSA: Wayne/2 Main St/Joseph Lorent', 'MSSA', '2026-07-18 13:00+00', '2026-07-18 14:00+00', '{Joe}')`);
     await db.owner.query(`UPDATE jp_schedule SET deleted_at = now() WHERE jp_schedule_id = 'S4'`);
     // Job 2's sale was run by Joe; the job's own Rep list (none here) would not know that.
     await db.owner.query(
@@ -247,8 +248,9 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     });
     expect(one!["jpUrl"]).toContain("/customer-jobs/9001/job/1");
     // No sub on the job: the crews on its live schedules stand in; the retired visit's crew does not.
+    // The 7/18 site assessment (before the 7/20 sale) is a visit, not an install: the install date is the 9/3 RR.
     expect(two).toMatchObject({
-      jobId: "2", salesRep: "Joe Mittiga", sub: "DNC, Manny", scheduledInstallDate: "2026-09-03",
+      jobId: "2", salesRep: "Joe Mittiga", sub: "DNC, Joe, Manny", scheduledInstallDate: "2026-09-03",
       gross: 4552, changeOrders: 150.5, totalRev: 4702.5, totalPayments: 2276, balanceOwed: 2426.5,
       paymentMethod: "Credit Card", deposit: 2276, progressPayments: null, paymentsCount: 1,
       materialVendor: null, containerScheduled: false, subScheduled: true, actualMaterial: null, billsCount: 0,
@@ -304,7 +306,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(job.getCell("BM").value).toMatchObject({ formula: 'IF(COUNT(BH3:BL3)=0,"",SUM(BH3:BL3))' });
     expect(ws.getCell("A4").value).toBe("Weekly Total");
     expect((ws.getCell("R4").value as { formula: string }).formula).toBe("SUM(R3:R3)");
-    expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("9/3/2026 RR");
+    expect(wb.getWorksheet("JP DETAIL")!.getRow(2).getCell(8).value).toBe("7/18/2026 MSSA, 9/3/2026 RR"); // every visit, install or not
     expect(wb.getWorksheet("About")).toBeTruthy();
 
     // No week → every tracked job and no week row; a malformed week → 400; a sales rep → 403.
