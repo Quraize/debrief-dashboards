@@ -137,7 +137,15 @@ export default function UniteCalls() {
               <Card label={`Calls on ${result.calls.window}`} value={String(result.calls.total)}
                 lines={[`${result.calls.inbound} inbound · ${result.calls.outbound} outbound · ${result.calls.internal} internal`, `${result.calls.matchableNumbers} with an outside number we could match to a lead`]} />
               <Card label="Recordings" value={result.recordings.listed == null ? "—" : String(result.recordings.listed)}
-                lines={[result.recordings.user ? `for ${result.recordings.user}` : "no user tested", result.recordings.newest ? `newest ${new Date(result.recordings.newest).toLocaleString()}` : ""].filter(Boolean)} />
+                lines={[result.recordings.user ? `for ${result.recordings.user}` : "no user tested", result.recordings.newest ? `newest ${new Date(result.recordings.newest).toLocaleString()}` : "",
+                  result.autoAttendant?.user ? `${result.autoAttendant.user}: ${result.autoAttendant.listed == null ? "error" : `${result.autoAttendant.listed} listed`}` : ""].filter(Boolean)} />
+            </div>
+            <div className={`rounded-xl border p-3 text-sm ${result.audio?.ok ? "border-green-200 bg-green-50 text-green-900" : result.audio?.tried ? "border-red-200 bg-red-50 text-red-900" : "border-border bg-secondary/40"}`}>
+              <div className="text-[11px] uppercase tracking-wide font-semibold opacity-80">Can we download the audio?</div>
+              <div className="font-semibold mt-0.5">{result.audio?.ok ? "Yes" : result.audio?.tried ? "No" : "Not tested"} <span className="font-normal opacity-80">— {result.audio?.detail}</span></div>
+              <div className="text-xs mt-1 opacity-80">This decides Phases 2 and 3: if the audio downloads, we can transcribe calls ourselves without the Contact Center add-on.</div>
+            </div>
+            <div className="hidden">
             </div>
             {result.calls.sample.length > 0 && (
               <div className="overflow-x-auto border border-border rounded-lg">

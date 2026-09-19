@@ -185,13 +185,22 @@ export class UniteClient {
     return body.records ?? [];
   }
 
-  /** The audio itself, as the vendor streams it (mp3 in the documented example). */
-  async recordingContent(unifiedUserId: string, recordingId: number | string): Promise<Response> {
+  /**
+   * The audio itself, as the vendor streams it (mp3 in the documented example).
+   * `rangeBytes` asks for only the first N bytes — enough to prove the download
+   * works without pulling a whole call.
+   */
+  async recordingContent(unifiedUserId: string, recordingId: number | string, opts: { rangeBytes?: number } = {}): Promise<Response> {
     const token = await this.token(SCOPES.recordings);
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (opts.rangeBytes) headers["Range"] = `bytes=0-${opts.rangeBytes - 1}`;
     const res = await this.fetchImpl(
       `${this.cfg.apiBase}/voice/v2/accounts/_me/users/${encodeURIComponent(unifiedUserId)}/call-recordings/${encodeURIComponent(String(recordingId))}/_content`,
-      { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new UniteError(`Unite voice:recording-content: HTTP ${res.status}`, res.status, "voice:recording-content");
+      { headers });
+    if (!res.ok) {
+      const hint = res.status === 403 ? " (forbidden — recording download may not be enabled for this account)" : "";
+      throw new UniteError(`Unite voice:recording-content: HTTP ${res.status}${hint} ${(await safeText(res)).slice(0, 200)}`, res.status, "voice:recording-content");
+    }
     return res;
   }
 }

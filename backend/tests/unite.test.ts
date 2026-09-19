@@ -8,7 +8,7 @@ import { probeUnite } from "../src/integrations/intermedia/probe.js";
 
 const CFG = { clientId: "id-1", clientSecret: "s3cret", tokenUrl: "https://login.test/token", apiBase: "https://api.test" };
 
-function fakeUnite(opts: { failScope?: string } = {}) {
+function fakeUnite(opts: { failScope?: string; noAudio?: boolean } = {}) {
   const log: { url: string; method: string; auth: string | null; body: string | null }[] = [];
   let tokenCalls = 0;
   const json = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => data, text: async () => JSON.stringify(data) }) as unknown as Response;
@@ -27,6 +27,7 @@ function fakeUnite(opts: { failScope?: string } = {}) {
       return json({ results: [
         { id: "u-jason", type: "user", displayName: "Jason Malarchak", email: "j@x", phoneNumbers: [{ type: "Phone", number: "+1 201 555 0100", internationalFormatNumber: "+12015550100" }], pbx: { enabled: true, extension: "408" } },
         { id: "u-ashley", type: "user", displayName: "Ashley Pascual", email: "a@x", phoneNumbers: [], pbx: { enabled: true, extension: "404" } },
+        { id: "u-aa", type: "user", displayName: "Allied AA Day", email: null, phoneNumbers: [], pbx: { enabled: true, extension: "500" } },
         { id: "room-1", type: "room", displayName: "Conference Room", email: null, phoneNumbers: [], pbx: null },
       ] });
     }
@@ -39,7 +40,13 @@ function fakeUnite(opts: { failScope?: string } = {}) {
       ] : [];
       return json({ calls, totalCalls: 3 });
     }
+    if (u.endsWith("/_content")) {
+      if (opts.noAudio) return json({ title: "forbidden" }, 403);
+      const bytes = new Uint8Array(4096);
+      return { ok: true, status: 206, headers: new Headers({ "content-type": "audio/mpeg" }), arrayBuffer: async () => bytes.buffer, text: async () => "" } as unknown as Response;
+    }
     if (u.includes("/call-recordings")) {
+      if (u.includes("/u-aa/")) return json({ records: [] });
       return json({ records: [{ id: 9001, fileName: "x/y/2026_Sep_17.mp3", duration: 312, callId: "g1", whenCreated: "2026-09-17T14:07:23+00:00", direction: "incoming", wasPaused: false, status: "active", caller: { phoneNumber: "2015550134", displayName: "CUSTOMER" } }] });
     }
     return json({ title: "not found" }, 404);
@@ -99,11 +106,15 @@ describe("probeUnite", () => {
     const r = await probeUnite({ env: { INTERMEDIA_CLIENT_ID: "id-1", INTERMEDIA_CLIENT_SECRET: "s3cret" }, client, now: new Date("2026-09-18T13:00:00Z") });
     expect(r.configured).toBe(true);
     expect(r.steps.every((s) => s.ok)).toBe(true);
-    expect(r.users).toMatchObject({ total: 3, withExtension: 2 });
+    expect(r.users).toMatchObject({ total: 4, withExtension: 3 });
     expect(r.users.sample[0]).toEqual({ name: "Jason Malarchak", extension: "408" });
     expect(r.calls).toMatchObject({ window: "2026-09-17 (UTC day)", total: 3, inbound: 1, outbound: 1, internal: 1, matchableNumbers: 2 });
     expect(r.calls.sample[0]).toEqual({ start: "2026-09-17T14:02:11Z", direction: "inbound", from: "(201) •••-0134", to: "408…", seconds: 312 });
     expect(r.recordings).toEqual({ user: "Jason Malarchak", listed: 1, newest: "2026-09-17T14:07:23+00:00" });
+    // The download is what decides Phases 2 and 3: proven with a ranged request, never the whole file.
+    expect(r.audio).toMatchObject({ tried: true, ok: true, status: 206, contentType: "audio/mpeg", bytes: 4096 });
+    expect(fake.log.find((l) => l.url.endsWith("/_content"))!.url).toContain("/users/u-jason/call-recordings/9001/_content");
+    expect(r.autoAttendant).toMatchObject({ user: "Allied AA Day", listed: 0 });
     expect(JSON.stringify(r)).not.toContain("s3cret");
     expect(JSON.stringify(r)).not.toContain("2015550134");
   });
@@ -116,5 +127,13 @@ describe("probeUnite", () => {
     expect(failed).toHaveLength(1);
     expect(failed[0]).toMatchObject({ name: "Sign in — Analytics" });
     expect(r.recordings.listed).toBe(1); // the recordings check still ran
+  });
+
+  it("reports a refused audio download as its own failed step, not a crash", async () => {
+    const fake = fakeUnite({ noAudio: true });
+    const r = await probeUnite({ env: { INTERMEDIA_CLIENT_ID: "id-1", INTERMEDIA_CLIENT_SECRET: "s3cret" }, client: new UniteClient(CFG, { fetchImpl: fake.fetchImpl }), now: new Date("2026-09-18T13:00:00Z") });
+    expect(r.audio).toMatchObject({ tried: true, ok: false, status: 403 });
+    expect(r.steps.find((s) => s.name === "Download recording audio")).toMatchObject({ ok: false });
+    expect(r.recordings.listed).toBe(1);
   });
 });

@@ -17,6 +17,10 @@ export interface ProbeResult {
   users: { total: number; withExtension: number; sample: { name: string; extension: string | null }[] };
   calls: { window: string; total: number; inbound: number; outbound: number; internal: number; matchableNumbers: number; sample: { start: string; direction: string; from: string; to: string; seconds: number }[] };
   recordings: { user: string | null; listed: number | null; newest: string | null };
+  /** Can the audio actually be downloaded? Decides whether transcription is possible without Contact Center. */
+  audio: { tried: boolean; ok: boolean; status: number | null; contentType: string | null; bytes: number | null; detail: string };
+  /** Recordings listed for an auto attendant, if one is on the account. */
+  autoAttendant: { user: string | null; listed: number | null; detail: string };
 }
 
 const mask = (n: string | null | undefined): string => {
@@ -34,6 +38,8 @@ export async function probeUnite(options: { env?: NodeJS.ProcessEnv; client?: Un
     users: { total: 0, withExtension: 0, sample: [] },
     calls: { window: "", total: 0, inbound: 0, outbound: 0, internal: 0, matchableNumbers: 0, sample: [] },
     recordings: { user: null, listed: null, newest: null },
+    audio: { tried: false, ok: false, status: null, contentType: null, bytes: null, detail: "not tried" },
+    autoAttendant: { user: null, listed: null, detail: "no auto attendant found" },
   };
   if (!c.configured) return result;
   const client = options.client ?? new UniteClient(c.config);
@@ -77,20 +83,50 @@ export async function probeUnite(options: { env?: NodeJS.ProcessEnv; client?: Un
     step(result.steps.some((s) => s.name === "Sign in — Analytics") ? "List yesterday's calls" : "Sign in — Analytics", false, (err as Error).message);
   }
 
-  // 3. Recordings for one user (the API is per user; auto attendants have none here).
-  const first = users[0];
+  // 3. Recordings for one user (the API is per user), then the download itself.
+  // Prefer a person over an auto attendant so the audio test is a real call.
+  const isAA = (u: UniteContact) => /\bAA\b|auto.?attendant/i.test(u.displayName ?? "");
+  const first = users.find((u) => !isAA(u)) ?? users[0];
+  let signedInRec = false;
   try {
     await client.token(SCOPES.recordings);
+    signedInRec = true;
     step("Sign in — Call Recordings", true, `scope ${SCOPES.recordings}`);
     if (first) {
       const recs = await client.listCallRecordings(first.id, { count: 20 });
       result.recordings = { user: first.displayName ?? first.id, listed: recs.length, newest: recs[0]?.whenCreated ?? null };
       step(`List recordings — ${first.displayName ?? first.id}`, true, `${recs.length} listed${recs[0]?.whenCreated ? `, newest ${recs[0].whenCreated}` : ""}`);
+      const newest = recs[0];
+      if (newest) {
+        result.audio.tried = true;
+        try {
+          const res = await client.recordingContent(first.id, newest.id, { rangeBytes: 65_536 });
+          const buf = new Uint8Array(await res.arrayBuffer());
+          result.audio = { tried: true, ok: buf.length > 0, status: res.status, contentType: res.headers.get("content-type"), bytes: buf.length,
+            detail: buf.length > 0 ? `HTTP ${res.status}, ${res.headers.get("content-type") ?? "unknown type"}, ${buf.length} bytes received` : `HTTP ${res.status} but an empty body` };
+          step("Download recording audio", result.audio.ok, result.audio.detail);
+        } catch (err) {
+          result.audio = { tried: true, ok: false, status: (err as { status?: number }).status ?? null, contentType: null, bytes: null, detail: (err as Error).message };
+          step("Download recording audio", false, (err as Error).message);
+        }
+      }
     } else {
       step("List recordings", false, "no user with an extension to test against");
     }
+    // 4. An auto attendant, if the account has one: the spec says none; the account may say otherwise.
+    const aa = users.find(isAA);
+    if (aa) {
+      try {
+        const recs = await client.listCallRecordings(aa.id, { count: 20 });
+        result.autoAttendant = { user: aa.displayName ?? aa.id, listed: recs.length, detail: `${recs.length} listed` };
+        step(`List recordings — ${aa.displayName ?? aa.id} (auto attendant)`, true, `${recs.length} listed`);
+      } catch (err) {
+        result.autoAttendant = { user: aa.displayName ?? aa.id, listed: null, detail: (err as Error).message };
+        step(`List recordings — ${aa.displayName ?? aa.id} (auto attendant)`, false, (err as Error).message);
+      }
+    }
   } catch (err) {
-    step(result.steps.some((s) => s.name === "Sign in — Call Recordings") ? "List recordings" : "Sign in — Call Recordings", false, (err as Error).message);
+    step(signedInRec ? "List recordings" : "Sign in — Call Recordings", false, (err as Error).message);
   }
   return result;
 }
