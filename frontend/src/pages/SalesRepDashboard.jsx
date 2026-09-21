@@ -158,7 +158,9 @@ export default function SalesRepDashboard() {
             <KpiCard label="One-Leg" value={tl.oneLeg} title="Visits where only one decision maker was there, among eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only)." />
             <KpiCard label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"}
               rating={tl.denominator > 0 ? (tl.oneLegRate <= 10 ? "green" : tl.oneLegRate <= 20 ? "yellow" : "red") : null}
-              title={`One-Leg ÷ the same eligible visits Two-Leg uses (${tl.denominator} in this period). Lower is better. Two-Leg is ${tl.denominator > 0 ? teamTwoLegPct + "%" : "—"} — see the breakdown below.`} />
+              title={`One-Leg ÷ the same eligible visits Two-Leg uses (${tl.denominator} in this period). Lower is better.`} />
+            <KpiCard label="Two-Leg %" value={tl.denominator > 0 ? teamTwoLegPct + "%" : "—"}
+              title="Two-Leg count ÷ eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only). The same denominator as One-Leg %, so the two read against each other." />
             <KpiCard label="Demos" value={teamDemos} />
             <KpiCard label="Demo %" value={aq.aqOpportunities > 0 ? teamDemoPct + "%" : "—"} />
             <CountWithChip label="No Demo" value={aq.aqNoDemo} chip={aq.aqAttended > 0 ? aq.noDemoRate + "%" : ""} />
