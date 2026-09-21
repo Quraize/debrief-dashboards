@@ -20,6 +20,7 @@
  * Status column instead.
  */
 import { MASTER_COLUMNS, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
+import { labelLink } from "@allied/shared/weeklyJobSheet";
 import { isInstallCode } from "@allied/shared/production";
 import { stageKey } from "@allied/shared/jobStages";
 import type { SheetRow } from "./weeklyJobSheet.js";
@@ -185,6 +186,8 @@ export function syncedValue(column: Column, row: SheetRow, syncedAt: string | nu
   const v = (row as unknown as Record<string, unknown>)[column.key];
   // The status column is cleared when a job has none, so a tick left from the column's checkbox days goes away.
   if (column.key === "pifStatus") return v ? String(v) : "";
+  // Column A keeps its text and opens the job in JobProgress when clicked.
+  if (column.key === "label") return labelLink(v, row.jpUrl);
   if (column.type === "check") return Boolean(v);
   if (v === null || v === undefined || v === "") return null;
   if (column.type === "date") return dateSerial(String(v));

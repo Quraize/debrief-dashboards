@@ -273,6 +273,21 @@ export function toSheetCsv(rows) {
   return sheetTable(rows).map((cells) => cells.map(csvEscape).join(",")).join("\r\n");
 }
 
+/**
+ * Column A as a link to the job in JobProgress, keeping the text the office
+ * reads: `HYPERLINK("…/job/123/overview","Wayne/1 Main St/Customer")`.
+ *
+ * Google Sheets gives a HYPERLINK cell the VALUE of its label, so the tab's
+ * own formulas (the cumulative row tests column A) and the planner's reading
+ * of the tab are unaffected. Without a URL the label is written as plain text.
+ */
+export function labelLink(label, url) {
+  const text = String(label ?? "");
+  if (!url) return text;
+  const q = (v) => String(v).replace(/"/g, '""');
+  return { formula: `HYPERLINK("${q(url)}","${q(text)}")` };
+}
+
 /** The hand-written key the tab uses in column A today: "Town/Address/Customer". */
 export function rowLabel(row) {
   return [row.city, row.address, row.customer].map((s) => String(s ?? "").trim()).filter(Boolean).join("/");

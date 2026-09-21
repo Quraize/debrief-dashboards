@@ -45,6 +45,8 @@ function cellValue(column: Column, row: SheetRow, meta: WorkbookMeta): ExcelJS.C
   if (column.key === "syncStatus") return "Synced from JobProgress API";
   const v = (row as unknown as Record<string, unknown>)[column.key];
   if (v === null || v === undefined || v === "") return null;
+  // Column A opens the job in JobProgress (it is already drawn in link blue).
+  if (column.key === "label" && row.jpUrl) return { text: String(v), hyperlink: row.jpUrl } as ExcelJS.CellHyperlinkValue;
   if (column.type === "date") return excelDate(String(v));
   if (column.type === "datetime") return new Date(String(v));
   if (column.type === "money" || column.type === "pct") return Number(v);
@@ -112,7 +114,7 @@ export async function buildWeeklySheetWorkbook(rows: SheetRow[], meta: WorkbookM
         cell.value = cellValue(c, row, meta);
       }
       styleCell(cell, c);
-      if (c.key === "label") cell.font = { ...FONT, color: { argb: "FF0000FF" } };
+      if (c.key === "label") cell.font = { ...FONT, color: { argb: "FF0000FF" }, underline: !!row.jpUrl };
       if (c.key === "jpUrl" && typeof cell.value === "string") {
         cell.value = { text: "Open in JobProgress", hyperlink: cell.value };
         cell.font = { ...FONT, color: { argb: "FF1D4ED8" }, underline: true };

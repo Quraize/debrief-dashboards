@@ -286,7 +286,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     // Row 2: the week label, as above each block on the tab. Row 3: the job. Row 4: the total.
     expect(ws.getCell("A2").value).toBe("9/1/2026-9/7/2026");
     const job = ws.getRow(3);
-    expect(job.getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
+    // The town/address/customer cell opens the job in JobProgress.
+    expect(job.getCell("A").value).toEqual({ text: "Wayne/2 Main St/Joseph Lorent", hyperlink: "https://app.jobprogress.com/#/customer-jobs/9002/job/2/overview" });
     expect(job.getCell("B").value).toBe("NO");                  // completed, not paid
     expect(job.getCell("D").value).toBe(true);                  // Job Complete ticked
     expect(job.getCell("AC").value).toBe("2609-2-01");

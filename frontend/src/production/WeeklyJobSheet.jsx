@@ -351,7 +351,9 @@ export default function WeeklyJobSheet() {
                   <tr key={r.jobId} className="border-b border-border/50 hover:bg-secondary/30">
                     {VISIBLE.map((c) => (
                       <td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.type === "money" ? "text-right tabular-nums" : ""} ${c.key === "label" ? "font-semibold text-primary" : ""} ${c.key === "jobNumber" ? "text-xs" : ""}`}>
-                        {cell(c, r)}
+                        {c.key === "label" && r.jpUrl
+                          ? <a href={r.jpUrl} target="_blank" rel="noreferrer" className="hover:underline" title="Open this job in JobProgress">{r.label}</a>
+                          : cell(c, r)}
                         {c.key === "label" && r.insurance && <span className="ml-1 text-[10px] font-bold px-1.5 rounded bg-indigo-100 text-indigo-700">INS</span>}
                       </td>
                     ))}
