@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats,
+  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats, missingDebriefRecords,
   appointmentFlow,
 } from "../src/kpi.js";
 
@@ -159,6 +159,54 @@ describe("twoLegStats", () => {
   it("reports a zero rate rather than dividing by zero", () => {
     expect(twoLegStats([]).rate).toBe(0);
     expect(twoLegStats([]).denominator).toBe(0);
+  });
+
+  it("gives One-Leg its own rate off the same denominator", () => {
+    const s = twoLegStats([
+      retail({ decision_maker_status: "One-Leg" }),
+      retail({ decision_maker_status: "One-Leg" }),
+      retail({ decision_maker_status: "Two-Leg" }),
+      retail({ decision_maker_status: "Two-Leg" }),
+    ]);
+    // The two rates are comparable because they share a denominator; unlike
+    // Two-Leg, a LOW One-Leg rate is the good one.
+    expect(s).toMatchObject({ denominator: 4, oneLeg: 2, twoLeg: 2, oneLegRate: 50, rate: 50 });
+    expect(twoLegStats([]).oneLegRate).toBe(0);
+    // An unanswered record still counts in the denominator, so the rate is honest.
+    expect(twoLegStats([retail({ decision_maker_status: "One-Leg" }), retail({})]).oneLegRate).toBe(50);
+  });
+});
+
+describe("missingDebriefRecords", () => {
+  const NOW = new Date("2026-09-20T12:00:00");
+  const appt = (leadId, date, over = {}) => ({ crm_lead_id: leadId, appointment_date: date, ...over });
+  const deb = (leadId, date, over = {}) => ({ crm_lead_id: leadId, appointment_date: date, appointment_outcome: "Demo Completed — Sale", ...over });
+
+  it("finds appointments in the range that have happened with no debrief filed", () => {
+    const appts = [appt("A1", "2026-09-10"), appt("A2", "2026-09-11"), appt("A3", "2026-09-12")];
+    const debs = [deb("A2", "2026-09-11")];
+    const miss = missingDebriefRecords(debs, appts, "This Month", "", "", NOW);
+    expect(miss.map((a) => a.crm_lead_id)).toEqual(["A1", "A3"]);
+  });
+
+  it("leaves out what is not due, not in the range, not a sales visit and not ours", () => {
+    const appts = [
+      appt("FUTURE", "2026-09-25"),                                   // has not happened yet
+      appt("AUGUST", "2026-08-14"),                                   // outside the range
+      appt("NONSALES", "2026-09-10", { is_sales_appointment: false }), // not a sales visit
+      appt("INS", "2026-09-10", { business_division: "Insurance" }),  // insurance has its own dashboard
+      appt("REAL", "2026-09-10"),
+    ];
+    expect(missingDebriefRecords([], appts, "This Month", "", "", NOW).map((a) => a.crm_lead_id)).toEqual(["REAL"]);
+    // The range follows the dashboard's filter, so a custom range answers for itself.
+    expect(missingDebriefRecords([], appts, "Custom Range", "2026-08-01", "2026-08-31", NOW).map((a) => a.crm_lead_id)).toEqual(["AUGUST"]);
+  });
+
+  it("matches a debrief to its own visit, not to the lead's other visits", () => {
+    // Same lead, two visits: the first debriefed, the reset not.
+    const appts = [appt("A1", "2026-09-05"), appt("A1", "2026-09-12")];
+    const miss = missingDebriefRecords([deb("A1", "2026-09-05")], appts, "This Month", "", "", NOW);
+    expect(miss.map((a) => a.appointment_date)).toEqual(["2026-09-12"]);
   });
 });
 

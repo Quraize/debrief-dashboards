@@ -5,7 +5,7 @@ import DateRangeFilter from "@/components/DateRangeFilter";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
 import {
-  repStatsFromDebriefs, filterByDate, filterByEffectiveSaleDate,
+  repStatsFromDebriefs, filterByDate, filterByEffectiveSaleDate, missingDebriefRecords,
   appointmentQualityStats, twoLegStats, isSale, isAppointmentOpportunity,
   APPOINTMENT_OPPORTUNITIES_DEFINITION,
   DEMO_RATE_DEFINITION, NO_DEMO_RATE_DEFINITION, NO_SEE_RATE_DEFINITION, TWO_LEG_DEFINITION
@@ -16,6 +16,7 @@ import { classifyAppointment, classificationCounts, enrichDebriefsWithTitles } f
 import ClassificationCounts from "@/components/ClassificationCounts";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from "recharts";
 import { Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { JpRepSection, DebriefSectionHeader } from "@/components/JpCrmSection";
 import { countedDebriefs } from "@allied/shared/debriefApproval";
 import { applyDebriefFilters, debriefFilterOptions, activeFilterCount, EMPTY_DEBRIEF_FILTERS } from "@allied/shared/debriefFilters";
@@ -77,6 +78,13 @@ export default function SalesRepDashboard() {
   const teamTwoLegPct = tl.rate;
   const teamSalesPct = teamDemos > 0 ? Math.round((teamSales / teamDemos) * 100) : 0;
   const teamAvgJob = teamSales > 0 ? Math.round(teamRevenue / teamSales) : 0;
+
+  // Appointments in this range that have happened and still have no debrief.
+  // Counted off every debrief, not the filtered section: a debrief is missing
+  // or it is not, and a rep filter must not make one look filed.
+  const missing = useMemo(
+    () => missingDebriefRecords(enrichedDb, appointments, filter, cs, ce).length,
+    [enrichedDb, appointments, filter, cs, ce]);
 
   const isMonth = filter === "This Month";
   // Was hardcoded to "August" and quietly wrong from September onwards.
@@ -147,8 +155,10 @@ export default function SalesRepDashboard() {
           {/* Primary KPI strip — exact order */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <KpiCard label="Appointments" value={teamAppts} title={APPOINTMENT_OPPORTUNITIES_DEFINITION} />
-            <KpiCard label="Two-Leg" value={tl.twoLeg} title="Two-Leg count among eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only). Uses the record's actual Decision Maker Status." />
-            <KpiCard label="Two-Leg %" value={tl.denominator > 0 ? teamTwoLegPct + "%" : "—"} title="Two-Leg count ÷ eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only)." />
+            <KpiCard label="One-Leg" value={tl.oneLeg} title="Visits where only one decision maker was there, among eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only)." />
+            <KpiCard label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"}
+              rating={tl.denominator > 0 ? (tl.oneLegRate <= 10 ? "green" : tl.oneLegRate <= 20 ? "yellow" : "red") : null}
+              title={`One-Leg ÷ the same eligible visits Two-Leg uses (${tl.denominator} in this period). Lower is better. Two-Leg is ${tl.denominator > 0 ? teamTwoLegPct + "%" : "—"} — see the breakdown below.`} />
             <KpiCard label="Demos" value={teamDemos} />
             <KpiCard label="Demo %" value={aq.aqOpportunities > 0 ? teamDemoPct + "%" : "—"} />
             <CountWithChip label="No Demo" value={aq.aqNoDemo} chip={aq.aqAttended > 0 ? aq.noDemoRate + "%" : ""} />
@@ -157,16 +167,20 @@ export default function SalesRepDashboard() {
             <KpiCard label="Sales %" value={teamDemos > 0 ? teamSalesPct + "%" : "0%"} />
             <KpiCard label="Revenue" value={"$" + teamRevenue.toLocaleString()} />
             <KpiCard label="Average Job Size" value={teamSales > 0 ? "$" + teamAvgJob.toLocaleString() : "$0"} />
+            <Link to="/queue" title="Sales appointments in this date range that have already happened and still have no debrief filed. Click to open the queue.">
+              <KpiCard label="Missing Debriefs" value={missing} rating={missing > 0 ? "red" : "green"} />
+            </Link>
           </div>
 
           {/* Two-Leg context — Residential Install only, prevents 1/1 without context */}
           <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-2">Two-Leg Breakdown (Roofing, Siding, Roofing + Siding eligible only)</div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2">
               <MiniStat label="Two-Leg" value={tl.twoLeg} />
               <MiniStat label="Denominator" value={tl.denominator} />
               <MiniStat label="Two-Leg %" value={tl.denominator > 0 ? tl.rate + "%" : "—"} />
               <MiniStat label="One-Leg" value={tl.oneLeg} />
+              <MiniStat label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"} />
               <MiniStat label="Missing Answer" value={tl.missingAnswer} />
               <MiniStat label="Excluded No C/No Show" value={tl.excludedNoCNoShow} />
               <MiniStat label="N/A / Needs Review" value={tl.naNeedsReview} />

@@ -13,6 +13,8 @@ function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 export function safeNum(v) { return num(v); }
 function pct(a, b) { const na = num(a); return b > 0 ? Math.round((na / b) * 100) : 0; }
 function ratePct(val, excellent, good) { if (val === 0) return null; return val >= excellent ? "green" : val >= good ? "yellow" : "red"; }
+/** For rates where LOW is the good number (One-Leg): green at or under `excellent`. */
+function ratePctLow(val, excellent, good) { return val <= excellent ? "green" : val <= good ? "yellow" : "red"; }
 
 const SALE_CLOSE_ACTUAL = ["First Call Close", "Rehash Close", "Follow-Up Close", "Reset Close", "Sale After Follow-Up"];
 
@@ -92,7 +94,14 @@ export function twoLegStats(debriefs) {
            NO_C_NO_SHOW_OUTCOMES.includes(d.appointment_outcome);
   }).length;
   const na = all.length - denominator;
-  return { twoLeg, denominator, oneLeg, missingAnswer, naNeedsReview, na, firstAppts, resetDemos, rehashes, excludedNoCNoShow, rate: denominator > 0 ? Math.round((twoLeg / denominator) * 100) : 0 };
+  return {
+    twoLeg, denominator, oneLeg, missingAnswer, naNeedsReview, na, firstAppts, resetDemos, rehashes, excludedNoCNoShow,
+    rate: denominator > 0 ? Math.round((twoLeg / denominator) * 100) : 0,
+    // The rep went in and only one decision maker was there. Off the same
+    // denominator as Two-Leg, so the two rates are comparable; unlike Two-Leg,
+    // LOW is good, which is why it is rated the other way round on screen.
+    oneLegRate: denominator > 0 ? Math.round((oneLeg / denominator) * 100) : 0,
+  };
 }
 
 export function isSale(d) {
@@ -364,6 +373,27 @@ export function filterByEffectiveSaleDate(items, filter, cs, ce) {
   });
 }
 
+/**
+ * Appointments in the range that have already happened and still have no
+ * debrief — the same rule the Open Debrief Queue works to, expressed against
+ * whatever range a dashboard is showing. Returns the records, so a card can
+ * count them and a page can list them.
+ */
+export function missingDebriefRecords(debriefs, appointments, filter, cs, ce, now = new Date()) {
+  const db = filterByDate(nonInsuranceDebriefs(debriefs), "appointment_date", filter, cs, ce);
+  const filed = new Set();
+  for (const d of db) {
+    if (d.crm_lead_id && d.appointment_date) filed.add(String(d.crm_lead_id).toLowerCase().trim() + "|" + d.appointment_date);
+  }
+  const appts = filterByDate(salesAppointmentsOnly(nonInsuranceAppointments(appointments)), "appointment_date", filter, cs, ce);
+  return appts.filter((a) => {
+    if (!a.appointment_date) return false;
+    const ad = new Date(a.appointment_date + "T00:00:00");
+    if (Number.isNaN(ad.getTime()) || ad.getTime() >= now.getTime()) return false;   // not due yet
+    return !filed.has(String(a.crm_lead_id || "").toLowerCase().trim() + "|" + a.appointment_date);
+  });
+}
+
 export function computeKPIs(debriefs, appointments, filter, cs, ce) {
   const db = filterByDate(nonInsuranceDebriefs(debriefs), "appointment_date", filter, cs, ce);
   // Sales/revenue are attributed to the signed month (effective_sale_date), not the appointment month.
@@ -411,13 +441,7 @@ export function computeKPIs(debriefs, appointments, filter, cs, ce) {
   const creditDeclines = db.filter((d) => d.appointment_outcome === SALE_CREDIT_DECLINE_OUTCOME || d.sale_close_type === CREDIT_DECLINE_CLOSE).length;
 
   // Missing Debriefs: past Appointments in period without matching Debrief
-  const missingDebriefs = appts.filter((a) => {
-    if (!a.appointment_date) return false;
-    const ad = new Date(a.appointment_date + "T00:00:00");
-    if (ad.getTime() >= Date.now()) return false;
-    const key = (a.crm_lead_id || "").toLowerCase().trim() + "|" + a.appointment_date;
-    return !debriefKeys.has(key);
-  }).length;
+  const missingDebriefs = missingDebriefRecords(debriefs, appointments, filter, cs, ce).length;
 
   const demoPctVal = pct(demos, appointmentsCount);
   const salesPctVal = pct(sales, demos);
@@ -441,6 +465,7 @@ export function computeKPIs(debriefs, appointments, filter, cs, ce) {
     { label: "Two-Leg", value: twoLeg },
     { label: "Two-Leg %", value: tl.denominator > 0 ? twoLegPctVal + "%" : "—", rating: ratePct(twoLegPctVal, 90, 80) },
     { label: "One-Leg", value: oneLeg },
+    { label: "One-Leg %", value: tl.denominator > 0 ? tl.oneLegRate + "%" : "—", rating: ratePctLow(tl.oneLegRate, 10, 20) },
     { label: "N/A", value: na },
     { label: "First Call Close", value: firstCallCloses },
     { label: "First Call Close %", value: safePct(firstCallCloses, sales), rating: ratePct(firstCallPctVal, 70, 50) },
