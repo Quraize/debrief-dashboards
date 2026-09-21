@@ -51,6 +51,8 @@ export interface PlanSummary {
   months: { label: string; jobs: number; gross: number }[];
   /** Week blocks that are past their Thursday and must be read-only, with their final row span. */
   locks: WeekLock[];
+  /** Synced columns written where the TAB's heading sits rather than the template's letter. */
+  columnsFollowed: { header: string; template: string; tab: string }[];
 }
 
 /**
@@ -117,8 +119,50 @@ export function dateTimeSerial(isoTs: string): number {
 
 const COLS = MASTER_COLUMNS as Column[];
 const IDX = Object.fromEntries(COLS.map((c) => [c.col, colIndex(c.col)])) as Record<string, number>;
-const JOB_ID_COL = IDX["HU"]!;
 const TOTALLED = ["R", "S", "T", "Y", "Z", "AA", "AB"];
+
+/** 0 → "A", 28 → "AC". */
+export function colLetter(index: number): string {
+  let n = index + 1, s = "";
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+/**
+ * Where each synced column's VALUE is written: by the tab's own heading.
+ *
+ * The template puts Scheduled Install Date at P and Sale Date at Q, and so
+ * did the code — by letter. Then someone swapped the two headings on the
+ * live tab, and every install date landed under "Sale Date" and vice versa.
+ * A heading is what a reader trusts, so a heading is what we follow: for a
+ * synced column whose expected heading is not at its template letter but IS
+ * found (once) elsewhere on row 1, write there. Formula columns keep their
+ * template letters — their formulas reference letters — and a heading that
+ * is missing or ambiguous falls back to the template.
+ */
+export function headerColumnMap(headerRow: CellValue[] | undefined): { idx: Record<string, number>; followed: { header: string; template: string; tab: string }[] } {
+  const idx = { ...IDX };
+  const followed: { header: string; template: string; tab: string }[] = [];
+  if (!headerRow || headerRow.length === 0) return { idx, followed };
+  const norm = (v: CellValue | undefined) => cellStr(v).toLowerCase().replace(/[^a-z0-9$#%]+/g, " ").trim();
+  const where = new Map<string, number[]>();
+  headerRow.forEach((v, i) => { const k = norm(v); if (k) (where.get(k) ?? where.set(k, []).get(k)!).push(i); });
+  for (const c of COLS) {
+    if (!c.key || c.formula || !c.header) continue;
+    const want = norm(c.header);
+    if (norm(headerRow[IDX[c.col]!]) === want) continue;
+    const hits = where.get(want);
+    if (hits && hits.length === 1 && hits[0] !== IDX[c.col]) {
+      idx[c.col] = hits[0]!;
+      followed.push({ header: c.header, template: c.col, tab: colLetter(hits[0]!) });
+    }
+  }
+  return { idx, followed };
+}
+
+/** The column map in force while a plan is being built (set by planSheet). */
+let ACTIVE: Record<string, number> = IDX;
+const JOB_ID_COL = () => ACTIVE["HU"]!;
 
 const cellStr = (v: CellValue | undefined) => (v === null || v === undefined ? "" : String(v).trim());
 
@@ -141,9 +185,9 @@ export function syncedValue(column: Column, row: SheetRow, syncedAt: string | nu
 function newRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): CellWrite[] {
   const out: CellWrite[] = [];
   for (const c of COLS) {
-    const col = IDX[c.col]!;
     const formula = columnFormula(c, rowIdx + 1);
-    if (formula) { out.push({ row: rowIdx, col, value: { formula } }); continue; }
+    if (formula) { out.push({ row: rowIdx, col: IDX[c.col]!, value: { formula } }); continue; }
+    const col = ACTIVE[c.col]!;
     const v = syncedValue(c, row, syncedAt);
     if (v !== null) out.push({ row: rowIdx, col, value: v });
     else if (c.type === "check") out.push({ row: rowIdx, col, value: false });
@@ -157,7 +201,7 @@ function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null):
   for (const c of COLS) {
     if (!c.key) continue;
     const v = syncedValue(c, row, syncedAt);
-    if (v !== null) out.push({ row: rowIdx, col: IDX[c.col]!, value: v });
+    if (v !== null) out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: v });
   }
   return out;
 }
@@ -289,11 +333,11 @@ export function monthLines(rows: SheetRow[], today: string): MonthLine[] {
 function monthLineCells(rowIdx: number, l: MonthLine): CellWrite[] {
   return [
     { row: rowIdx, col: IDX["A"]!, value: l.label },
-    { row: rowIdx, col: IDX["R"]!, value: l.gross },
-    { row: rowIdx, col: IDX["T"]!, value: l.totalRev },
-    { row: rowIdx, col: IDX["Y"]!, value: l.deposit },
-    { row: rowIdx, col: IDX["AA"]!, value: l.paid },
-    { row: rowIdx, col: IDX["AB"]!, value: l.owed },
+    { row: rowIdx, col: ACTIVE["R"]!, value: l.gross },
+    { row: rowIdx, col: ACTIVE["T"]!, value: l.totalRev },
+    { row: rowIdx, col: ACTIVE["Y"]!, value: l.deposit },
+    { row: rowIdx, col: ACTIVE["AA"]!, value: l.paid },
+    { row: rowIdx, col: ACTIVE["AB"]!, value: l.owed },
   ];
 }
 
@@ -318,8 +362,19 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [],
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [],
   };
+  // Write each synced value where the tab's heading for it sits.
+  const headerMap = headerColumnMap(grid[0]);
+  ACTIVE = headerMap.idx;
+  summary.columnsFollowed = headerMap.followed;
+  try {
+    return buildPlan();
+  } finally {
+    ACTIVE = IDX;
+  }
+
+  function buildPlan(): Plan {
   // Writes are mirrored into the model too, so later steps see the labels and
   // job ids they just placed (a block inserted above shifts everything below).
   const write = (cells: CellWrite[]) => {
@@ -397,7 +452,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     report.existing = true;
     const byJobId = new Map<string, number>();
     for (const idx of block.jobIdx) {
-      const id = cellStr(grid[idx]?.[JOB_ID_COL]);
+      const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
       if (id) byJobId.set(id, idx);
     }
     const seen = new Set<string>();
@@ -427,10 +482,10 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const stale: CellWrite[] = [];
     const staleRows: RowStyle[] = [];
     for (const idx of block.jobIdx) {
-      const id = cellStr(grid[idx]?.[JOB_ID_COL]);
+      const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
       if (id && !seen.has(id) && !additions.some((r) => r.jobId === id)) {
-        stale.push({ row: idx, col: IDX["HY"]!, value: SYNC_STATUS_STALE });
-        if (opts.syncedAt) stale.push({ row: idx, col: IDX["HX"]!, value: dateTimeSerial(opts.syncedAt) });
+        stale.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
+        if (opts.syncedAt) stale.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
         summary.jobsNotThisWeek++; report.notThisWeek.push(cellStr(grid[idx]?.[0]) || id);
         staleRows.push({ row: idx, style: "stale" });
       }
@@ -484,6 +539,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const ownJobs: [number, number] | null = me.totalIdx > me.labelIdx + 1 ? [me.labelIdx + 1, me.totalIdx - 1] : null;
     const below: [number, number] | null = endRow > cumulativeIdx ? [cumulativeIdx + 1, endRow] : null;
     write(cumulativeRowCells(cumulativeIdx, ownJobs, below));
+  }
   }
 }
 

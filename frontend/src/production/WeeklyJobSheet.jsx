@@ -295,6 +295,11 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {(pushResult.summary.columnsFollowed ?? []).length > 0 && (
+              <div className="text-muted-foreground" title="A heading on the tab is not at the template's column. The automation writes that value where the heading actually is.">
+                ↔ Following the tab's headings: {pushResult.summary.columnsFollowed.map((c) => `${c.header} → column ${c.tab} (template ${c.template})`).join(" · ")}
+              </div>
+            )}
             {(pushResult.summary.locks ?? []).length > 0 && (
               <div className="text-muted-foreground" title="A week becomes read-only at the end of its Thursday. The automation keeps updating JobProgress figures in it; people cannot edit, add or move rows.">
                 🔒 {pushResult.summary.locks.length} week(s) read-only{pushResult.locksAdded ? ` (${pushResult.locksAdded} locked on this run)` : ""}: {pushResult.summary.locks.map((l) => l.label).join(", ")}

@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  planSheet, parseBlocks, parseWeekLabel, colIndex, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote,
+  planSheet, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
   SYNC_STATUS_STALE, SUMMARY_MARKER, CUMULATIVE_LABEL, type CellWrite,
 } from "../src/production/sheetPlan.js";
 import { toRequests, lockRequests } from "../src/production/sheetPush.js";
@@ -225,6 +225,36 @@ describe("toRequests", () => {
     expect(reqs.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("ONE_OF_LIST"))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("frozenRowCount"))).toBe(true);
+  });
+});
+
+describe("following the tab's headings", () => {
+  const P = colIndex("P"), Q = colIndex("Q");
+  it("writes a synced value where its heading sits when the tab has moved it, and says so", () => {
+    const swapped = headerRow(); swapped[P] = "Sale Date"; swapped[Q] = "Scheduled Install Date";
+    const { idx, followed } = headerColumnMap(swapped);
+    expect(idx["P"]).toBe(Q); expect(idx["Q"]).toBe(P); expect(idx["R"]).toBe(colIndex("R"));
+    expect(followed).toEqual([
+      { header: "Scheduled Install Date", template: "P", tab: "Q" },
+      { header: "Sale Date", template: "Q", tab: "P" },
+    ]);
+    const plan = planSheet([swapped, ["9/7/2026-9/13/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]], [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);
+    const cells = cellsOf(plan);
+    // Row 2 is the new job: its sale date (8/20) lands under "Sale Date" — now column P — and the install (9/9) under Q.
+    expect(at(cells, 2, P)).toBe(dateSerial("2026-08-20"));
+    expect(at(cells, 2, Q)).toBe(dateSerial("2026-09-09"));
+    expect(plan.summary.columnsFollowed).toHaveLength(2);
+    // Formulas keep the template's letters: T is still R+S.
+    expect(at(cells, 2, T)).toEqual({ formula: "R3+S3" });
+  });
+  it("leaves the template alone when the headings match, are missing, or are ambiguous", () => {
+    expect(headerColumnMap(headerRow()).followed).toEqual([]);
+    expect(headerColumnMap(undefined).idx["P"]).toBe(P);
+    const twice = headerRow(); twice[P] = "Sale Date"; twice[Q] = "Sale Date";
+    expect(headerColumnMap(twice).followed).toEqual([]); // two "Sale Date" headings: nothing to follow safely
+    expect(colLetter(0)).toBe("A"); expect(colLetter(25)).toBe("Z"); expect(colLetter(26)).toBe("AA"); expect(colLetter(colIndex("HU"))).toBe("HU");
+    // A plan on a normal tab records nothing followed, and the next plan is not affected by a previous swapped one.
+    expect(planSheet([headerRow(), ["9/7/2026-9/13/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]], [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH).summary.columnsFollowed).toEqual([]);
   });
 });
 
