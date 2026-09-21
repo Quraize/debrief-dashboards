@@ -26,7 +26,7 @@
 
 import { stageKey } from "./jobStages.js";
 import { DEMO_OUTCOMES, NON_COMPLETED_OUTCOMES } from "./constants.js";
-import { isSale, isNoSeeRecord, isNoDemoOutcome, isAppointmentOpportunity, appointmentQualityStats } from "./kpi.js";
+import { isSale, isNoSeeRecord, isNoDemoOutcome, isAppointmentOpportunity, appointmentQualityRecords } from "./kpi.js";
 import { nonInsuranceDebriefs } from "./insurance.js";
 import { countedDebriefs } from "./debriefApproval.js";
 
@@ -114,22 +114,22 @@ export function visitStatus(d) {
  */
 export function visitBreakdown(visits) {
   const ds = nonInsuranceDebriefs(visits);
-  const aq = appointmentQualityStats(ds);
+  const aq = appointmentQualityRecords(ds);
   const isDemo = (d) => String(d?.appointment_outcome ?? "").startsWith("Demo Completed");
+  // Each list is the population the Sales dashboard counts under that name:
+  //   ran     its Appointments (appointment opportunities)
+  //   demo    its Demos        noDemo  its No Demo      noSee  its No See
+  // Demos and Appointments are different populations on that dashboard too —
+  // a demo given on a follow-up visit is a demo but not an opportunity — so
+  // the three below need not add up to `ran`, exactly as they do not there.
   const demo = ds.filter(isDemo);
-  // The same rule appointmentQualityStats applies, kept in step by assertion:
-  // eligible type, not core-excluded, not a no-see, and a no-demo outcome.
-  const noDemo = ds.filter((d) => isNoDemoOutcome(d) && !isDemo(d) && !isNoSeeRecord(d));
-  const noSee = ds.filter((d) => isNoSeeRecord(d) && !isDemo(d));
-  const opportunities = ds.filter(isAppointmentOpportunity);
-  const inNoDemo = new Set(noDemo);
-  const pending = opportunities.filter((d) => !isDemo(d) && !inNoDemo.has(d));
+  const ran = ds.filter(isAppointmentOpportunity);
+  const inNoDemo = new Set(aq.noDemos);
   const sold = demo.filter(isSale);
   return {
-    demo, noDemo, noSee, pending, sold,
-    notSold: demo.filter((d) => !isSale(d)),
-    ran: [...demo, ...noDemo, ...pending],
-    aqNoDemo: aq.aqNoDemo, aqNoSee: aq.aqNoSee,
+    demo, noDemo: aq.noDemos, noSee: aq.noSees, ran,
+    pending: ran.filter((d) => !isDemo(d) && !inNoDemo.has(d)),
+    sold, notSold: demo.filter((d) => !isSale(d)),
   };
 }
 
@@ -183,7 +183,7 @@ export function leadFunnel(rows, opts = {}) {
   // match the Sales dashboard. Cohort mode counts leads, always.
   const byVisit = activity && Array.isArray(opts.visits);
   const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
-  let sold = 0, revenue = 0, notSoldVisits = null;
+  let sold = 0, revenue = 0, notSoldVisits = null, ranFromVisits = null;
   if (byVisit) {
     // Every card is the card of the same name on the Sales dashboard, counted
     // off the same population by the same rules, so management reads one set
@@ -198,6 +198,7 @@ export function leadFunnel(rows, opts = {}) {
     status.noDemo = b.noDemo.length;
     status.noSee = b.noSee.length;
     status.pending = b.pending.length;
+    ranFromVisits = b.ran.length;
     sold = b.sold.length;
     notSoldVisits = b.notSold.length;
     revenue = b.sold.reduce((n, d) => n + (Number(d.sale_amount) || 0), 0);
@@ -217,7 +218,9 @@ export function leadFunnel(rows, opts = {}) {
   const notSet = notSetRows.length;
   // Counting visits, a booking with no debrief yet is still Set and still
   // Awaiting, so the column sums: Set = Ran + No See + Awaiting.
-  const ranVisits = status.demo + status.noDemo + status.pending;
+  // Ran is the Sales dashboard's Appointments exactly, not a sum of the three
+  // cards beside it — those are counted on their own populations, there as here.
+  const ranVisits = ranFromVisits ?? (status.demo + status.noDemo + status.pending);
   if (byVisit) {
     // Bookings in the range with no debrief filed. Counted, not inferred from
     // the visit total: a reset demo often has no booking row of its own, and
@@ -228,7 +231,7 @@ export function leadFunnel(rows, opts = {}) {
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const soldCount = activity && opts.signedSales != null ? opts.signedSales : sold;
   const notSoldCount = notSoldVisits ?? Math.max(0, status.demo - soldCount);
-  const ran = status.demo + status.noDemo + status.pending;
+  const ran = ranVisits;
   const demo = status.demo;
   return {
     basis: activity ? "activity" : "cohort",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { leadFlow, leadFunnel, leadReason, leadStatus, isLeadStage, isDisqualifiedStage, LEAD_REASONS } from "../src/leadFlow.js";
+import { leadFlow, leadFunnel, leadReason, leadStatus, isLeadStage, isDisqualifiedStage, visitBreakdown, LEAD_REASONS } from "../src/leadFlow.js";
 
 const lead = (stage, has_appointment = false, debriefs = []) => ({ current_stage: stage, has_appointment, debriefs });
 const d = (outcome, over = {}) => ({ appointment_type: "First Appointment", appointment_outcome: outcome, ...over });
@@ -122,6 +122,29 @@ describe("leadFunnel — activity basis: the work done in the range", () => {
       .toMatchObject({ set: 1, ran: 0, demo: 0, awaiting: 1 });
     // Cohort never counts visits, whatever it is handed.
     expect(leadFunnel(rows, { ...OPTS, basis: "cohort", visits, appointments: 3 })).toMatchObject({ byVisit: false });
+  });
+
+  it("counts Ran, No Demo and No See on the Sales dashboard's own populations", () => {
+    const rows = [r("Demo No Sale", { apptIn: true })];
+    const visits = [
+      // An opportunity that demoed, and one that recorded a no-demo: both count.
+      { appointment_type: "First Appointment", appointment_outcome: "Demo Completed — Sale", sale_amount: 100 },
+      { appointment_type: "First Appointment", appointment_outcome: "No Demo — Reset Needed" },
+      // A no-demo on a RESET DEMO visit. The dashboard's No Demo is first
+      // appointments and rehashes only, so it is not a No Demo — but it is
+      // still an appointment opportunity, so it lands in Result Pending.
+      { appointment_type: "Reset Demo", appointment_outcome: "No Demo — Reset Needed" },
+      // A no-show: No See, and never an opportunity.
+      { appointment_type: "First Appointment", appointment_outcome: "No C / No Show — Do Not Reset" },
+      // A follow-up that demoed: a Demo on the dashboard, not an Appointment.
+      { appointment_type: "Follow-Up", appointment_outcome: "Demo Completed — Demo No Sale" },
+    ];
+    const f = leadFunnel(rows, { ...OPTS, visits, appointments: 5 });
+    expect(f).toMatchObject({ ran: 3, demo: 2, noDemo: 1, pending: 1, noSee: 1, sold: 1 });
+    const b = visitBreakdown(visits);
+    // Every card's list is exactly as long as its number.
+    expect([b.ran.length, b.demo.length, b.noDemo.length, b.pending.length, b.noSee.length]).toEqual([3, 2, 1, 1, 1]);
+    expect(b.pending[0].appointment_type).toBe("Reset Demo");
   });
 
   it("reports the visit total so the Marketing dashboard reconciles, and defaults to cohort when asked nothing", () => {

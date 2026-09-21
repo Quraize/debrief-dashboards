@@ -141,6 +141,23 @@ function aqAttended(d) { return aqIsDemo(d) || aqIsNoDemo(d); }
 function aqResetNeeded(d) { return d.reset_needed === true || RESET_OUTCOMES.includes(d.appointment_outcome); }
 function aqCompletedResetDemo(d) { return normalizeAppointmentType(d.appointment_type) === APPT_TYPE_RESET_DEMO && aqAttended(d) && !aqCoreExcluded(d); }
 
+/**
+ * The RECORDS behind the appointment-quality counts. The dashboards show the
+ * counts; anything that has to list the rows — the Overview's clickable cards
+ * — takes them from here, so a list is never a different population from the
+ * number above it.
+ */
+export function appointmentQualityRecords(debriefs) {
+  const ds = debriefs || [];
+  const demoRateEligible = ds.filter((d) => aqEligibleType(d) && !aqCoreExcluded(d) && !isNoSeeRecord(d));
+  return {
+    opportunities: demoRateEligible,
+    demos: demoRateEligible.filter(aqIsDemo),
+    noDemos: demoRateEligible.filter(aqIsNoDemo),
+    noSees: ds.filter((d) => isNoSeeRecord(d) && !aqCoreExcluded(d)),
+  };
+}
+
 export function appointmentQualityStats(debriefs) {
   const ds = debriefs || [];
   // Demo Rate eligible = First Appt + Rehash, not core-excluded, not No See (attended only)
