@@ -1,16 +1,28 @@
-// The Overview funnel, followed lead by lead.
+// The Overview funnel, followed lead by lead, answering either question.
 //
 // In JobProgress a lead IS a job — the workflow begins at "LEAD NOT
 // CONTACTED!!!" — and a lead's fate is the stage its job sits in until an
-// appointment exists, and its debriefs after that. Every box here is a count
-// of LEADS created in the range, followed wherever their appointments go, so
-// each column sums exactly to the box that feeds it and a lead is counted
-// once: a reset visit is the same lead getting another chance to move right,
-// not a second appointment.
+// appointment exists, and its debriefs after that. A lead is counted once
+// however many visits it took: a reset is the same lead getting another
+// chance to move right, not a second appointment.
 //
-// This deliberately differs from the Marketing and Sales dashboards, which
-// count appointments by appointment date. Those answer "what happened this
-// month"; this answers "what became of this month's leads".
+// Two questions, one funnel:
+//
+//   activity (the default) — what the team DID in the range. Everything from
+//     Appointment Set rightward counts leads whose appointment falls in the
+//     range, however long ago the lead arrived, and reads only the debriefs
+//     for visits inside it. This is the question "how many did we run".
+//
+//   cohort — what became of the leads that ARRIVED in the range, followed
+//     wherever their appointments went, even into a later month. Good for
+//     judging lead quality; it always looks weak early in a month, because
+//     this month's leads have not had time to convert yet.
+//
+// The lead columns (Leads, Valid, Disqualified, Not Set) are the same in both:
+// a lead arrives once, and that is a fact about the range either way. In
+// activity mode Set therefore need not sum with Not Set to Valid — some of
+// the appointments belong to leads from before the range, counted in
+// `setFromEarlier`.
 
 import { stageKey } from "./jobStages.js";
 import { DEMO_OUTCOMES, NON_COMPLETED_OUTCOMES } from "./constants.js";
@@ -76,15 +88,38 @@ export function leadStatus(debriefs) {
 }
 
 /**
- * @param {Array<{ current_stage?: string|null, has_appointment: boolean, debriefs?: Array<object> }>} rows
- *   Jobs created in the range, insurance already excluded.
+ * A debrief belongs to the range by the date of the VISIT it describes, not
+ * when it was typed — a Monday debrief of a Friday demo is Friday's.
  */
-export function leadFunnel(rows) {
+function debriefInRange(d, from, to) {
+  if (!from || !to) return true;
+  const day = String(d?.appointment_date ?? "").slice(0, 10);
+  return day >= from && day <= to;
+}
+
+/**
+ * @param {Array<{ current_stage?: string|null, has_appointment: boolean, debriefs?: Array<object>,
+ *   created_in_range?: boolean, appt_in_range?: boolean }>} rows
+ *   Leads (jp_job rows), insurance already excluded. A row with no
+ *   `created_in_range` flag is treated as having arrived in the range, so the
+ *   cohort query — which returns only those — needs no flag at all.
+ * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null }} [opts]
+ */
+export function leadFunnel(rows, opts = {}) {
+  const activity = opts.basis === "activity";
+  const { from, to } = opts;
   const all = (rows ?? []).filter((r) => isLeadStage(r.current_stage));
-  const dqRows = all.filter((r) => isDisqualifiedStage(r.current_stage));
-  const validRows = all.filter((r) => !isDisqualifiedStage(r.current_stage));
+  // Leads arrived in the range — the same count whichever question is asked.
+  const arrived = all.filter((r) => r.created_in_range !== false);
+  const dqRows = arrived.filter((r) => isDisqualifiedStage(r.current_stage));
+  const validRows = arrived.filter((r) => !isDisqualifiedStage(r.current_stage));
+  // Not Set stays a fact about the leads that arrived: no appointment booked
+  // at all. A lead that arrived on the 30th with a visit booked for the 3rd
+  // is not a failure, so it is neither Set nor Not Set in activity mode.
   const notSetRows = validRows.filter((r) => r.has_appointment !== true);
-  const setRows = validRows.filter((r) => r.has_appointment === true);
+  const setRows = activity
+    ? all.filter((r) => !isDisqualifiedStage(r.current_stage) && r.appt_in_range === true)
+    : validRows.filter((r) => r.has_appointment === true);
 
   const reasonCounts = Object.fromEntries(LEAD_REASONS.map((r) => [r.key, 0]));
   for (const r of notSetRows) reasonCounts[leadReason(r.current_stage)]++;
@@ -92,21 +127,29 @@ export function leadFunnel(rows) {
   const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
   let sold = 0, revenue = 0;
   for (const r of setRows) {
-    const s = leadStatus(r.debriefs);
+    const ds = activity ? (r.debriefs ?? []).filter((d) => debriefInRange(d, from, to)) : (r.debriefs ?? []);
+    const s = leadStatus(ds);
     status[s]++;
     if (s === "demo") {
-      const sale = countedDebriefs(r.debriefs ?? []).find(isSale);
+      const sale = countedDebriefs(ds).find(isSale);
       if (sale) { sold++; revenue += Number(sale.sale_amount) || 0; }
     }
   }
 
-  const leads = all.length, disqualified = dqRows.length, valid = validRows.length;
+  const leads = arrived.length, disqualified = dqRows.length, valid = validRows.length;
   const set = setRows.length, notSet = notSetRows.length;
+  const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const ran = status.demo + status.noDemo + status.pending;
   const demo = status.demo;
   return {
+    basis: activity ? "activity" : "cohort",
     leads, valid, disqualified, validRate: pct(valid, leads), disqualifiedRate: pct(disqualified, leads),
-    set, notSet, setRate: pct(set, valid), notSetRate: pct(notSet, valid),
+    // In activity mode Set is measured against a different population from
+    // Valid, so a share of valid would be a lie; the count of appointments
+    // belonging to earlier leads is what the reader actually needs.
+    set, notSet, setFromEarlier, setRate: activity ? null : pct(set, valid), notSetRate: pct(notSet, valid),
+    /** Sales appointments dated in the range, resets included — reconciles with the Marketing dashboard. */
+    appointments: opts.appointments ?? null,
     reasons: LEAD_REASONS.map((r) => ({ key: r.key, label: r.label, count: reasonCounts[r.key], share: pct(reasonCounts[r.key], notSet) })),
     ran, noSee: status.noSee, awaiting: status.awaiting,
     ranRate: pct(ran, set), noSeeRate: pct(status.noSee, set), awaitingRate: pct(status.awaiting, set),
@@ -117,8 +160,8 @@ export function leadFunnel(rows) {
 }
 
 /** Header-only view (leads / valid / disqualified / set / not set + reasons). */
-export function leadFlow(rows) {
-  const f = leadFunnel(rows);
+export function leadFlow(rows, opts = {}) {
+  const f = leadFunnel(rows, opts);
   const { leads, valid, disqualified, validRate, disqualifiedRate, set, notSet, setRate, notSetRate, reasons } = f;
   return { leads, valid, disqualified, validRate, disqualifiedRate, set, notSet, setRate, notSetRate, reasons };
 }

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ArrowDown, Loader2 } from "lucide-react";
@@ -6,57 +7,84 @@ import { get, qs } from "@/api/http";
 const money = (v) => "$" + Math.round(Number(v) || 0).toLocaleString();
 
 /**
- * The executive's funnel, followed lead by lead:
+ * The executive's funnel:
  *
  *   Leads → Valid Leads / Disqualified → Appointment Set / Not Set (why)
  *         → Ran / No See / Awaiting → Demo / No Demo / Pending → Sold / No Sale
  *
- * Valid = leads − disqualified (the CEO's definition). Every box is a count
- * of LEADS created in the range, so each column sums to the box that feeds
- * it and a lead is counted once however many visits it took. Six columns
- * that read left to right on a wide screen and top to bottom below that. Numbers come from GET /api/leads/flow (shared/src/leadFlow.js).
+ * Valid = leads − disqualified (the CEO's definition). A lead is counted once
+ * however many visits it took. Six columns that read left to right on a wide
+ * screen and top to bottom below that. Numbers come from GET /api/leads/flow
+ * (shared/src/leadFlow.js), which answers either of two questions:
  *
- * This is a different question from the Marketing and Sales dashboards, which
- * count appointments by appointment date — and the subtitle says so.
+ *   Work done in the range (the default) — everything from Appointment Set
+ *     rightward counts visits that fall in the range, whenever the lead came
+ *     in. This is what "how many did we run this month" means, and it matches
+ *     the Marketing and Sales dashboards' basis.
+ *   Leads that came in — the same leads followed wherever their appointments
+ *     went, even into a later month. Judges lead quality, and always reads low
+ *     early in a month because new leads have not had time to convert.
+ *
+ * The lead columns are identical in both: a lead arrives once.
  *
  * @param {{ from: string, to: string, rangeLabel: string, resultsHref?: string }} props
  */
+const BASES = [
+  { key: "activity", label: "Work done in this range" },
+  { key: "cohort", label: "Leads that came in" },
+];
+
 export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/results" }) {
+  const [basis, setBasis] = useState("activity");
   const enabled = !!from && !!to;
   const { data: f, isLoading, error } = useQuery({
-    queryKey: ["leads-flow", from, to],
-    queryFn: () => get(`/api/leads/flow${qs({ from, to })}`),
+    queryKey: ["leads-flow", from, to, basis],
+    queryFn: () => get(`/api/leads/flow${qs({ from, to, basis })}`),
     enabled, staleTime: 60_000,
   });
+  const activity = basis === "activity";
 
   let body;
   if (!enabled) body = <Empty>Pick a date range to see the flow.</Empty>;
   else if (isLoading) body = <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
   else if (error || !f) body = <Empty>The flow could not be loaded right now.</Empty>;
-  else if (f.leads === 0) body = <Empty>No leads came in during this period.</Empty>;
-  else body = <Funnel f={f} />;
+  else if (f.leads === 0 && f.set === 0) body = <Empty>Nothing happened in this period, and no leads came in.</Empty>;
+  else body = <Funnel f={f} activity={activity} />;
 
   return (
     <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
         <div>
           <h2 className="font-heading font-bold text-primary">Lead Flow</h2>
           <p className="text-xs text-muted-foreground max-w-3xl">
-            {rangeLabel} · every lead that came in during this period, followed through whatever happened to it — even if the
-            appointment fell in a later month. Leads are JobProgress jobs by created date; results come from filed debriefs.
-            Insurance and warranty callbacks excluded. The Marketing and Sales dashboards count appointments by appointment date,
-            so their Set Appointments will differ — a different question, not a discrepancy.
+            {rangeLabel} · {activity
+              ? "the appointments that fall in this period and what came of them, whenever the lead first came in. Leads, Valid and Not Set still describe the leads that arrived in the period — a lead arrives once."
+              : "every lead that came in during this period, followed through whatever happened to it, even if the appointment fell in a later month. Early in a month this reads low: those leads have not had time to convert."}
+            {" "}Leads are JobProgress jobs by created date; results come from filed debriefs. Insurance and warranty callbacks excluded.
           </p>
         </div>
-        <Link to={resultsHref} className="text-xs font-semibold text-accent hover:underline shrink-0">Open Results Review →</Link>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex rounded-lg border border-border overflow-hidden" role="group" aria-label="What the flow counts">
+            {BASES.map((b) => (
+              <button key={b.key} onClick={() => setBasis(b.key)} aria-pressed={basis === b.key}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  basis === b.key ? "bg-accent text-white" : "bg-white text-muted-foreground hover:bg-secondary"
+                }`}>
+                {b.label}
+              </button>
+            ))}
+          </div>
+          <Link to={resultsHref} className="text-xs font-semibold text-accent hover:underline">Open Results Review →</Link>
+        </div>
       </div>
       {body}
     </div>
   );
 }
 
-function Funnel({ f }) {
+function Funnel({ f, activity }) {
   const reasons = f.reasons.filter((r) => r.count > 0);
+  const resets = activity && f.appointments != null ? f.appointments - f.set : 0;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] gap-3 xl:gap-2 items-start">
       <Column>
@@ -72,8 +100,11 @@ function Funnel({ f }) {
       <Connector />
       <Column>
         <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid"
-          note="A sales appointment exists for the lead" />
-        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid" />
+          note={activity
+            ? `Leads with a visit in this period.${f.setFromEarlier ? ` ${f.setFromEarlier} of them came in before it.` : ""}${resets > 0 ? ` ${f.appointments} visits in all, counting resets.` : ""}`
+            : "A sales appointment exists for the lead"} />
+        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid"
+          note={activity ? "Valid leads from this period with no appointment booked yet" : undefined} />
         {reasons.length > 0 && (
           <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2 text-xs">
             {reasons.map((r) => (

@@ -48,6 +48,57 @@ describe("leadStatus — one lead, from its debriefs", () => {
   });
 });
 
+describe("leadFunnel — activity basis: the work done in the range", () => {
+  const OPTS = { basis: "activity", from: "2026-09-01", to: "2026-09-30" };
+  // Shapes: arrived = created in the range, appt = has a visit inside it.
+  const r = (stage, { arrived = true, apptIn = false, hasAppt = apptIn, debriefs = [] } = {}) =>
+    ({ current_stage: stage, created_in_range: arrived, has_appointment: hasAppt, appt_in_range: apptIn, debriefs });
+  const on = (day, outcome, over = {}) => ({ appointment_date: day, appointment_type: "First Appointment", appointment_outcome: outcome, ...over });
+
+  it("counts a visit from an older lead, and reads only the debriefs inside the range", () => {
+    const rows = [
+      // An August lead that demoed and sold in September: invisible to cohort, counted here.
+      r("Demo No Sale", { arrived: false, apptIn: true, debriefs: [on("2026-09-10", "Demo Completed — Sale", { sale_amount: 18000 })] }),
+      // A September lead that demoed in September.
+      r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Demo No Sale")] }),
+      // A September lead whose ONLY demo was in August — ran then, not now.
+      r("Demo No Sale", { apptIn: false, hasAppt: true, debriefs: [on("2026-08-14", "Demo Completed — Sale", { sale_amount: 9000 })] }),
+      // A September lead with nothing booked at all.
+      r("LEAD NOT CONTACTED!!!"),
+    ];
+    const f = leadFunnel(rows, OPTS);
+    expect(f).toMatchObject({
+      basis: "activity", leads: 3, valid: 3, disqualified: 0,
+      set: 2, setFromEarlier: 1, setRate: null, notSet: 1,
+      ran: 2, demo: 2, sold: 1, revenue: 18000, notSold: 1,
+    });
+    // The August demo's $9,000 is not September's money.
+    expect(f.revenue).toBe(18000);
+  });
+
+  it("answers the other question from the same rows, and leaves the lead columns alone", () => {
+    const rows = [
+      r("Demo No Sale", { arrived: false, apptIn: true, debriefs: [on("2026-09-10", "Demo Completed — Sale", { sale_amount: 18000 })] }),
+      r("Demo No Sale", { apptIn: false, hasAppt: true, debriefs: [on("2026-08-14", "Demo Completed — Sale", { sale_amount: 9000 })] }),
+      r("LEAD NOT CONTACTED!!!"),
+    ];
+    const cohort = leadFunnel(rows, { ...OPTS, basis: "cohort" });
+    // Cohort ignores the August lead entirely and keeps the September lead's August demo.
+    expect(cohort).toMatchObject({ basis: "cohort", leads: 2, set: 1, setFromEarlier: 0, setRate: 50, sold: 1, revenue: 9000 });
+    expect(cohort.set + cohort.notSet).toBe(cohort.valid);
+    // Leads, Valid and Not Set are the same number under either question.
+    const activity = leadFunnel(rows, OPTS);
+    for (const k of ["leads", "valid", "disqualified", "notSet"]) expect(activity[k], k).toBe(cohort[k]);
+  });
+
+  it("reports the visit total so the Marketing dashboard reconciles, and defaults to cohort when asked nothing", () => {
+    const rows = [r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Sale", { sale_amount: 1 })] })];
+    // Two visits on one lead (a reset): one lead in Set, two on the calendar.
+    expect(leadFunnel(rows, { ...OPTS, appointments: 2 })).toMatchObject({ set: 1, appointments: 2 });
+    expect(leadFunnel(rows)).toMatchObject({ basis: "cohort", appointments: null, setFromEarlier: 0 });
+  });
+});
+
 describe("leadFunnel", () => {
   const rows = [
     lead("Demo No Sale", true, [d("Demo Completed — Sale", { sale_amount: 20000 })]),

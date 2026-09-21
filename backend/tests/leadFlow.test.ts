@@ -26,18 +26,18 @@ async function job(id: string, number: string | null, stage: string, createdEt: 
     `INSERT INTO jp_job (jp_job_id, job_number, current_stage, is_insurance, jp_created_at) VALUES ($1, $2, $3, $4, ($5::timestamp AT TIME ZONE 'America/New_York'))`,
     [id, number, stage, insurance, createdEt]);
 }
-async function appt(id: string, jobId: string, sales = true) {
+async function appt(id: string, jobId: string, sales = true, date = "2026-09-10") {
   await db.owner.query(
-    `INSERT INTO jp_appointment (jp_appointment_id, crm_job_id, is_sales_type, appointment_date) VALUES ($1, $2, $3, '2026-09-10')`,
-    [id, jobId, sales]);
+    `INSERT INTO jp_appointment (jp_appointment_id, crm_job_id, is_sales_type, appointment_date) VALUES ($1, $2, $3, $4::date)`,
+    [id, jobId, sales, date]);
 }
 async function debrief(leadId: string, outcome: string, over: Record<string, unknown> = {}) {
   await db.owner.query(
     `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_type, appointment_outcome,
                           crm_lead_id, crm_job_id, sale_amount, approval_status, created_by)
-     VALUES ('rep@allied.test', $1, '2026-09-10', 'Jason Malarchak', 'Ashley Pascual', $2, $3, $4, $5, $6, $7, 'rep@allied.test')`,
+     VALUES ('rep@allied.test', $1, $8::date, 'Jason Malarchak', 'Ashley Pascual', $2, $3, $4, $5, $6, $7, 'rep@allied.test')`,
     [`Customer ${leadId}`, over["appointment_type"] ?? "First Appointment", outcome, over["crm_lead_id"] ?? leadId,
-      over["crm_job_id"] ?? null, over["sale_amount"] ?? null, over["approval_status"] ?? null]);
+      over["crm_job_id"] ?? null, over["sale_amount"] ?? null, over["approval_status"] ?? null, over["appointment_date"] ?? "2026-09-10"]);
 }
 
 describe.skipIf(!reachable)("GET /api/leads/flow", () => {
@@ -86,6 +86,15 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     await job("j16", "2609-0016-01", "Open Warranty Claims/CallBacks", "2026-09-12 11:00");
     // Created 11:30pm ET on Aug 31 — 03:30 UTC Sep 1. An office-calendar August lead.
     await job("j17", "2608-0017-01", "DQ (MGR APPROVAL)", "2026-08-31 23:30");
+    // An AUGUST lead that demoed and sold in September: the work the cohort
+    // question cannot see. Its August visit stays in August.
+    await job("j18", "2608-0018-01", "Demo No Sale", "2026-08-12 10:00");
+    await appt("a18a", "j18", true, "2026-08-20"); await appt("a18b", "j18", true, "2026-09-18");
+    await debrief("2608-0018-01", "No C / No Show — Reset Needed", { appointment_date: "2026-08-20" });
+    await debrief("2608-0018-01", "Demo Completed — Sale", { sale_amount: 31000, appointment_date: "2026-09-18", appointment_type: "Reset Demo" });
+    // A September lead whose visit is booked for October: set in cohort, not
+    // yet work done in September, and never "Not Set" — it IS booked.
+    await job("j19", "2609-0019-01", "Appointment Set", "2026-09-20 10:00"); await appt("a19", "j19", true, "2026-10-05");
   });
   afterAll(async () => {
     await app?.close();
@@ -95,15 +104,16 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
   });
 
   it("follows September's leads through their appointments, every column summing to its parent", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30", ...auth });
+    const res = await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30&basis=cohort", ...auth });
     expect(res.statusCode).toBe(200);
     const f = res.json();
     expect(f).toMatchObject({
-      from: "2026-09-01", to: "2026-09-30",
-      leads: 14, valid: 12, disqualified: 2, set: 7, notSet: 5,
-      ran: 4, noSee: 1, awaiting: 2,          // j6 booked; j7's DQ still awaiting approval
+      from: "2026-09-01", to: "2026-09-30", basis: "cohort",
+      leads: 15, valid: 13, disqualified: 2, set: 8, notSet: 5,   // j19 arrived in September and is booked
+      ran: 4, noSee: 1, awaiting: 3,          // j6 and j19 booked; j7's DQ still awaiting approval
       demo: 3, noDemo: 1, pending: 0,
-      sold: 1, notSold: 2, revenue: 20000,
+      sold: 1, notSold: 2, revenue: 20000,    // the August lead's $31,000 is not September's cohort
+      setFromEarlier: 0, setRate: 62,
     });
     expect(f.valid + f.disqualified).toBe(f.leads);
     expect(f.set + f.notSet).toBe(f.valid);
@@ -113,9 +123,31 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     expect(by).toEqual({ working: 3, hold: 1, cancelled: 1, dnc: 0, other: 0 });
   });
 
-  it("puts the 11:30pm lead in August, not September", async () => {
+  it("counts the work done in September by default: the August lead's demo in, October's booking out", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30", ...auth });
+    const f = res.json();
+    expect(f).toMatchObject({
+      basis: "activity",
+      leads: 15, valid: 13, disqualified: 2, notSet: 5,   // the lead columns do not move
+      set: 8, setFromEarlier: 1, setRate: null,           // j1..j7 + the August lead j18; j19's October visit is out
+      appointments: 8,                                    // visits dated in September, resets included
+      ran: 5, noSee: 1, awaiting: 2,
+      demo: 4, noDemo: 1, pending: 0,
+      sold: 2, notSold: 2, revenue: 51000,                // 20,000 + the August lead's 31,000
+    });
+    expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
+    expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
+  });
+
+  it("gives the August lead its August visit, and nothing of September", async () => {
     const aug = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-08-01&to=2026-08-31", ...auth })).json();
-    expect(aug).toMatchObject({ leads: 1, disqualified: 1, valid: 0, set: 0, notSet: 0 });
+    // j17 (DQ, 11:30pm) and j18 arrived in August; only j18's no-show visit falls in it.
+    expect(aug).toMatchObject({ basis: "activity", leads: 2, disqualified: 1, valid: 1, set: 1, noSee: 1, ran: 0, sold: 0, revenue: 0, appointments: 1 });
+  });
+
+  it("puts the 11:30pm lead in August, not September", async () => {
+    const aug = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-08-01&to=2026-08-31&basis=cohort", ...auth })).json();
+    expect(aug).toMatchObject({ leads: 2, disqualified: 1, valid: 1, set: 1, notSet: 0 });
   });
 
   it("rejects bad ranges and anonymous callers", async () => {
