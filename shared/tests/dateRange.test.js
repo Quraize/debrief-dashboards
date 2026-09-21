@@ -34,9 +34,12 @@ describe("All Time", () => {
 });
 
 describe("filter lists", () => {
-  it("keeps the dashboards' list unchanged and gives the queue its own", () => {
-    expect(DATE_FILTERS).not.toContain("Last Week");
+  it("offers Last Week beside This Week on the dashboards, and gives the queue its own list", () => {
+    expect(DATE_FILTERS[DATE_FILTERS.indexOf("This Week") + 1]).toBe("Last Week");
     expect(QUEUE_DATE_FILTERS[0]).toBe(ALL_TIME_FILTER);
-    for (const f of QUEUE_DATE_FILTERS) if (f !== ALL_TIME_FILTER && f !== "Custom Range") expect(getDateRangeBounds(f)?.start).toBeTruthy();
+    // Every offered range resolves to real bounds, so no chip can render a dead filter.
+    for (const list of [DATE_FILTERS, QUEUE_DATE_FILTERS]) {
+      for (const f of list) if (f !== ALL_TIME_FILTER && f !== "Custom Range") expect(getDateRangeBounds(f)?.start, f).toBeTruthy();
+    }
   });
 });

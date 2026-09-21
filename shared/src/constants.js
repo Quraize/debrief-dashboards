@@ -173,7 +173,9 @@ export const PRODUCTION_ROLES = ["admin", "sales_manager", "project_manager", "p
 export const STAFF_ROLES = ROLES.filter((r) => r !== "production");
 export const isProductionOnly = (role) => role === "production";
 
-export const DATE_FILTERS = ["Today","Yesterday","This Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
+// Weeks start Monday. "Last Week" is the completed week the managers review on
+// a Monday, so it sits next to "This Week" on every dashboard.
+export const DATE_FILTERS = ["Today","Yesterday","This Week","Last Week","This Month","Last Month","Last Quarter","This Quarter","Year to Date","Custom Range"];
 // The Open Debrief Queue is a to-do list, so its default is everything still open;
 // the short ranges are for working a day or a week at a time. Weeks start Monday.
 export const ALL_TIME_FILTER = "All Time";
