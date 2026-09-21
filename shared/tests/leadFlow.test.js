@@ -95,7 +95,8 @@ describe("leadFunnel — activity basis: the work done in the range", () => {
     const rows = [r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Sale", { sale_amount: 126182 })] })];
     // Rosco Coleman and Ruben Sanchez demoed earlier and signed in September:
     // their money is September's on the Sales dashboard, so it is here too.
-    expect(leadFunnel(rows, { ...OPTS, signedRevenue: 168081 })).toMatchObject({ sold: 1, revenue: 168081, demoRevenue: 126182 });
+    expect(leadFunnel(rows, { ...OPTS, signedRevenue: 168081, signedSales: 12 }))
+      .toMatchObject({ sold: 12, demoSold: 1, revenue: 168081, demoRevenue: 126182 });
     // Not given, nothing changes. Cohort keeps its own money — a different question.
     expect(leadFunnel(rows, OPTS)).toMatchObject({ revenue: 126182, demoRevenue: 126182 });
     expect(leadFunnel(rows, { ...OPTS, basis: "cohort", signedRevenue: 168081 })).toMatchObject({ revenue: 126182, demoRevenue: 126182 });

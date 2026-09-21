@@ -120,9 +120,10 @@ function debriefInRange(d, from, to) {
  *   `created_in_range` flag is treated as having arrived in the range, so the
  *   cohort query — which returns only those — needs no flag at all.
  * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null,
- *   signedRevenue?: number|null, visits?: Array<object>|null }} [opts]
+ *   signedRevenue?: number|null, signedSales?: number|null, visits?: Array<object>|null }} [opts]
  *   `signedRevenue` is the dashboards' signed-month total for the range; when given it is
- *   what the Sold card reports. `visits` is every debrief for a visit in the range — the
+ *   total for the range and `signedSales` its count; when given they are what the Sold card
+ *   reports, so the card's number and its money come from one population. `visits` is every debrief for a visit in the range — the
  *   Sales dashboard's own pool. When given, activity mode counts those visits from
  *   Appointment Set rightward instead of counting leads, so the two pages agree. Without
  *   it activity mode falls back to counting leads.
@@ -183,6 +184,7 @@ export function leadFunnel(rows, opts = {}) {
     ? status.demo + status.noDemo + status.pending + status.noSee + status.awaiting
     : setRows.length;
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
+  const soldCount = activity && opts.signedSales != null ? opts.signedSales : sold;
   const ran = status.demo + status.noDemo + status.pending;
   const demo = status.demo;
   return {
@@ -201,7 +203,12 @@ export function leadFunnel(rows, opts = {}) {
     ranRate: pct(ran, set), noSeeRate: pct(status.noSee, set), awaitingRate: pct(status.awaiting, set),
     demo, noDemo: status.noDemo, pending: status.pending,
     demoRate: pct(demo, ran), noDemoRate: pct(status.noDemo, ran), pendingRate: pct(status.pending, ran),
-    sold, notSold: demo - sold, soldRate: pct(sold, demo), notSoldRate: pct(demo - sold, demo),
+    // Sold is the Sales dashboard's Sales: every sale SIGNED in the range,
+    // which is the same population its revenue comes from. A demo from an
+    // earlier month closed now is one of them, so Sold can exceed the sales
+    // made by the demos counted above — `demoSold` keeps that figure.
+    sold: soldCount, demoSold: sold, notSold: Math.max(0, demo - soldCount),
+    soldRate: pct(soldCount, demo), notSoldRate: pct(Math.max(0, demo - soldCount), demo),
     // The Sold card shows the SAME money as the Sales dashboard: every sale
     // signed in the range, whenever its demo happened (Rosco Coleman demoed
     // in August and signed on 3 September — September's money). The funnel's

@@ -141,11 +141,11 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
       // j7's DQ is still with a manager, so its visit is awaiting.
       ran: 5, noSee: 2, awaiting: 1,
       demo: 4, noDemo: 1, pending: 0,
-      sold: 2, notSold: 2, demoRevenue: 51000,            // 20,000 + the August lead's 31,000
-      // The Sold card reports the Sales dashboard's money: every sale signed
-      // in September — the two demos above plus Ruben's June demo, closed by
-      // phone on 9 September. His visit is June's; his money is September's.
-      revenue: 65399,
+      // The Sold card reports the Sales dashboard's Sales and Revenue: every
+      // sale SIGNED in September — the two demos above plus Ruben's June demo,
+      // closed by phone on 9 September. His visit is June's, his sale is
+      // September's, so Sold (3) exceeds the demos here that sold (2).
+      sold: 3, demoSold: 2, notSold: 1, revenue: 65399, demoRevenue: 51000,
     });
     expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
     expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
@@ -155,7 +155,8 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     // June: Ruben's visit and his demo, but the Sold card shows no money — he
     // signed in September, so that is where the Sales dashboard puts it.
     const jun = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-06-01&to=2026-06-30", ...auth })).json();
-    expect(jun).toMatchObject({ basis: "activity", byVisit: true, set: 1, demo: 1, sold: 1, demoRevenue: 14399, revenue: 0 });
+    // The demo sold, but not in June: Sold and its money are both zero here.
+    expect(jun).toMatchObject({ basis: "activity", byVisit: true, set: 1, demo: 1, sold: 0, demoSold: 1, demoRevenue: 14399, revenue: 0 });
     // Cohort is a different question and keeps its own money: September's own
     // leads sold 20,000, whatever was signed in September from earlier demos.
     const coh = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30&basis=cohort", ...auth })).json();
