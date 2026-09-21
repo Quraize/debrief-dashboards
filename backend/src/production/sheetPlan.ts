@@ -30,7 +30,7 @@ type Column = { col: string; header: string; key?: string; type: string; hidden?
 export interface WeekInput { from: string; to: string; rows: SheetRow[] }
 
 export interface CellWrite { row: number; col: number; value: CellValue | { formula: string } }
-export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale" | "paidComplete" | "completed" | "paidOnly" | "mismatch";
+export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale" | "paid" | "unpaid" | "mismatch";
 /** A row's format; `cols` = [start, end) limits it to some columns (default: the whole row). */
 export interface RowStyle { row: number; style: RowStyleName; cols?: [number, number] }
 export type PlanOp =
@@ -40,8 +40,8 @@ export type PlanOp =
   /** Drop a column's data validation (a renamed checkbox column that now holds text). */
   | { type: "clearValidation"; col: number };
 
-/** The left cells that take the paid/completed colour: A..D. */
-export const TONE_COLS: [number, number] = [0, 4];
+/** The cell that takes the paid/unpaid colour: B, the PAID-IN-FULL column. */
+export const TONE_COLS: [number, number] = [1, 2];
 
 export interface PlanSummary {
   headerCreated: boolean;
@@ -206,9 +206,10 @@ function newRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): Ce
   return out;
 }
 
-/** The paid/completed colour on a job row's left cells, when it has one. */
+/** The PAID-IN-FULL cell's colour on a job row: green YES, red NO, amber warning. */
 function toneStyle(rowIdx: number, row: SheetRow): RowStyle[] {
-  return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: TONE_COLS }] : [];
+  const col = ACTIVE["B"]!;
+  return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: [col, col + 1] }] : [];
 }
 
 /** Only the synced columns of an existing row — the team's cells stay as they are. */

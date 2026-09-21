@@ -46,8 +46,8 @@ export interface SheetRow {
   totalPayments: number | null; balanceOwed: number | null;
   /** Columns B..D: the paid-in-full / job-completed status text, the last payment's date once paid, the completed tick. */
   pifStatus: string | null; pifDate: string | null; jobComplete: boolean; paidInFull: boolean;
-  /** Colour for the row's left cells: paidComplete · completed · paidOnly · mismatch (paid stage, ledger still owed). */
-  statusTone: "paidComplete" | "completed" | "paidOnly" | "mismatch" | null;
+  /** Colour of the PAID-IN-FULL cell: paid (green) · unpaid (red) · mismatch (amber: paid stage, ledger still owed). */
+  statusTone: "paid" | "unpaid" | "mismatch" | null;
   /** True when a live production schedule on the job has a crew assigned (AJ Sub Scheduled). */
   subScheduled: boolean;
   /** From vendor bills: material vendors (AD), a carting bill (AI), actual costs (BH..BL). */

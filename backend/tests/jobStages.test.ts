@@ -287,7 +287,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(ws.getCell("A2").value).toBe("9/1/2026-9/7/2026");
     const job = ws.getRow(3);
     expect(job.getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
-    expect(job.getCell("B").value).toBe("JOB COMPLETED: awaiting final payment"); // from the stage
+    expect(job.getCell("B").value).toBe("NO");                  // completed, not paid
     expect(job.getCell("D").value).toBe(true);                  // Job Complete ticked
     expect(job.getCell("AC").value).toBe("2609-2-01");
     expect(job.getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");

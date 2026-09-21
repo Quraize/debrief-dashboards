@@ -55,27 +55,28 @@ describe("paymentBreakdown", () => {
   });
 });
 
-describe("jobStatus — columns B..D from the stage and the ledger", () => {
+describe("jobStatus — PAID-IN-FULL yes/no, the PIF date and the completed tick", () => {
   const pay = (date, amount) => ({ id: date, amount, date, method: "cash", methodLabel: "Cash", status: "paid", canceled: false });
-  it("is paid and completed when the ledger is settled in an after-work stage, dated by the last payment", () => {
+  it("says YES (green) when the ledger is settled or the job sits in a Paid stage, dated by the last payment", () => {
     const s = jobStatus({ stage: "Paid New Roof", balanceOwed: 0, totalPayments: 12000, payments: [pay("2026-08-01", 2000), pay("2026-09-10", 10000)] });
-    expect(s).toEqual({ paidInFull: true, completed: true, ledgerOwed: false, status: PIF_STATUS.paidComplete, pifDate: "2026-09-10", tone: "paidComplete" });
+    expect(s).toEqual({ paidInFull: true, completed: true, ledgerOwed: false, status: "YES", pifDate: "2026-09-10", tone: "paid" });
     // The "Paid Complete 20xx" and "Paid & Complete" parking stages count too, even without ledger figures.
-    expect(jobStatus({ stage: "Paid & Complete 2019-2020", balanceOwed: null, totalPayments: null, payments: [] })).toMatchObject({ paidInFull: true, completed: true, status: PIF_STATUS.paidComplete, pifDate: null });
-    expect(jobStatus({ stage: "Client Satisfaction/Referrals", balanceOwed: null, totalPayments: null, payments: [] })).toMatchObject({ tone: "paidComplete" });
+    expect(jobStatus({ stage: "Paid & Complete 2019-2020", balanceOwed: null, totalPayments: null, payments: [] })).toMatchObject({ paidInFull: true, completed: true, status: "YES", pifDate: null });
+    // Paid before the final walk: YES, not yet completed.
+    expect(jobStatus({ stage: "Need Final Walk-Through", balanceOwed: 0, totalPayments: 12000, payments: [pay("2026-09-12", 12000)] })).toMatchObject({ paidInFull: true, completed: false, status: "YES", pifDate: "2026-09-12", tone: "paid" });
   });
-  it("flags a paid stage whose ledger still shows a balance", () => {
+  it("warns (amber) on a paid stage whose ledger still shows a balance", () => {
     expect(jobStatus({ stage: "Warranty", balanceOwed: 3000, totalPayments: 9000, payments: [pay("2026-08-01", 9000)] }))
       .toEqual({ paidInFull: true, completed: true, ledgerOwed: true, status: PIF_STATUS.mismatch, pifDate: "2026-08-01", tone: "mismatch" });
   });
-  it("tells completed-awaiting-payment from paid-before-the-final-walk, and leaves working jobs blank", () => {
-    expect(jobStatus({ stage: "COMPLETED NEED FINAL PAYMENT!!", balanceOwed: 4000, totalPayments: 8000, payments: [] })).toMatchObject({ completed: true, paidInFull: false, status: PIF_STATUS.completed, tone: "completed" });
-    expect(jobStatus({ stage: "Collections", balanceOwed: 4000, totalPayments: 8000, payments: [] })).toMatchObject({ status: PIF_STATUS.completed });
-    expect(jobStatus({ stage: "Need Final Walk-Through", balanceOwed: 0, totalPayments: 12000, payments: [pay("2026-09-12", 12000)] })).toMatchObject({ paidInFull: true, completed: false, status: PIF_STATUS.paidOnly, pifDate: "2026-09-12", tone: "paidOnly" });
+  it("says NO (red) for everything else that is not cancelled, and ticks completed from the stage", () => {
+    expect(jobStatus({ stage: "COMPLETED NEED FINAL PAYMENT!!", balanceOwed: 4000, totalPayments: 8000, payments: [] })).toMatchObject({ completed: true, paidInFull: false, status: "NO", tone: "unpaid" });
+    expect(jobStatus({ stage: "Collections", balanceOwed: 4000, totalPayments: 8000, payments: [] })).toMatchObject({ completed: true, status: "NO" });
     // No money received yet: a zero total is not "paid".
-    expect(jobStatus({ stage: "Roof/Siding Scheduled", balanceOwed: 0, totalPayments: 0, payments: [] })).toMatchObject({ paidInFull: false, status: null, tone: null });
-    expect(jobStatus({ stage: "Production Started", balanceOwed: 8000, totalPayments: 2000, payments: [pay("2026-08-01", 2000)] })).toMatchObject({ status: null, pifDate: null });
-    expect(jobStatus({ stage: "Cancel: NO FOLLOW UP(MGR APPR)", balanceOwed: 0, totalPayments: 500, payments: [] })).toMatchObject({ paidInFull: false, status: null });
+    expect(jobStatus({ stage: "Roof/Siding Scheduled", balanceOwed: 0, totalPayments: 0, payments: [] })).toMatchObject({ paidInFull: false, completed: false, status: "NO", tone: "unpaid" });
+    expect(jobStatus({ stage: "Production Started", balanceOwed: 8000, totalPayments: 2000, payments: [pay("2026-08-01", 2000)] })).toMatchObject({ status: "NO", pifDate: null });
+    // Cancelled: blank, no colour.
+    expect(jobStatus({ stage: "Cancel: NO FOLLOW UP(MGR APPR)", balanceOwed: 0, totalPayments: 500, payments: [] })).toEqual({ paidInFull: false, completed: false, ledgerOwed: false, status: null, pifDate: null, tone: null });
   });
 });
 

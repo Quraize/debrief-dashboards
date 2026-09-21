@@ -238,13 +238,12 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   // against the team's hand-applied fills; this also restores rows greyed by
   // that earlier push. Fills are never touched.
   stale: { textFormat: { italic: false, foregroundColor: rgb("000000") } },
-  // Paid / completed, on the row's left cells only (A..D): fill only, so the
-  // team's own text formats stay. Never reset — the status text in B is the
-  // word; the colour is the flag.
-  paidComplete: { backgroundColor: rgb("B7E1CD") },  // green: paid in full and completed
-  completed: { backgroundColor: rgb("FCE8B2") },     // amber: completed, awaiting payment
-  paidOnly: { backgroundColor: rgb("CFE2F3") },      // blue: paid, install not yet complete
-  mismatch: { backgroundColor: rgb("F4C7C3") },      // red: paid stage, ledger still shows a balance
+  // The PAID-IN-FULL cell (B) on a job row: YES green, NO red, and amber for
+  // a paid stage whose ledger still shows a balance. Set on every push, so a
+  // job that gets paid turns from red to green.
+  paid: { backgroundColor: rgb("B7E1CD"), textFormat: { bold: true, foregroundColor: rgb("0B6B2E") } },
+  unpaid: { backgroundColor: rgb("F4C7C3"), textFormat: { bold: true, foregroundColor: rgb("9C1C13") } },
+  mismatch: { backgroundColor: rgb("FCE8B2"), textFormat: { bold: true, foregroundColor: rgb("7A4B00") } },
 };
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {

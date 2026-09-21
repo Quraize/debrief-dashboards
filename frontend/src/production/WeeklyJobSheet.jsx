@@ -25,7 +25,7 @@ const sum = (rows, key) => rows.reduce((n, r) => n + (r[key] == null ? 0 : Numbe
 // office needs to recognise a row (customer, town). The CSV is the full A..AB.
 const VISIBLE = [
   { key: "label", label: "Town/Address/Customer", col: "A" },
-  { key: "pifStatus", label: "Paid-in-full / Completed", col: "B" },
+  { key: "pifStatus", label: "Paid-in-full", col: "B" },
   { key: "jobNumber", label: "Job #", col: "AC" },
   { key: "division", label: "Division", col: "K" },
   { key: "trades", label: "Trades", col: "L" },

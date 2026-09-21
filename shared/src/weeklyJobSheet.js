@@ -115,30 +115,30 @@ export function livePayments(payments) {
 
 // ── Paid in full / job completed (columns B, C, D) ─────────────────────────
 //
+// Column B answers one question, PAID-IN-FULL: YES (green) or NO (red).
 // Paid in full: the ledger shows nothing owed with money received, OR the
 // job sits in one of the office's "Paid" stages (a third of the jobs on the
-// sheet have no ledger figures at all, so the stage has to count).
-// Completed: the stage says so — see jobStages. A job in a Paid stage whose
-// ledger still shows a balance is called out: either the payment was never
-// entered in JobProgress or the totals were never fetched.
+// sheet have no ledger figures at all, so the stage has to count). A job in
+// a Paid stage whose ledger still shows a balance is YES with a warning
+// (amber): either the payment was never entered in JobProgress or the totals
+// were never fetched. Completed is column D's tick — the stage says so, see
+// jobStages. A cancelled job gets neither.
 
 export const PIF_STATUS = {
-  paidComplete: "PAID-IN-FULL: JOB COMPLETED",
-  mismatch: "PAID-IN-FULL: JOB COMPLETED (ledger still shows a balance)",
-  completed: "JOB COMPLETED: awaiting final payment",
-  paidOnly: "PAID-IN-FULL: job not yet complete",
+  yes: "YES",
+  no: "NO",
+  mismatch: "YES (ledger still shows a balance)",
 };
 
 /**
  * `{ paidInFull, completed, ledgerOwed, status, pifDate, tone }` for a job.
- * `status` is the text of column B (null = blank); `pifDate` the last
- * payment's date once paid; `tone` colours the row's left cells:
- * paidComplete (green) · completed (amber) · paidOnly (blue) · mismatch (red).
+ * `status` is the text of column B (null = blank, cancelled); `pifDate` the
+ * last payment's date once paid; `tone` colours the B cell:
+ * paid (green) · unpaid (red) · mismatch (amber).
  */
 export function jobStatus({ stage, balanceOwed, totalPayments, payments }) {
   const s = String(stage ?? "");
-  const none = { paidInFull: false, completed: false, ledgerOwed: false, status: null, pifDate: null, tone: null };
-  if (CANCELLATION_STAGE.test(s)) return none;
+  if (CANCELLATION_STAGE.test(s)) return { paidInFull: false, completed: false, ledgerOwed: false, status: null, pifDate: null, tone: null };
   const owed = num(balanceOwed), received = num(totalPayments);
   const stagePaid = isPaidStage(s);
   const ledgerPaid = owed !== null && owed <= 0 && received !== null && received > 0;
@@ -148,12 +148,8 @@ export function jobStatus({ stage, balanceOwed, totalPayments, payments }) {
   const mismatch = stagePaid && ledgerOwed;
   const live = livePayments(payments);
   const pifDate = paidInFull && live.length ? (live[live.length - 1].date ?? null) : null;
-  if (paidInFull && completed) {
-    return { paidInFull, completed, ledgerOwed: mismatch, status: mismatch ? PIF_STATUS.mismatch : PIF_STATUS.paidComplete, pifDate, tone: mismatch ? "mismatch" : "paidComplete" };
-  }
-  if (completed) return { paidInFull, completed, ledgerOwed: false, status: PIF_STATUS.completed, pifDate, tone: "completed" };
-  if (paidInFull) return { paidInFull, completed, ledgerOwed: false, status: PIF_STATUS.paidOnly, pifDate, tone: "paidOnly" };
-  return none;
+  if (!paidInFull) return { paidInFull, completed, ledgerOwed: false, status: PIF_STATUS.no, pifDate: null, tone: "unpaid" };
+  return { paidInFull, completed, ledgerOwed: mismatch, status: mismatch ? PIF_STATUS.mismatch : PIF_STATUS.yes, pifDate, tone: mismatch ? "mismatch" : "paid" };
 }
 
 export function paymentBreakdown(payments) {
