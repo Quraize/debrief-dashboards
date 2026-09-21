@@ -104,6 +104,36 @@ export function visitStatus(d) {
 }
 
 /**
+ * The visits behind each card, as lists — the funnel counts their length and
+ * the detail page shows their rows, so a card and its list can never disagree.
+ *
+ * Each list is the population the Sales dashboard counts under that name:
+ * `ran` is its Appointments (appointment opportunities), `demo` its Demos,
+ * `noDemo` its No Demo, `noSee` its No See. `pending` is an opportunity that
+ * neither demoed nor recorded a no-demo — a result not yet settled.
+ */
+export function visitBreakdown(visits) {
+  const ds = nonInsuranceDebriefs(visits);
+  const aq = appointmentQualityStats(ds);
+  const isDemo = (d) => String(d?.appointment_outcome ?? "").startsWith("Demo Completed");
+  const demo = ds.filter(isDemo);
+  // The same rule appointmentQualityStats applies, kept in step by assertion:
+  // eligible type, not core-excluded, not a no-see, and a no-demo outcome.
+  const noDemo = ds.filter((d) => isNoDemoOutcome(d) && !isDemo(d) && !isNoSeeRecord(d));
+  const noSee = ds.filter((d) => isNoSeeRecord(d) && !isDemo(d));
+  const opportunities = ds.filter(isAppointmentOpportunity);
+  const inNoDemo = new Set(noDemo);
+  const pending = opportunities.filter((d) => !isDemo(d) && !inNoDemo.has(d));
+  const sold = demo.filter(isSale);
+  return {
+    demo, noDemo, noSee, pending, sold,
+    notSold: demo.filter((d) => !isSale(d)),
+    ran: [...demo, ...noDemo, ...pending],
+    aqNoDemo: aq.aqNoDemo, aqNoSee: aq.aqNoSee,
+  };
+}
+
+/**
  * A debrief belongs to the range by the date of the VISIT it describes, not
  * when it was typed — a Monday debrief of a Friday demo is Friday's.
  */
@@ -120,7 +150,8 @@ function debriefInRange(d, from, to) {
  *   `created_in_range` flag is treated as having arrived in the range, so the
  *   cohort query — which returns only those — needs no flag at all.
  * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null,
- *   signedRevenue?: number|null, signedSales?: number|null, visits?: Array<object>|null }} [opts]
+ *   signedRevenue?: number|null, signedSales?: number|null, visits?: Array<object>|null,
+ *   awaiting?: number|null }} [opts]
  *   `signedRevenue` is the dashboards' signed-month total for the range; when given it is
  *   total for the range and `signedSales` its count; when given they are what the Sold card
  *   reports, so the card's number and its money come from one population. `visits` is every debrief for a visit in the range — the
@@ -152,7 +183,7 @@ export function leadFunnel(rows, opts = {}) {
   // match the Sales dashboard. Cohort mode counts leads, always.
   const byVisit = activity && Array.isArray(opts.visits);
   const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
-  let sold = 0, revenue = 0;
+  let sold = 0, revenue = 0, notSoldVisits = null;
   if (byVisit) {
     // Every card is the card of the same name on the Sales dashboard, counted
     // off the same population by the same rules, so management reads one set
@@ -162,14 +193,14 @@ export function leadFunnel(rows, opts = {}) {
     //   No See   = its No See          Sold    = its Sales (signed in the range)
     // Set is those plus bookings with no debrief yet, which is the Marketing
     // dashboard's Set Appointments.
-    const ds = nonInsuranceDebriefs(opts.visits);
-    const aq = appointmentQualityStats(ds);
-    status.demo = ds.filter((d) => String(d.appointment_outcome ?? "").startsWith("Demo Completed")).length;
-    status.noDemo = aq.aqNoDemo;
-    status.noSee = aq.aqNoSee;
-    const opportunities = ds.filter(isAppointmentOpportunity).length;
-    status.pending = Math.max(0, opportunities - status.demo - status.noDemo);
-    for (const d of ds) if (String(d.appointment_outcome ?? "").startsWith("Demo Completed") && isSale(d)) { sold++; revenue += Number(d.sale_amount) || 0; }
+    const b = visitBreakdown(opts.visits);
+    status.demo = b.demo.length;
+    status.noDemo = b.noDemo.length;
+    status.noSee = b.noSee.length;
+    status.pending = b.pending.length;
+    sold = b.sold.length;
+    notSoldVisits = b.notSold.length;
+    revenue = b.sold.reduce((n, d) => n + (Number(d.sale_amount) || 0), 0);
   } else {
     for (const r of setRows) {
       const ds = activity ? (r.debriefs ?? []).filter((d) => debriefInRange(d, from, to)) : (r.debriefs ?? []);
@@ -188,11 +219,15 @@ export function leadFunnel(rows, opts = {}) {
   // Awaiting, so the column sums: Set = Ran + No See + Awaiting.
   const ranVisits = status.demo + status.noDemo + status.pending;
   if (byVisit) {
-    status.awaiting = Math.max(0, (opts.appointments ?? 0) - ranVisits - status.noSee);
+    // Bookings in the range with no debrief filed. Counted, not inferred from
+    // the visit total: a reset demo often has no booking row of its own, and
+    // subtracting would let the two cancel out and hide a real gap.
+    status.awaiting = opts.awaiting ?? Math.max(0, (opts.appointments ?? 0) - ranVisits - status.noSee);
   }
   const set = byVisit ? ranVisits + status.noSee + status.awaiting : setRows.length;
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const soldCount = activity && opts.signedSales != null ? opts.signedSales : sold;
+  const notSoldCount = notSoldVisits ?? Math.max(0, status.demo - soldCount);
   const ran = status.demo + status.noDemo + status.pending;
   const demo = status.demo;
   return {
@@ -215,8 +250,11 @@ export function leadFunnel(rows, opts = {}) {
     // which is the same population its revenue comes from. A demo from an
     // earlier month closed now is one of them, so Sold can exceed the sales
     // made by the demos counted above — `demoSold` keeps that figure.
-    sold: soldCount, demoSold: sold, notSold: Math.max(0, demo - soldCount),
-    soldRate: pct(soldCount, demo), notSoldRate: pct(Math.max(0, demo - soldCount), demo),
+    // No Sale is the demos here that have not sold — counted from the same
+    // list the card shows, not by subtracting a Sold that is measured on a
+    // different population (sales signed in the range).
+    sold: soldCount, demoSold: sold, notSold: notSoldCount,
+    soldRate: pct(soldCount, demo), notSoldRate: pct(notSoldCount, demo),
     // The Sold card shows the SAME money as the Sales dashboard: every sale
     // signed in the range, whenever its demo happened (Rosco Coleman demoed
     // in August and signed on 3 September — September's money). The funnel's

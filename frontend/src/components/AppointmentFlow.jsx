@@ -49,7 +49,7 @@ export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/
   else if (isLoading) body = <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
   else if (error || !f) body = <Empty>The flow could not be loaded right now.</Empty>;
   else if (f.leads === 0 && f.set === 0) body = <Empty>Nothing happened in this period, and no leads came in.</Empty>;
-  else body = <Funnel f={f} activity={activity} />;
+  else body = <Funnel f={f} activity={activity} from={from} to={to} basis={basis} />;
 
   return (
     <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
@@ -82,69 +82,73 @@ export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/
   );
 }
 
-function Funnel({ f, activity }) {
+function Funnel({ f, activity, from, to, basis }) {
   const reasons = f.reasons.filter((r) => r.count > 0);
   const byVisit = !!f.byVisit;
   const unit = byVisit ? "visits" : "leads";
+  // Every card opens the rows behind its number. Range, basis and card travel
+  // in the URL so a manager can send the link straight to whoever owns them.
+  const href = (card, label) => `/lead-flow${qs({ from, to, basis, card, label })}`;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] gap-3 xl:gap-2 items-start">
       <Column>
-        <Box tone="navy" label="Leads" value={f.leads} note="Jobs created in JobProgress in this range" />
+        <Box tone="navy" label="Leads" value={f.leads} note="Jobs created in JobProgress in this range" to={href("leads", "Leads")} />
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Valid Leads" value={f.valid} share={f.validRate} of="of leads"
+        <Box tone="green" label="Valid Leads" value={f.valid} share={f.validRate} of="of leads" to={href("valid", "Valid Leads")}
           note="Leads minus disqualified. Everything to the right is measured against this number." />
-        <Box tone="red" label="Disqualified" value={f.disqualified} share={f.disqualifiedRate} of="of leads"
+        <Box tone="red" label="Disqualified" value={f.disqualified} share={f.disqualifiedRate} of="of leads" to={href("disqualified", "Disqualified")}
           note="Moved to a DQ stage in JobProgress by the call center or a manager" />
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid"
+        <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid" to={href("set", "Appointment Set")}
           note={activity
             ? `Visits booked in this period, resets counted separately — the same basis as the Sales and Marketing dashboards.${f.setFromEarlier ? ` ${f.setFromEarlier} belong to leads that came in before this period.` : ""}`
             : "A sales appointment exists for the lead"} />
-        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid"
+        <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid" to={href("notSet", "Not Set")}
           note={activity ? "Valid leads from this period with no appointment booked yet" : undefined} />
         {reasons.length > 0 && (
           <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2 text-xs">
             {reasons.map((r) => (
-              <div key={r.key} className="flex items-baseline justify-between gap-2 py-0.5">
+              <Link key={r.key} to={href(`reason:${r.key}`, `Not Set — ${r.label}`)}
+                className="flex items-baseline justify-between gap-2 py-0.5 hover:text-accent">
                 <span className="text-muted-foreground">{r.label}</span>
                 <span className="font-semibold tabular-nums">{r.count} <span className="text-muted-foreground font-normal">{r.share}%</span></span>
-              </div>
+              </Link>
             ))}
           </div>
         )}
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Ran" value={f.ran} share={f.ranRate} of="of set"
+        <Box tone="green" label="Ran" value={f.ran} share={f.ranRate} of="of set" to={href("ran", "Ran")}
           note={byVisit ? "Visits the rep attended" : "The rep attended at least one visit"} />
-        <Box tone="red" label="No See" value={f.noSee} share={f.noSeeRate} of="of set"
+        <Box tone="red" label="No See" value={f.noSee} share={f.noSeeRate} of="of set" to={href("noSee", "No See")}
           note={byVisit ? "Visits that were a no-show or cancelled" : "Every visit so far was a no-show or cancelled"} />
         {f.awaiting > 0 && (
-          <Box tone="slate" label="Awaiting" value={f.awaiting} share={f.awaitingRate} of="of set"
+          <Box tone="slate" label="Awaiting" value={f.awaiting} share={f.awaitingRate} of="of set" to={href("awaiting", "Awaiting")}
             note={`Booked but not yet run, or run and not yet debriefed (${unit})`} />
         )}
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} of="of ran"
+        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} of="of ran" to={href("demo", "Demo")}
           note={byVisit ? "Visits that gave a demo — the Sales dashboard's Demos" : undefined} />
-        <Box tone="amber" label="No Demo" value={f.noDemo} share={f.noDemoRate} of="of ran" />
+        <Box tone="amber" label="No Demo" value={f.noDemo} share={f.noDemoRate} of="of ran" to={href("noDemo", "No Demo")} />
         {f.pending > 0 && (
-          <Box tone="slate" label="Result Pending" value={f.pending} share={f.pendingRate} of="of ran"
+          <Box tone="slate" label="Result Pending" value={f.pending} share={f.pendingRate} of="of ran" to={href("pending", "Result Pending")}
             note="Ran; outcome not yet settled (estimate in progress)" />
         )}
       </Column>
       <Connector />
       <Column>
-        <Box tone="gold" label="Sold" value={f.sold} share={f.soldRate} of="of demos" sub={money(f.revenue)}
+        <Box tone="gold" label="Sold" value={f.sold} share={f.soldRate} of="of demos" sub={money(f.revenue)} to={href("sold", "Sold")}
           note={byVisit
             ? `Sales signed in this period — the Sales dashboard's Sales and Revenue exactly. A demo from an earlier month closed now counts here, so this can exceed the sales made by the ${f.demo} demos above (${f.demoSold} of those have sold).`
             : "Leads that have sold to date, later phone or email closes included"} />
-        <Box tone="slate" label="No Sale" value={f.notSold} share={f.notSoldRate} of="of demos" />
+        <Box tone="slate" label="No Sale" value={f.notSold} share={f.notSoldRate} of="of demos" to={href("notSold", "No Sale")} />
       </Column>
     </div>
   );
@@ -181,10 +185,12 @@ const TONES = {
   slate: "bg-secondary/60 text-foreground border-border",
 };
 
-function Box({ tone, label, value, share, of, sub, note }) {
+function Box({ tone, label, value, share, of, sub, note, to }) {
   const dark = tone === "navy";
+  const Tag = to ? Link : "div";
+  const props = to ? { to, title: note ? `${note} — click for the list` : "Click for the list" } : { title: note || undefined };
   return (
-    <div className={`rounded-xl border p-3 ${TONES[tone]}`} title={note || undefined}>
+    <Tag {...props} className={`block rounded-xl border p-3 ${TONES[tone]} ${to ? "transition-shadow hover:shadow-md hover:ring-2 hover:ring-accent/40 cursor-pointer" : ""}`}>
       <div className={`text-[11px] uppercase tracking-wide font-semibold ${dark ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{label}</div>
       <div className="flex items-baseline gap-2 mt-0.5">
         <span className="text-2xl font-heading font-bold tabular-nums">{value}</span>
@@ -194,6 +200,6 @@ function Box({ tone, label, value, share, of, sub, note }) {
       </div>
       {sub && <div className="text-sm font-semibold mt-0.5">{sub}</div>}
       {note && <div className={`text-[11px] mt-1 leading-snug ${dark ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{note}</div>}
-    </div>
+    </Tag>
   );
 }

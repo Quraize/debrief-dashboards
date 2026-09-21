@@ -134,19 +134,23 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     expect(f).toMatchObject({
       basis: "activity",
       leads: 15, valid: 13, disqualified: 2, notSet: 5,   // the lead columns do not move
-      set: 8, setFromEarlier: 1, setRate: null, byVisit: true,
+      setFromEarlier: 1, setRate: null, byVisit: true,
       appointments: 8,                                    // visits dated in September, resets included
       // Counted as VISITS off the Sales dashboard's own populations: j4 was a
       // no-show and then a reset demo, which is two visits, not one lead, and
       // j7's DQ counts as an appointment and a no-demo there whether or not a
       // manager has approved it yet.
-      ran: 6, noSee: 2, awaiting: 0,
+      // j6 is booked for September with no debrief filed: that is the Awaiting
+      // card, counted from the bookings themselves so the list behind it agrees.
+      ran: 6, noSee: 2, awaiting: 1, set: 9,
       demo: 4, noDemo: 2, pending: 0,
       // The Sold card reports the Sales dashboard's Sales and Revenue: every
       // sale SIGNED in September — the two demos above plus Ruben's June demo,
       // closed by phone on 9 September. His visit is June's, his sale is
       // September's, so Sold (3) exceeds the demos here that sold (2).
-      sold: 3, demoSold: 2, notSold: 1, revenue: 65399, demoRevenue: 51000,
+      // Sold is every sale signed in September (3); No Sale is the demos here
+      // that have not sold (2). Different populations, so they do not sum to 4.
+      sold: 3, demoSold: 2, notSold: 2, revenue: 65399, demoRevenue: 51000,
     });
     expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
     expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
@@ -174,6 +178,57 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
   it("puts the 11:30pm lead in August, not September", async () => {
     const aug = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-08-01&to=2026-08-31&basis=cohort", ...auth })).json();
     expect(aug).toMatchObject({ leads: 2, disqualified: 1, valid: 1, set: 1, notSet: 0 });
+  });
+
+  it("lists the rows behind every card, each list as long as its own number", async () => {
+    const f = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30", ...auth })).json();
+    const detail = async (card: string) =>
+      (await app.inject({ method: "GET", url: `/api/leads/flow/detail?from=2026-09-01&to=2026-09-30&card=${encodeURIComponent(card)}`, ...auth })).json();
+
+    // Every card a manager can click, checked against the number it was clicked from.
+    for (const card of ["leads", "valid", "disqualified", "notSet", "ran", "noSee", "awaiting", "demo", "noDemo", "pending", "sold", "notSold", "set"] as const) {
+      const d = await detail(card);
+      expect(d.rows, card).toHaveLength(d.count);
+      if (card !== "set") expect(d.count, card).toBe(f[card]);
+    }
+    expect((await detail("set")).count).toBe(f.ran + f.noSee);   // plus any booking with no debrief, of which there are none here
+
+    // Disqualified: the two DQ'd leads, named, with a link into JobProgress.
+    const dq = await detail("disqualified");
+    expect(dq).toMatchObject({ kind: "lead", label: "Disqualified", count: 2 });
+    expect(dq.rows.map((r: { jobNumber: string }) => r.jobNumber).sort()).toEqual(["2609-0008-01", "2609-0009-01"]);
+    // Each row carries what the page renders: who, where in the workflow, when.
+    expect(dq.rows[0]).toMatchObject({ kind: "lead", stage: "DQ (MGR APPROVAL)", date: "2026-09-08" });
+    expect(Object.keys(dq.rows[0]).sort()).toEqual(["customer", "date", "id", "jobNumber", "jpUrl", "kind", "place", "reason", "stage"]);
+
+    // Not Set, split by the reason under the card — the same reason counts.
+    const working = await detail("reason:working");
+    expect(working).toMatchObject({ label: "Not Set — Still being worked", count: 3 });
+    expect(working.rows.every((r: { reason: string }) => r.reason === "Still being worked")).toBe(true);
+
+    // Sold lists the sales its money comes from: Ruben's June demo, signed in September.
+    const sold = await detail("sold");
+    expect(sold.count).toBe(3);
+    const ruben = sold.rows.find((r: { customer: string }) => r.customer?.includes("2606-0020-01"));
+    expect(ruben).toMatchObject({ date: "2026-06-27", signedDate: "2026-09-09", amount: 14399 });
+    expect(sold.rows.reduce((n: number, r: { amount: number }) => n + r.amount, 0)).toBe(f.revenue);
+
+    // A no-see row names the rep, so a manager can act on it.
+    expect((await detail("noSee")).rows[0]).toMatchObject({ kind: "visit", rep: "Jason Malarchak", setter: "Ashley Pascual" });
+  });
+
+  it("refuses an unknown card, a bad reason and the production role", async () => {
+    const url = "/api/leads/flow/detail?from=2026-09-01&to=2026-09-30";
+    expect((await app.inject({ method: "GET", url: `${url}&card=nonsense`, ...auth })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: `${url}&card=reason:nonsense`, ...auth })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url, ...auth })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: `${url}&card=leads` })).statusCode).toBe(401);
+    // Production accounts have no business on the sales side, and this list carries names.
+    await db.owner.query(`INSERT INTO app_user (email, full_name, role, password_hash) VALUES ($1, $2, $3, $4)`,
+      ["crew@allied.test", "Crew Lead", "production", await hashPassword(PASSWORD)]);
+    const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "crew@allied.test", password: PASSWORD } });
+    const crew = { cookies: { allied_session: cookieFrom(login, "allied_session") }, headers: { "x-csrf-token": cookieFrom(login, "allied_csrf") } };
+    expect((await app.inject({ method: "GET", url: `${url}&card=leads`, ...crew })).statusCode).toBe(403);
   });
 
   it("rejects bad ranges and anonymous callers", async () => {

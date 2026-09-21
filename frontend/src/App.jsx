@@ -21,6 +21,7 @@ import ExportCenter from '@/pages/ExportCenter';
 import AdminSettings from '@/pages/AdminSettings';
 import ImportAppointments from '@/pages/ImportAppointments';
 import ResultsReview from '@/pages/ResultsReview';
+import LeadFlowDetail from "@/pages/LeadFlowDetail";
 import ManagerReport from '@/pages/ManagerReport';
 import JobProgressSync from '@/pages/JobProgressSync';
 import PriceReview from '@/pages/PriceReview';
@@ -93,6 +94,7 @@ const AuthenticatedApp = () => {
           <Route path="/admin" element={<AdminSettings />} />
           <Route path="/import" element={<ImportAppointments />} />
           <Route path="/results" element={<ResultsReview />} />
+          <Route path="/lead-flow" element={<LeadFlowDetail />} />
           <Route path="/debrief-approvals" element={<DebriefApprovals />} />
           <Route path="/manager-report" element={<ManagerReport />} />
           <Route path="/jobprogress-sync" element={<JobProgressSync />} />
