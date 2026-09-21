@@ -22,9 +22,13 @@ const c = (col, header, over = {}) => ({ col, header, type: "text", width: 10, f
 
 export const MASTER_COLUMNS = [
   c("A", "Town/Address/Customer", { key: "label", width: 32.6 }),
-  c("B", "PIF", { type: "check", fill: "magenta" }),
-  c("C", "PIF Date", { type: "date", fill: "magenta", width: 8 }),
-  c("D", "Job Complete", { type: "check", fill: "magenta" }),
+  // B..D were the team's hand-ticked PIF / PIF Date / Job Complete. Since
+  // 2026-09-21 JobProgress fills them (weeklyJobSheet.jobStatus): B carries
+  // the status text and was renamed — `renamedFrom` lets the push recognise
+  // the old heading on the tab, rewrite it and drop the checkbox validation.
+  c("B", "PAID-IN-FULL: JOB COMPLETED", { key: "pifStatus", fill: "magenta", width: 24, renamedFrom: ["PIF"] }),
+  c("C", "PIF Date", { key: "pifDate", type: "date", fill: "magenta", width: 8 }),
+  c("D", "Job Complete", { key: "jobComplete", type: "check", fill: "magenta" }),
   c("E", "Job Folder", { type: "check", fill: null }),
   c("F", "Site Assess", { type: "check" }),
   c("G", "Job Costing Complete", { type: "check" }),

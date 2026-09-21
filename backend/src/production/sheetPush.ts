@@ -238,6 +238,13 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   // against the team's hand-applied fills; this also restores rows greyed by
   // that earlier push. Fills are never touched.
   stale: { textFormat: { italic: false, foregroundColor: rgb("000000") } },
+  // Paid / completed, on the row's left cells only (A..D): fill only, so the
+  // team's own text formats stay. Never reset — the status text in B is the
+  // word; the colour is the flag.
+  paidComplete: { backgroundColor: rgb("B7E1CD") },  // green: paid in full and completed
+  completed: { backgroundColor: rgb("FCE8B2") },     // amber: completed, awaiting payment
+  paidOnly: { backgroundColor: rgb("CFE2F3") },      // blue: paid, install not yet complete
+  mismatch: { backgroundColor: rgb("F4C7C3") },      // red: paid stage, ledger still shows a balance
 };
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
@@ -246,21 +253,29 @@ export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCo
   if (plan.summary.headerCreated) reqs.push(...setupRequests(sheetId, grid));
   else reqs.push(...growRequests(sheetId, grid));
   const lastCol = colIndex("HZ") + 1;
-  for (const op of plan.ops) opRequests(op, sheetId, lastCol, reqs);
+  const lastRow = Math.max(FORMAT_ROWS, grid.rowCount);
+  for (const op of plan.ops) opRequests(op, sheetId, lastCol, lastRow, reqs);
   return reqs;
 }
 
-function opRequests(op: PlanOp, sheetId: number, lastCol: number, reqs: unknown[]): void {
+function opRequests(op: PlanOp, sheetId: number, lastCol: number, lastRow: number, reqs: unknown[]): void {
   if (op.type === "insertRows") {
     reqs.push({ insertDimension: { range: { sheetId, dimension: "ROWS", startIndex: op.at, endIndex: op.at + op.count }, inheritFromBefore: false } });
     return;
   }
+  if (op.type === "clearValidation") {
+    // No rule = remove it, on every body row of the column.
+    reqs.push({ setDataValidation: { range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: op.col, endColumnIndex: op.col + 1 } } });
+    return;
+  }
   if (op.type === "style") {
     for (const r of op.rows) {
+      const fmt = ROW_STYLES[r.style] ?? ROW_STYLES["total"]!;
+      const [c0, c1] = r.cols ?? [0, lastCol];
       reqs.push({ repeatCell: {
-        range: { sheetId, startRowIndex: r.row, endRowIndex: r.row + 1, startColumnIndex: 0, endColumnIndex: lastCol },
-        cell: { userEnteredFormat: ROW_STYLES[r.style] ?? ROW_STYLES["total"] },
-        fields: "backgroundColor" in (ROW_STYLES[r.style] ?? ROW_STYLES["total"]!) ? "userEnteredFormat(backgroundColor,textFormat)" : "userEnteredFormat.textFormat",
+        range: { sheetId, startRowIndex: r.row, endRowIndex: r.row + 1, startColumnIndex: c0, endColumnIndex: c1 },
+        cell: { userEnteredFormat: fmt },
+        fields: `userEnteredFormat(${Object.keys(fmt).join(",")})`, // only the parts the style sets
       } });
     }
     return;

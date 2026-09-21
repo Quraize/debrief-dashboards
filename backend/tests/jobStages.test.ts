@@ -276,7 +276,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const ws = wb.getWorksheet("WEEKLY JOB SHEET")!;
     // Row 1: the tab's headers at the tab's own letters, including the far-right JP columns.
     expect(ws.getCell("A1").value).toBe("Town/Address/Customer");
-    expect(ws.getCell("B1").value).toBe("PIF");
+    expect(ws.getCell("B1").value).toBe("PAID-IN-FULL: JOB COMPLETED");
     expect(ws.getCell("M1").value).toBe("Job Stage");
     expect(ws.getCell("AB1").value).toBe("Balance Owed");
     expect(ws.getCell("AC1").value).toBe("Job #");
@@ -287,7 +287,8 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(ws.getCell("A2").value).toBe("9/1/2026-9/7/2026");
     const job = ws.getRow(3);
     expect(job.getCell("A").value).toBe("Wayne/2 Main St/Joseph Lorent");
-    expect(job.getCell("B").value).toBe(false);                 // checkbox, unticked
+    expect(job.getCell("B").value).toBe("JOB COMPLETED: awaiting final payment"); // from the stage
+    expect(job.getCell("D").value).toBe(true);                  // Job Complete ticked
     expect(job.getCell("AC").value).toBe("2609-2-01");
     expect(job.getCell("M").value).toBe("COMPLETED NEED FINAL PAYMENT!!");
     expect(job.getCell("R").value).toBe(4552);

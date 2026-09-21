@@ -72,6 +72,35 @@ export function stageOrder(name) {
   return STAGE_GROUPS.indexOf(g) * 100 + g.stages.findIndex((s) => stageKey(s) === k);
 }
 
+// ── Done and paid ─────────────────────────────────────────────────────────
+//
+// JobProgress's completion_date is a target, not a fact: it is set on jobs
+// still in Production Started and Roof/Siding Scheduled. The stage is what
+// the office moves when the work is really over, so the stage decides.
+
+/** Work finished, money still open. */
+export const COMPLETED_UNPAID_STAGES = ["COMPLETED NEED FINAL PAYMENT!!", "Collections"];
+/** The office parks a job here once it is paid; "Paid Complete 20xx" and
+ *  "Paid & Complete 2019-2020" are caught by the leading "Paid". */
+export const PAID_STAGES = [
+  "Paid New Roof", "Paid Siding/Repair/MISC/ETC", "Paid Repair/Remodel", "Paid Don't Contact",
+  "Warranty", "Client Satisfaction/Referrals", "3-Month Touch Point", "12-Month Touch Point",
+  "Annual Follow Up", "Annual Jobs & Subscriptions", "Closed Warranty Claims",
+];
+const PAID_KEYS = new Set(PAID_STAGES.map(stageKey));
+const COMPLETED_KEYS = new Set([...COMPLETED_UNPAID_STAGES, "Open Warranty Claims/CallBacks"].map(stageKey));
+
+/** The stage says the job has been paid in full. */
+export function isPaidStage(name) {
+  const k = stageKey(name);
+  return PAID_KEYS.has(k) || /^paid/.test(k); // stageKey drops spaces: "paidcomplete2026"
+}
+
+/** The stage says the work is finished (every paid stage is, plus the awaiting-payment ones and warranty work). */
+export function isCompletedStage(name) {
+  return isPaidStage(name) || COMPLETED_KEYS.has(stageKey(name));
+}
+
 /** Whole days a job has sat in its current stage. */
 export function daysInStage(stageLastModified, now = new Date()) {
   if (!stageLastModified) return null;

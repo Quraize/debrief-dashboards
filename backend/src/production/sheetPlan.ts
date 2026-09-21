@@ -25,17 +25,23 @@ import { stageKey } from "@allied/shared/jobStages";
 import type { SheetRow } from "./weeklyJobSheet.js";
 import type { CellValue } from "../integrations/google/sheets.js";
 
-type Column = { col: string; header: string; key?: string; type: string; hidden?: boolean; list?: string[]; formula?: string; fill?: string | null };
+type Column = { col: string; header: string; key?: string; type: string; hidden?: boolean; list?: string[]; formula?: string; fill?: string | null; renamedFrom?: string[] };
 
 export interface WeekInput { from: string; to: string; rows: SheetRow[] }
 
 export interface CellWrite { row: number; col: number; value: CellValue | { formula: string } }
-export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale";
-export interface RowStyle { row: number; style: RowStyleName }
+export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale" | "paidComplete" | "completed" | "paidOnly" | "mismatch";
+/** A row's format; `cols` = [start, end) limits it to some columns (default: the whole row). */
+export interface RowStyle { row: number; style: RowStyleName; cols?: [number, number] }
 export type PlanOp =
   | { type: "insertRows"; at: number; count: number }
   | { type: "write"; cells: CellWrite[] }
-  | { type: "style"; rows: RowStyle[] };
+  | { type: "style"; rows: RowStyle[] }
+  /** Drop a column's data validation (a renamed checkbox column that now holds text). */
+  | { type: "clearValidation"; col: number };
+
+/** The left cells that take the paid/completed colour: A..D. */
+export const TONE_COLS: [number, number] = [0, 4];
 
 export interface PlanSummary {
   headerCreated: boolean;
@@ -53,6 +59,8 @@ export interface PlanSummary {
   locks: WeekLock[];
   /** Synced columns written where the TAB's heading sits rather than the template's letter. */
   columnsFollowed: { header: string; template: string; tab: string }[];
+  /** Headings rewritten because the template renamed them (B: "PIF" → the status column). */
+  headersRenamed: { from: string; to: string; col: string }[];
 }
 
 /**
@@ -173,6 +181,8 @@ export function syncedValue(column: Column, row: SheetRow, syncedAt: string | nu
   if (column.key === "syncedAt") return syncedAt ? dateTimeSerial(syncedAt) : null;
   if (column.key === "syncStatus") return SYNC_STATUS_OK;
   const v = (row as unknown as Record<string, unknown>)[column.key];
+  // The status column is cleared when a job has none, so a tick left from the column's checkbox days goes away.
+  if (column.key === "pifStatus") return v ? String(v) : "";
   if (column.type === "check") return Boolean(v);
   if (v === null || v === undefined || v === "") return null;
   if (column.type === "date") return dateSerial(String(v));
@@ -189,10 +199,16 @@ function newRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): Ce
     if (formula) { out.push({ row: rowIdx, col: IDX[c.col]!, value: { formula } }); continue; }
     const col = ACTIVE[c.col]!;
     const v = syncedValue(c, row, syncedAt);
+    if (v === "") continue; // nothing to clear on a new row
     if (v !== null) out.push({ row: rowIdx, col, value: v });
     else if (c.type === "check") out.push({ row: rowIdx, col, value: false });
   }
   return out;
+}
+
+/** The paid/completed colour on a job row's left cells, when it has one. */
+function toneStyle(rowIdx: number, row: SheetRow): RowStyle[] {
+  return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: TONE_COLS }] : [];
 }
 
 /** Only the synced columns of an existing row — the team's cells stay as they are. */
@@ -201,7 +217,8 @@ function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null):
   for (const c of COLS) {
     if (!c.key) continue;
     const v = syncedValue(c, row, syncedAt);
-    if (v !== null) out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: v });
+    if (v === "") out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: null });
+    else if (v !== null) out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: v });
   }
   return out;
 }
@@ -362,7 +379,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [],
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [],
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -397,6 +414,22 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     if (grid.length === 0) grid.push([]);
     write(COLS.map((c) => ({ row: 0, col: IDX[c.col]!, value: c.header })));
     summary.headerCreated = true;
+  } else {
+    // A heading the template has since renamed (B: "PIF" → the status text)
+    // is rewritten where it stands, and the column's old checkbox rule is
+    // dropped so the text can live there.
+    const renames: CellWrite[] = [];
+    for (const c of COLS) {
+      if (!c.renamedFrom) continue;
+      const col = ACTIVE[c.col]!;
+      const have = cellStr(grid[0]?.[col]);
+      if (c.renamedFrom.some((old) => old.toLowerCase() === have.toLowerCase())) {
+        renames.push({ row: 0, col, value: c.header });
+        ops.push({ type: "clearValidation", col });
+        summary.headersRenamed.push({ from: have, to: c.header, col: colLetter(col) });
+      }
+    }
+    write(renames);
   }
 
   // Month at a glance: a fixed block right under the header, rewritten in place.
@@ -442,6 +475,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       cells.push({ row: totalIdx + 1, col: 0, value: CUMULATIVE_LABEL }); // formulas come in the final pass
       write(cells);
       style([{ row: at, style: "label" }, { row: totalIdx, style: "total" }, { row: totalIdx + 1, style: "cumulative" }]);
+      style(rows.flatMap((r, i) => toneStyle(at + 1 + i, r)));
       summary.blocksCreated.push(label);
       summary.jobsAdded += rows.length;
       report.added = rows.map((r) => r.label);
@@ -461,6 +495,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const idx = byJobId.get(r.jobId);
       if (idx !== undefined) {
         write(updateRowCells(idx, r, opts.syncedAt));
+        style(toneStyle(idx, r));
         summary.jobsUpdated++; report.updated.push(r.label); seen.add(r.jobId);
       } else {
         additions.push(r);
@@ -473,6 +508,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const cells: CellWrite[] = [];
       additions.forEach((r, i) => cells.push(...newRowCells(at + i, r, opts.syncedAt)));
       write(cells);
+      style(additions.flatMap((r, i) => toneStyle(at + i, r)));
       summary.jobsAdded += additions.length;
       report.added = additions.map((r) => r.label);
     }

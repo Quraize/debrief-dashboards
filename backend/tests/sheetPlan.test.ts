@@ -21,7 +21,8 @@ const row = (jobId: string, over: Partial<SheetRow> = {}): SheetRow => ({
   stage: "Roof/Siding Scheduled", stageGroup: "production", stageSince: null, salesRep: "Jason Malarchak", sub: "Lucy Construction",
   scheduledInstallDate: "2026-09-09", saleDate: "2026-08-20", completionDate: null, installDates: ["2026-09-09"], nextInstallDate: null,
   visits: [{ day: "2026-09-09", code: "RR" }], gross: 10000, changeOrders: 0, totalRev: 10000, paymentMethod: "Check", deposit: 2000,
-  progressPayments: null, paymentsCount: 1, totalPayments: 2000, balanceOwed: 8000, subScheduled: true, materialVendor: "NCBP",
+  progressPayments: null, paymentsCount: 1, totalPayments: 2000, balanceOwed: 8000, pifStatus: null, pifDate: null, jobComplete: false, paidInFull: false, statusTone: null,
+  subScheduled: true, materialVendor: "NCBP",
   containerScheduled: false, actualMaterial: 3000, actualLabor: null, actualCarting: null, actualOther: null, billsCount: 1, bills: [],
   financialsFetchedAt: SYNCED_AT, paymentsFetchedAt: null, billsFetchedAt: null, jpUrl: `https://app.jobprogress.com/#/customer-jobs/9${jobId}/job/${jobId}/overview`,
   ...over,
@@ -66,7 +67,7 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 2, 0)).toBe("Wayne/3 Main St/Customer 3");
     expect(at(cells, 2, HU)).toBe("3");
     expect(at(cells, 2, R)).toBe(10000);
-    expect(at(cells, 2, B)).toBe(false);
+    expect(at(cells, 2, B)).toBeUndefined(); // no paid/completed status: B stays blank
     expect(at(cells, 2, T)).toEqual({ formula: "R3+S3" });
     expect(at(cells, 3, 0)).toBe("Weekly Total");
     expect(at(cells, 3, R)).toEqual({ formula: 'SUMIF(HY3:HY3,"<>Not on the JobProgress calendar this week",R3:R3)' });
@@ -112,15 +113,15 @@ describe("planSheet on a tab the team has been working in", () => {
     const plan = planSheet(grid(), [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2")] }], NO_MONTH);
     expect(plan.summary).toMatchObject({ headerCreated: false, blocksCreated: [], jobsAdded: 1, jobsUpdated: 1, jobsNotThisWeek: 1 });
     const cells = cellsOf(plan);
-    // Existing job 1 at row 2: money refreshed, the ticked PIF checkbox and the note untouched.
+    // Existing job 1 at row 2: money refreshed, the status column cleared (no status), the note untouched.
     expect(at(cells, 2, R)).toBe(10000);
-    expect(cells.some((c) => c.row === 2 && c.col === B)).toBe(false);
+    expect(cells.find((c) => c.row === 2 && c.col === B)).toEqual({ row: 2, col: B, value: null });
     expect(cells.some((c) => c.row === 2 && c.col === colIndex("BG"))).toBe(false);
     expect(cells.some((c) => c.row === 2 && c.col === T)).toBe(false); // formulas are not rewritten on existing rows
     // New job 2 inserted before the total (row 4) → total moves to row 5 and re-sums 2..4; a cumulative row is added at 6.
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 4, count: 1 }, { type: "insertRows", at: 6, count: 1 }]);
     expect(at(cells, 4, HU)).toBe("2");
-    expect(at(cells, 4, B)).toBe(false);
+    expect(at(cells, 4, B)).toBeUndefined();
     expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
     expect(at(cells, 6, 0)).toBe(CUMULATIVE_LABEL);
     expect((at(cells, 6, R) as { formula: string }).formula).toContain("IFERROR(1*R3:R5,0)");
@@ -201,7 +202,7 @@ describe("toRequests", () => {
     const updates = reqs.filter((r) => r["updateCells"]);
     expect(updates.length).toBeGreaterThan(3);
     for (const u of updates) expect((u["updateCells"] as Record<string, unknown>)["fields"]).toBe("userEnteredValue");
-    // On the new row, C (PIF Date, hand-filled) is skipped, so A..B is one run and D..U another:
+    // On the new row, B (no status) and C (no PIF date) are skipped, so A is one run and D..U another:
     // seven checkboxes, then the synced job columns through Payment Method.
     const runAt = (col: number) => updates.find((u) => (u["updateCells"] as { start: { columnIndex: number; rowIndex: number } }).start.columnIndex === col && (u["updateCells"] as { start: { rowIndex: number } }).start.rowIndex === 2);
     const du = runAt(colIndex("D"))!;
@@ -210,7 +211,7 @@ describe("toRequests", () => {
     expect(vals[0]).toEqual({ userEnteredValue: { boolValue: false } });
     expect(vals[colIndex("K") - colIndex("D")]).toEqual({ userEnteredValue: { stringValue: "ACR Roofing Division" } });
     expect(vals[colIndex("T") - colIndex("D")]).toEqual({ userEnteredValue: { formulaValue: "=R3+S3" } });
-    expect((runAt(colIndex("A"))!["updateCells"] as { rows: { values: unknown[] }[] }).rows[0]!.values).toHaveLength(2);
+    expect((runAt(colIndex("A"))!["updateCells"] as { rows: { values: unknown[] }[] }).rows[0]!.values).toHaveLength(1);
     expect(runAt(B)).toBeUndefined();
     // No setup requests when the header already existed and the tab is full size.
     expect(reqs.some((r) => r["setDataValidation"])).toBe(false);
@@ -225,6 +226,45 @@ describe("toRequests", () => {
     expect(reqs.some((r) => JSON.stringify(r).includes('"BOOLEAN"'))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("ONE_OF_LIST"))).toBe(true);
     expect(reqs.some((r) => JSON.stringify(r).includes("frozenRowCount"))).toBe(true);
+  });
+});
+
+describe("paid-in-full / completed — columns B..D", () => {
+  const C = colIndex("C"), D = colIndex("D");
+  const paid = row("1", { stage: "Paid New Roof", balanceOwed: 0, totalPayments: 10000, pifStatus: "PAID-IN-FULL: JOB COMPLETED", pifDate: "2026-09-10", jobComplete: true, paidInFull: true, statusTone: "paidComplete" });
+  it("renames the team's PIF heading once, drops its checkbox rule, and colours the left cells of a paid row", () => {
+    const tab = headerRow(); tab[B] = "PIF";
+    const grid = [tab, ["9/7/2026-9/13/2026"], ["Wayne/1 Main St/Customer 1", true, null, false, ...Array(HU - 4).fill(null), "1"], ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [paid, row("2")] }], NO_MONTH);
+    const cells = cellsOf(plan);
+    expect(at(cells, 0, B)).toBe("PAID-IN-FULL: JOB COMPLETED");
+    expect(plan.summary.headersRenamed).toEqual([{ from: "PIF", to: "PAID-IN-FULL: JOB COMPLETED", col: "B" }]);
+    expect(plan.ops.filter((o) => o.type === "clearValidation")).toEqual([{ type: "clearValidation", col: B }]);
+    // The existing row (row 2) is updated: status text, PIF date, completed tick.
+    expect(at(cells, 2, B)).toBe("PAID-IN-FULL: JOB COMPLETED");
+    expect(at(cells, 2, C)).toBe(dateSerial("2026-09-10"));
+    expect(at(cells, 2, D)).toBe(true);
+    const styles = plan.ops.flatMap((o) => (o.type === "style" ? o.rows : []));
+    expect(styles).toContainEqual({ row: 2, style: "paidComplete", cols: [0, 4] });
+    // The new row (job 2, inserted at row 3) has no status: nothing written to B or C, D unticked, no colour.
+    expect(at(cells, 3, B)).toBeUndefined(); expect(at(cells, 3, C)).toBeUndefined(); expect(at(cells, 3, D)).toBe(false);
+    expect(styles.some((s) => s.row === 3 && s.cols)).toBe(false);
+    // And the requests: validation removed on the body of B, the tone as a fill-only format on A..D.
+    const reqs = toRequests(plan, 7) as Record<string, Record<string, unknown>>[];
+    expect(reqs.find((r) => r["setDataValidation"])!["setDataValidation"]).toEqual({ range: { sheetId: 7, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: B, endColumnIndex: B + 1 } });
+    const tone = reqs.find((r) => r["repeatCell"] && (r["repeatCell"]!["range"] as { startRowIndex: number; endColumnIndex: number }).startRowIndex === 2 && (r["repeatCell"]!["range"] as { endColumnIndex: number }).endColumnIndex === 4)!["repeatCell"] as Record<string, unknown>;
+    expect(tone["fields"]).toBe("userEnteredFormat(backgroundColor)");
+    expect(tone["range"]).toEqual({ sheetId: 7, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 4 });
+  });
+  it("clears a leftover tick when a known row has no status, and does not rename a heading already renamed", () => {
+    const grid = [headerRow(), ["9/7/2026-9/13/2026"], ["Wayne/1 Main St/Customer 1", false, null, true, ...Array(HU - 4).fill(null), "1"], ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);
+    const cells = cellsOf(plan);
+    expect(at(cells, 0, B)).toBeUndefined();
+    expect(plan.summary.headersRenamed).toEqual([]);
+    expect(plan.ops.some((o) => o.type === "clearValidation")).toBe(false);
+    expect(cells.find((c) => c.row === 2 && c.col === B)).toEqual({ row: 2, col: B, value: null });
+    expect(at(cells, 2, D)).toBe(false);
   });
 });
 
@@ -285,7 +325,7 @@ describe("week locks — read-only from the end of Thursday", () => {
     expect(notes.map((c) => c.row)).toEqual([9, 15]);
     // Already noted → not written again.
     const noted = grid.map((r) => [...r]); noted[9]![1] = lockNote("2026-09-14"); noted[15]![1] = lockNote("2026-09-07");
-    expect(cellsOf(planSheet(noted, [week], { ...NO_MONTH, today: "2026-09-18" })).filter((c) => c.col === B)).toHaveLength(0);
+    expect(cellsOf(planSheet(noted, [week], { ...NO_MONTH, today: "2026-09-18" })).filter((c) => c.col === B && c.value !== null)).toHaveLength(0);
     // Off switch.
     expect(planSheet(grid, [week], { ...NO_MONTH, today: "2026-09-18", lockWeeks: false }).summary.locks).toEqual([]);
   });

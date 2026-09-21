@@ -1,5 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { STAGE_GROUPS, stageGroup, isTrackedStage, stageOrder, daysInStage } from "../src/jobStages.js";
+import { STAGE_GROUPS, stageGroup, isTrackedStage, stageOrder, daysInStage, isPaidStage, isCompletedStage } from "../src/jobStages.js";
+
+describe("done and paid stages", () => {
+  it("reads the office's Paid stages, whatever the year", () => {
+    for (const s of ["Paid New Roof", "Paid Siding/Repair/MISC/ETC", "Paid Repair/Remodel", "Paid Complete 2026", "Paid & Complete 2019-2020", "Paid Don't Contact", "Warranty", "Client Satisfaction/Referrals", "Closed Warranty Claims", "12-Month Touch Point"]) {
+      expect(isPaidStage(s), s).toBe(true);
+      expect(isCompletedStage(s), s).toBe(true);
+    }
+  });
+  it("knows finished-but-unpaid, and leaves working and lost jobs alone", () => {
+    for (const s of ["COMPLETED NEED FINAL PAYMENT!!", "Collections", "Open Warranty Claims/CallBacks"]) {
+      expect(isCompletedStage(s), s).toBe(true);
+      expect(isPaidStage(s), s).toBe(false);
+    }
+    for (const s of ["Production Started", "Need Final Walk-Through", "Job Lost DNS (MGR APPROVAL)", "Accepted/No Deposit/Finance", null, ""]) {
+      expect(isCompletedStage(s), String(s)).toBe(false);
+      expect(isPaidStage(s), String(s)).toBe(false);
+    }
+  });
+});
 
 describe("stage groups — the office's Jobs screen grouping", () => {
   it("places the live stage names (as the API spells them) in the right group", () => {

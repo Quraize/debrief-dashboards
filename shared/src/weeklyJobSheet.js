@@ -12,13 +12,16 @@
 // rather than guessed. (None today: payment detail comes from the job's
 // payment history — see paymentBreakdown.)
 
+import { isPaidStage, isCompletedStage } from "./jobStages.js";
+
 export const SHEET_COLUMNS = [
   // Column A stays the office's own key, "Town/Address/Customer"; the job
   // number lives in AC (managers' decision, 2026-09-09).
   { col: "A", header: "Town/Address/Customer", key: "label" },
-  { col: "B", header: "PIF" },
-  { col: "C", header: "PIF Date" },
-  { col: "D", header: "Job Complete" },
+  // B..D were hand-ticked; since 2026-09-21 JobProgress fills them (jobStatus).
+  { col: "B", header: "PAID-IN-FULL: JOB COMPLETED", key: "pifStatus" },
+  { col: "C", header: "PIF Date", key: "pifDate", type: "date" },
+  { col: "D", header: "Job Complete", key: "jobComplete", type: "check" },
   { col: "E", header: "Job Folder" },
   { col: "F", header: "Site Assess" },
   { col: "G", header: "Job Costing Complete" },
@@ -100,13 +103,61 @@ export function balanceOwed(totalRev, totalPayments, stage) {
  * AA formula sums, and matches total_payment_received when JobProgress agrees
  * with itself.
  */
-export function paymentBreakdown(payments) {
-  const live = (payments ?? [])
+/** The payments that count: not cancelled or voided, a positive amount, oldest first. */
+export function livePayments(payments) {
+  return (payments ?? [])
     .filter((p) => !p.canceled && !/cancel|void/i.test(String(p.status ?? "")))
     .map((p) => ({ ...p, amount: num(p.amount) }))
     .filter((p) => p.amount !== null && p.amount > 0)
     .sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? ""))
       || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true }));
+}
+
+// ── Paid in full / job completed (columns B, C, D) ─────────────────────────
+//
+// Paid in full: the ledger shows nothing owed with money received, OR the
+// job sits in one of the office's "Paid" stages (a third of the jobs on the
+// sheet have no ledger figures at all, so the stage has to count).
+// Completed: the stage says so — see jobStages. A job in a Paid stage whose
+// ledger still shows a balance is called out: either the payment was never
+// entered in JobProgress or the totals were never fetched.
+
+export const PIF_STATUS = {
+  paidComplete: "PAID-IN-FULL: JOB COMPLETED",
+  mismatch: "PAID-IN-FULL: JOB COMPLETED (ledger still shows a balance)",
+  completed: "JOB COMPLETED: awaiting final payment",
+  paidOnly: "PAID-IN-FULL: job not yet complete",
+};
+
+/**
+ * `{ paidInFull, completed, ledgerOwed, status, pifDate, tone }` for a job.
+ * `status` is the text of column B (null = blank); `pifDate` the last
+ * payment's date once paid; `tone` colours the row's left cells:
+ * paidComplete (green) · completed (amber) · paidOnly (blue) · mismatch (red).
+ */
+export function jobStatus({ stage, balanceOwed, totalPayments, payments }) {
+  const s = String(stage ?? "");
+  const none = { paidInFull: false, completed: false, ledgerOwed: false, status: null, pifDate: null, tone: null };
+  if (CANCELLATION_STAGE.test(s)) return none;
+  const owed = num(balanceOwed), received = num(totalPayments);
+  const stagePaid = isPaidStage(s);
+  const ledgerPaid = owed !== null && owed <= 0 && received !== null && received > 0;
+  const ledgerOwed = owed !== null && owed > 0;
+  const paidInFull = stagePaid || ledgerPaid;
+  const completed = isCompletedStage(s);
+  const mismatch = stagePaid && ledgerOwed;
+  const live = livePayments(payments);
+  const pifDate = paidInFull && live.length ? (live[live.length - 1].date ?? null) : null;
+  if (paidInFull && completed) {
+    return { paidInFull, completed, ledgerOwed: mismatch, status: mismatch ? PIF_STATUS.mismatch : PIF_STATUS.paidComplete, pifDate, tone: mismatch ? "mismatch" : "paidComplete" };
+  }
+  if (completed) return { paidInFull, completed, ledgerOwed: false, status: PIF_STATUS.completed, pifDate, tone: "completed" };
+  if (paidInFull) return { paidInFull, completed, ledgerOwed: false, status: PIF_STATUS.paidOnly, pifDate, tone: "paidOnly" };
+  return none;
+}
+
+export function paymentBreakdown(payments) {
+  const live = livePayments(payments);
   if (live.length === 0) return { deposit: null, progressPayments: null, paymentMethod: null, count: 0 };
   const deposit = live[0].amount;
   const progress = live.slice(1).reduce((n, p) => n + p.amount, 0);

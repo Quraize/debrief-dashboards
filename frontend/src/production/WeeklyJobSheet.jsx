@@ -25,6 +25,7 @@ const sum = (rows, key) => rows.reduce((n, r) => n + (r[key] == null ? 0 : Numbe
 // office needs to recognise a row (customer, town). The CSV is the full A..AB.
 const VISIBLE = [
   { key: "label", label: "Town/Address/Customer", col: "A" },
+  { key: "pifStatus", label: "Paid-in-full / Completed", col: "B" },
   { key: "jobNumber", label: "Job #", col: "AC" },
   { key: "division", label: "Division", col: "K" },
   { key: "trades", label: "Trades", col: "L" },
@@ -295,6 +296,11 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {(pushResult.summary.headersRenamed ?? []).length > 0 && (
+              <div className="text-muted-foreground">
+                ✎ Heading renamed: {pushResult.summary.headersRenamed.map((h) => `column ${h.col} "${h.from}" → "${h.to}"`).join(" · ")}
+              </div>
+            )}
             {(pushResult.summary.columnsFollowed ?? []).length > 0 && (
               <div className="text-muted-foreground" title="A heading on the tab is not at the template's column. The automation writes that value where the heading actually is.">
                 ↔ Following the tab's headings: {pushResult.summary.columnsFollowed.map((c) => `${c.header} → column ${c.tab} (template ${c.template})`).join(" · ")}

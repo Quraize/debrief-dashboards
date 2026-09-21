@@ -27,7 +27,7 @@
 import { dbApp, withUser, withServiceRole, type SessionContext } from "../db/client.js";
 import { stageGroup } from "@allied/shared/jobStages";
 import { isInstallCode } from "@allied/shared/production";
-import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown, billBreakdown } from "@allied/shared/weeklyJobSheet";
+import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown, billBreakdown, jobStatus } from "@allied/shared/weeklyJobSheet";
 import { BOARD_TIMEZONE, jobProgressUrl } from "./board.js";
 
 export interface SheetRow {
@@ -44,6 +44,10 @@ export interface SheetRow {
   gross: number | null; changeOrders: number | null; totalRev: number | null;
   paymentMethod: string | null; deposit: number | null; progressPayments: number | null; paymentsCount: number;
   totalPayments: number | null; balanceOwed: number | null;
+  /** Columns B..D: the paid-in-full / job-completed status text, the last payment's date once paid, the completed tick. */
+  pifStatus: string | null; pifDate: string | null; jobComplete: boolean; paidInFull: boolean;
+  /** Colour for the row's left cells: paidComplete · completed · paidOnly · mismatch (paid stage, ledger still owed). */
+  statusTone: "paidComplete" | "completed" | "paidOnly" | "mismatch" | null;
   /** True when a live production schedule on the job has a crew assigned (AJ Sub Scheduled). */
   subScheduled: boolean;
   /** From vendor bills: material vendors (AD), a carting bill (AI), actual costs (BH..BL). */
@@ -198,6 +202,8 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
     const pay = paymentBreakdown(r.payments ?? []);
     const bill = billBreakdown(r.bills ?? []);
     const installVisitDays = [...new Set((r.visits ?? []).filter((v) => isInstallCode(v.code)).map((v) => v.day))].sort();
+    const owed = money(r.total_amount_owed) ?? balanceOwed(totalRev, totalPayments, r.current_stage);
+    const status = jobStatus({ stage: r.current_stage, balanceOwed: owed, totalPayments, payments: r.payments ?? [] });
     const base = {
       jobId: r.jp_job_id, customerId: r.jp_customer_id, jobNumber: r.job_number, jobName: r.job_name,
       customer: r.customer_name, address: r.address, city: r.city,
@@ -221,7 +227,9 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
       gross, changeOrders, totalRev,
       paymentMethod: pay.paymentMethod, deposit: pay.deposit, progressPayments: pay.progressPayments, paymentsCount: pay.count,
       totalPayments,
-      balanceOwed: money(r.total_amount_owed) ?? balanceOwed(totalRev, totalPayments, r.current_stage),
+      balanceOwed: owed,
+      pifStatus: status.status, pifDate: status.pifDate, jobComplete: status.completed, paidInFull: status.paidInFull,
+      statusTone: status.tone as SheetRow["statusTone"],
       subScheduled: r.sub_scheduled,
       materialVendor: bill.materialVendor, containerScheduled: bill.containerBilled,
       actualMaterial: bill.actualMaterial, actualLabor: bill.actualLabor, actualCarting: bill.actualCarting, actualOther: bill.actualOther,
