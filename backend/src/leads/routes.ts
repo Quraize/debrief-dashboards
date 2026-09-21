@@ -47,6 +47,25 @@ interface FlowRow {
 const SALE_CLOSE_ACTUAL = ["First Call Close", "Rehash Close", "Follow-Up Close", "Reset Close", "Sale After Follow-Up"];
 const SALE_OUTCOMES = ["Demo Completed — Sale", "Demo Completed — Sale / Credit Decline", "Demo Completed — Sale / Cancellation"];
 
+/**
+ * Every debrief for a visit in the range — the pool the Sales dashboard
+ * counts (it filters the same table by appointment_date). Handed to the
+ * funnel so its Ran and Demo cards are the dashboard's Ran and Demo. The
+ * classifying is done by the shared rules, never re-expressed in SQL; only
+ * the fields those rules read are selected, and no name leaves the server.
+ */
+async function visitsInRange(from: string, to: string): Promise<Record<string, unknown>[]> {
+  return withServiceRole(async (c) => {
+    const { rows } = await c.query<Record<string, unknown>>(
+      `SELECT d.appointment_type, d.appointment_outcome, d.sales_appointment, d.approval_status,
+              d.sale_amount, d.sale_close_type, d.business_division, d.product
+         FROM debrief d
+        WHERE d.appointment_date BETWEEN $1::date AND $2::date`,
+      [from, to]);
+    return rows;
+  }, "leads:flow-visits", { quiet: true });
+}
+
 async function signedMonthRevenue(from: string, to: string): Promise<number> {
   return withServiceRole(async (c) => {
     const { rows } = await c.query<{ revenue: string }>(
@@ -103,7 +122,8 @@ export function registerLeadRoutes(app: FastifyInstance): void {
       // number the Marketing dashboard counts, so the two can be reconciled.
       const appointments = data.reduce((n, r) => n + (r.appointments_in_range ?? 0), 0);
       const signedRevenue = await signedMonthRevenue(from, to);
-      return reply.send({ from, to, ...leadFunnel(data, { basis, from, to, appointments, signedRevenue }) });
+      const visits = basis === "activity" ? await visitsInRange(from, to) : null;
+      return reply.send({ from, to, ...leadFunnel(data, { basis, from, to, appointments, signedRevenue, visits }) });
     },
   );
 }

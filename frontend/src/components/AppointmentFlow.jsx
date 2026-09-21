@@ -58,8 +58,8 @@ export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/
           <h2 className="font-heading font-bold text-primary">Lead Flow</h2>
           <p className="text-xs text-muted-foreground max-w-3xl">
             {rangeLabel} · {activity
-              ? "the appointments that fall in this period and what came of them, whenever the lead first came in. Leads, Valid and Not Set still describe the leads that arrived in the period — a lead arrives once."
-              : "every lead that came in during this period, followed through whatever happened to it, even if the appointment fell in a later month. Early in a month this reads low: those leads have not had time to convert."}
+              ? "the visits that fall in this period and what came of them, whenever the lead first came in. Appointment Set rightward counts visits, the same basis as the Sales and Marketing dashboards, so a lead seen twice is two visits. Leads, Valid and Not Set still describe the leads that arrived in the period — a lead arrives once."
+              : "every lead that came in during this period, followed through whatever happened to it, even if the appointment fell in a later month. A lead is counted once however many visits it took, and early in a month this reads low: those leads have not had time to convert."}
             {" "}Leads are JobProgress jobs by created date; results come from filed debriefs. Insurance and warranty callbacks excluded.
           </p>
         </div>
@@ -84,7 +84,8 @@ export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/
 
 function Funnel({ f, activity }) {
   const reasons = f.reasons.filter((r) => r.count > 0);
-  const resets = activity && f.appointments != null ? f.appointments - f.set : 0;
+  const byVisit = !!f.byVisit;
+  const unit = byVisit ? "visits" : "leads";
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] gap-3 xl:gap-2 items-start">
       <Column>
@@ -101,7 +102,7 @@ function Funnel({ f, activity }) {
       <Column>
         <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid"
           note={activity
-            ? `Leads with a visit in this period.${f.setFromEarlier ? ` ${f.setFromEarlier} of them came in before it.` : ""}${resets > 0 ? ` ${f.appointments} visits in all, counting resets.` : ""}`
+            ? `Visits booked in this period, resets counted separately — the same basis as the Sales and Marketing dashboards.${f.setFromEarlier ? ` ${f.setFromEarlier} belong to leads that came in before this period.` : ""}`
             : "A sales appointment exists for the lead"} />
         <Box tone="amber" label="Not Set" value={f.notSet} share={f.notSetRate} of="of valid"
           note={activity ? "Valid leads from this period with no appointment booked yet" : undefined} />
@@ -118,16 +119,19 @@ function Funnel({ f, activity }) {
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Ran" value={f.ran} share={f.ranRate} of="of set" note="The rep attended at least one visit" />
-        <Box tone="red" label="No See" value={f.noSee} share={f.noSeeRate} of="of set" note="Every visit so far was a no-show or cancelled" />
+        <Box tone="green" label="Ran" value={f.ran} share={f.ranRate} of="of set"
+          note={byVisit ? "Visits the rep attended" : "The rep attended at least one visit"} />
+        <Box tone="red" label="No See" value={f.noSee} share={f.noSeeRate} of="of set"
+          note={byVisit ? "Visits that were a no-show or cancelled" : "Every visit so far was a no-show or cancelled"} />
         {f.awaiting > 0 && (
           <Box tone="slate" label="Awaiting" value={f.awaiting} share={f.awaitingRate} of="of set"
-            note="Booked but not yet run, or run and not yet debriefed" />
+            note={`Booked but not yet run, or run and not yet debriefed (${unit})`} />
         )}
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} of="of ran" />
+        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} of="of ran"
+          note={byVisit ? "Visits that gave a demo — the Sales dashboard's Demos" : undefined} />
         <Box tone="amber" label="No Demo" value={f.noDemo} share={f.noDemoRate} of="of ran" />
         {f.pending > 0 && (
           <Box tone="slate" label="Result Pending" value={f.pending} share={f.pendingRate} of="of ran"

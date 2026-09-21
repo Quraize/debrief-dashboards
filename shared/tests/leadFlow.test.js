@@ -101,6 +101,28 @@ describe("leadFunnel — activity basis: the work done in the range", () => {
     expect(leadFunnel(rows, { ...OPTS, basis: "cohort", signedRevenue: 168081 })).toMatchObject({ revenue: 126182, demoRevenue: 126182 });
   });
 
+  it("counts visits, not leads, when given the dashboards' pool — a lead seen twice is two visits", () => {
+    const rows = [r("Demo No Sale", { apptIn: true }), r("Demo No Sale", { apptIn: true })];
+    // One lead was seen twice: a no-show, then a reset demo that sold. The
+    // Sales dashboard counts three visits and two demos; so does this.
+    const visits = [
+      { appointment_type: "First Appointment", appointment_outcome: "No C / No Show — Reset Needed" },
+      { appointment_type: "Reset Demo", appointment_outcome: "Demo Completed — Sale", sale_amount: 5000 },
+      { appointment_type: "First Appointment", appointment_outcome: "Demo Completed — Demo No Sale" },
+    ];
+    const f = leadFunnel(rows, { ...OPTS, visits, appointments: 3 });
+    expect(f).toMatchObject({ byVisit: true, set: 3, ran: 2, noSee: 1, awaiting: 0, demo: 2, noDemo: 0, sold: 1, demoRevenue: 5000 });
+    expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
+    expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
+    // A booking with no debrief yet is still Set, and Awaiting.
+    expect(leadFunnel(rows, { ...OPTS, visits, appointments: 5 })).toMatchObject({ set: 5, awaiting: 2 });
+    // An insurance visit is not the dashboards' business, and neither is it ours.
+    expect(leadFunnel(rows, { ...OPTS, appointments: 1, visits: [{ ...visits[2], business_division: "Insurance" }] }))
+      .toMatchObject({ set: 1, ran: 0, demo: 0, awaiting: 1 });
+    // Cohort never counts visits, whatever it is handed.
+    expect(leadFunnel(rows, { ...OPTS, basis: "cohort", visits, appointments: 3 })).toMatchObject({ byVisit: false });
+  });
+
   it("reports the visit total so the Marketing dashboard reconciles, and defaults to cohort when asked nothing", () => {
     const rows = [r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Sale", { sale_amount: 1 })] })];
     // Two visits on one lead (a reset): one lead in Set, two on the calendar.

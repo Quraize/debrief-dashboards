@@ -27,6 +27,7 @@
 import { stageKey } from "./jobStages.js";
 import { DEMO_OUTCOMES, NON_COMPLETED_OUTCOMES } from "./constants.js";
 import { isSale, isNoSeeRecord, isNoDemoOutcome } from "./kpi.js";
+import { nonInsuranceDebriefs } from "./insurance.js";
 import { countedDebriefs } from "./debriefApproval.js";
 
 /**
@@ -88,6 +89,21 @@ export function leadStatus(debriefs) {
 }
 
 /**
+ * Where ONE visit stands, by the same rules `leadStatus` applies to a lead's
+ * whole history. Activity mode counts visits, so that the Ran and Demo cards
+ * report what the Sales dashboard reports: a lead seen twice in a month is
+ * two visits, and a demo is a demo whichever visit gave it.
+ */
+export function visitStatus(d) {
+  if (countedDebriefs([d]).length === 0) return "awaiting";   // a DQ still waiting on a manager
+  if (DEMO_OUTCOMES.includes(d.appointment_outcome)) return "demo";
+  if (isNoDemoOutcome(d)) return "noDemo";
+  if (NON_COMPLETED_OUTCOMES.includes(d.appointment_outcome)) return "awaiting";
+  if (isNoSeeRecord(d)) return "noSee";
+  return "pending";
+}
+
+/**
  * A debrief belongs to the range by the date of the VISIT it describes, not
  * when it was typed — a Monday debrief of a Friday demo is Friday's.
  */
@@ -104,8 +120,12 @@ function debriefInRange(d, from, to) {
  *   `created_in_range` flag is treated as having arrived in the range, so the
  *   cohort query — which returns only those — needs no flag at all.
  * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null,
- *   signedRevenue?: number|null }} [opts] `signedRevenue` is the dashboards' signed-month
- *   total for the range; when given it is what the Sold card reports.
+ *   signedRevenue?: number|null, visits?: Array<object>|null }} [opts]
+ *   `signedRevenue` is the dashboards' signed-month total for the range; when given it is
+ *   what the Sold card reports. `visits` is every debrief for a visit in the range — the
+ *   Sales dashboard's own pool. When given, activity mode counts those visits from
+ *   Appointment Set rightward instead of counting leads, so the two pages agree. Without
+ *   it activity mode falls back to counting leads.
  */
 export function leadFunnel(rows, opts = {}) {
   const activity = opts.basis === "activity";
@@ -126,20 +146,42 @@ export function leadFunnel(rows, opts = {}) {
   const reasonCounts = Object.fromEntries(LEAD_REASONS.map((r) => [r.key, 0]));
   for (const r of notSetRows) reasonCounts[leadReason(r.current_stage)]++;
 
+  // Activity mode counts VISITS when it is given the dashboard's pool, so a
+  // lead seen twice in the period is two visits and the Ran and Demo cards
+  // match the Sales dashboard. Cohort mode counts leads, always.
+  const byVisit = activity && Array.isArray(opts.visits);
   const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
   let sold = 0, revenue = 0;
-  for (const r of setRows) {
-    const ds = activity ? (r.debriefs ?? []).filter((d) => debriefInRange(d, from, to)) : (r.debriefs ?? []);
-    const s = leadStatus(ds);
-    status[s]++;
-    if (s === "demo") {
-      const sale = countedDebriefs(ds).find(isSale);
-      if (sale) { sold++; revenue += Number(sale.sale_amount) || 0; }
+  if (byVisit) {
+    for (const d of nonInsuranceDebriefs(opts.visits)) {
+      const s = visitStatus(d);
+      status[s]++;
+      if (s === "demo" && isSale(d)) { sold++; revenue += Number(d.sale_amount) || 0; }
+    }
+  } else {
+    for (const r of setRows) {
+      const ds = activity ? (r.debriefs ?? []).filter((d) => debriefInRange(d, from, to)) : (r.debriefs ?? []);
+      const s = leadStatus(ds);
+      status[s]++;
+      if (s === "demo") {
+        const sale = countedDebriefs(ds).find(isSale);
+        if (sale) { sold++; revenue += Number(sale.sale_amount) || 0; }
+      }
     }
   }
 
   const leads = arrived.length, disqualified = dqRows.length, valid = validRows.length;
-  const set = setRows.length, notSet = notSetRows.length;
+  const notSet = notSetRows.length;
+  // Counting visits, a booking with no debrief yet is still Set and still
+  // Awaiting, so the column sums: Set = Ran + No See + Awaiting.
+  if (byVisit) {
+    const booked = opts.appointments ?? 0;
+    const debriefed = status.demo + status.noDemo + status.pending + status.noSee + status.awaiting;
+    status.awaiting += Math.max(0, booked - debriefed);
+  }
+  const set = byVisit
+    ? status.demo + status.noDemo + status.pending + status.noSee + status.awaiting
+    : setRows.length;
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const ran = status.demo + status.noDemo + status.pending;
   const demo = status.demo;
@@ -150,6 +192,8 @@ export function leadFunnel(rows, opts = {}) {
     // Valid, so a share of valid would be a lie; the count of appointments
     // belonging to earlier leads is what the reader actually needs.
     set, notSet, setFromEarlier, setRate: activity ? null : pct(set, valid), notSetRate: pct(notSet, valid),
+    /** True when Set rightward counts visits (the dashboards' basis) rather than leads. */
+    byVisit,
     /** Sales appointments dated in the range, resets included — reconciles with the Marketing dashboard. */
     appointments: opts.appointments ?? null,
     reasons: LEAD_REASONS.map((r) => ({ key: r.key, label: r.label, count: reasonCounts[r.key], share: pct(reasonCounts[r.key], notSet) })),

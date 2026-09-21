@@ -134,9 +134,12 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     expect(f).toMatchObject({
       basis: "activity",
       leads: 15, valid: 13, disqualified: 2, notSet: 5,   // the lead columns do not move
-      set: 8, setFromEarlier: 1, setRate: null,           // j1..j7 + the August lead j18; j19's October visit is out
+      set: 8, setFromEarlier: 1, setRate: null, byVisit: true,
       appointments: 8,                                    // visits dated in September, resets included
-      ran: 5, noSee: 1, awaiting: 2,
+      // Counted as VISITS, the way the Sales dashboard counts: j4 was a
+      // no-show and then a reset demo, which is two visits, not one lead.
+      // j7's DQ is still with a manager, so its visit is awaiting.
+      ran: 5, noSee: 2, awaiting: 1,
       demo: 4, noDemo: 1, pending: 0,
       sold: 2, notSold: 2, demoRevenue: 51000,            // 20,000 + the August lead's 31,000
       // The Sold card reports the Sales dashboard's money: every sale signed
@@ -152,7 +155,7 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     // June: Ruben's visit and his demo, but the Sold card shows no money — he
     // signed in September, so that is where the Sales dashboard puts it.
     const jun = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-06-01&to=2026-06-30", ...auth })).json();
-    expect(jun).toMatchObject({ basis: "activity", set: 1, demo: 1, sold: 1, demoRevenue: 14399, revenue: 0 });
+    expect(jun).toMatchObject({ basis: "activity", byVisit: true, set: 1, demo: 1, sold: 1, demoRevenue: 14399, revenue: 0 });
     // Cohort is a different question and keeps its own money: September's own
     // leads sold 20,000, whatever was signed in September from earlier demos.
     const coh = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30&basis=cohort", ...auth })).json();
@@ -163,6 +166,7 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     const aug = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-08-01&to=2026-08-31", ...auth })).json();
     // j17 (DQ, 11:30pm) and j18 arrived in August; only j18's no-show visit falls in it.
     expect(aug).toMatchObject({ basis: "activity", leads: 2, disqualified: 1, valid: 1, set: 1, noSee: 1, ran: 0, sold: 0, revenue: 0, appointments: 1 });
+    expect(aug.ran + aug.noSee + aug.awaiting).toBe(aug.set);
   });
 
   it("puts the 11:30pm lead in August, not September", async () => {
