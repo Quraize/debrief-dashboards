@@ -259,6 +259,19 @@ describe("PAID-IN-FULL — columns B..D", () => {
     expect(tone["fields"]).toBe("userEnteredFormat(backgroundColor,textFormat)");
     expect(tone["range"]).toEqual({ sheetId: 7, startRowIndex: 2, endRowIndex: 3, startColumnIndex: B, endColumnIndex: B + 1 });
   });
+  it("clears the TRUE/FALSE the checkbox days left on label, total, spacer and stale rows, but not a lock note", () => {
+    const grid = [headerRow(),
+      ["9/14/2026-9/20/2026", "FALSE"], ["Wayne/1 Main St/Customer 1", false, null, false, ...Array(HU - 4).fill(null), "1"], ["Weekly Total", "FALSE"], [CUMULATIVE_LABEL, false], [null, "FALSE"],
+      ["9/7/2026-9/13/2026", lockNote("2026-09-07")], ["Wayne/9 Main St/Customer 9", "TRUE", null, true, ...Array(HU - 4).fill(null), "9"], ["Weekly Total", "FALSE"], [CUMULATIVE_LABEL, "FALSE"]];
+    const plan = planSheet(grid, [{ from: "2026-09-14", to: "2026-09-20", rows: [row("1")] }], { ...NO_MONTH, today: "2026-09-16" });
+    const cells = cellsOf(plan);
+    expect(at(cells, 2, B)).toBe("NO"); // the matched job answers
+    // Every other TRUE/FALSE in B goes — including the stale job 9's hand tick — and the lock note stays.
+    const cleared = cells.filter((c) => c.col === B && c.value === null).map((c) => c.row).sort((a, b) => a - b);
+    expect(cleared).toEqual([1, 3, 4, 5, 7, 8, 9]);
+    expect(cells.some((c) => c.row === 6 && c.col === B)).toBe(false);
+    expect(plan.summary.checkboxLeftoversCleared).toBe(7);
+  });
   it("clears B for a cancelled job on a known row, and does not rename a heading already renamed", () => {
     const grid = [headerRow(), ["9/7/2026-9/13/2026"], ["Wayne/3 Main St/Customer 3", false, null, true, ...Array(HU - 4).fill(null), "3"], ["Weekly Total"], [CUMULATIVE_LABEL]];
     const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [cancelled] }], NO_MONTH);

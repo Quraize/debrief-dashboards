@@ -296,6 +296,9 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {(pushResult.summary.checkboxLeftoversCleared ?? 0) > 0 && (
+              <div className="text-muted-foreground">✎ {pushResult.summary.checkboxLeftoversCleared} leftover TRUE/FALSE cell(s) cleared from the PAID-IN-FULL column.</div>
+            )}
             {(pushResult.summary.headersRenamed ?? []).length > 0 && (
               <div className="text-muted-foreground">
                 ✎ Heading renamed: {pushResult.summary.headersRenamed.map((h) => `column ${h.col} "${h.from}" → "${h.to}"`).join(" · ")}

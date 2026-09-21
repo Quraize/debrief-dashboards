@@ -61,6 +61,8 @@ export interface PlanSummary {
   columnsFollowed: { header: string; template: string; tab: string }[];
   /** Headings rewritten because the template renamed them (B: "PIF" → the status column). */
   headersRenamed: { from: string; to: string; col: string }[];
+  /** TRUE/FALSE leftovers from column B's checkbox days, cleared off rows the feed does not write. */
+  checkboxLeftoversCleared: number;
 }
 
 /**
@@ -380,7 +382,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [],
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -546,6 +548,18 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   // is in place: a new earlier week changes the later weeks' running totals too.
   const months = new Set(ordered.map((w) => monthOf(w.from)));
   for (const b of parseBlocks(grid)) if (months.has(monthOf(b.from))) writeCumulative(b.from);
+
+  // Column B was a checkbox column: Google put TRUE/FALSE in every cell of
+  // it, and dropping the rule left them showing as text on the rows the
+  // feed never writes (week labels, totals, spacers, rows stamped as not
+  // this week). Cleared, so the column reads YES / NO / blank. Job rows
+  // written above already hold their answer and are not boolean any more.
+  const pifCol = ACTIVE["B"]!;
+  const boolish = (v: CellValue | undefined) => v === true || v === false || /^(true|false)$/i.test(cellStr(v));
+  const leftovers: CellWrite[] = [];
+  grid.forEach((r, i) => { if (i > 0 && boolish(r?.[pifCol])) leftovers.push({ row: i, col: pifCol, value: null }); });
+  write(leftovers);
+  summary.checkboxLeftoversCleared = leftovers.length;
 
   // Locks last, off the final grid, so the row spans are the ones the sheet
   // will have once every insert above has run. Every block past its Thursday
