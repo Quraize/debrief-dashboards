@@ -26,7 +26,7 @@
 
 import { stageKey } from "./jobStages.js";
 import { DEMO_OUTCOMES, NON_COMPLETED_OUTCOMES } from "./constants.js";
-import { isSale, isNoSeeRecord, isNoDemoOutcome } from "./kpi.js";
+import { isSale, isNoSeeRecord, isNoDemoOutcome, isAppointmentOpportunity, appointmentQualityStats } from "./kpi.js";
 import { nonInsuranceDebriefs } from "./insurance.js";
 import { countedDebriefs } from "./debriefApproval.js";
 
@@ -154,11 +154,22 @@ export function leadFunnel(rows, opts = {}) {
   const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
   let sold = 0, revenue = 0;
   if (byVisit) {
-    for (const d of nonInsuranceDebriefs(opts.visits)) {
-      const s = visitStatus(d);
-      status[s]++;
-      if (s === "demo" && isSale(d)) { sold++; revenue += Number(d.sale_amount) || 0; }
-    }
+    // Every card is the card of the same name on the Sales dashboard, counted
+    // off the same population by the same rules, so management reads one set
+    // of numbers across the platform:
+    //   Ran      = its Appointments (appointment opportunities)
+    //   Demo     = its Demos           No Demo = its No Demo
+    //   No See   = its No See          Sold    = its Sales (signed in the range)
+    // Set is those plus bookings with no debrief yet, which is the Marketing
+    // dashboard's Set Appointments.
+    const ds = nonInsuranceDebriefs(opts.visits);
+    const aq = appointmentQualityStats(ds);
+    status.demo = ds.filter((d) => String(d.appointment_outcome ?? "").startsWith("Demo Completed")).length;
+    status.noDemo = aq.aqNoDemo;
+    status.noSee = aq.aqNoSee;
+    const opportunities = ds.filter(isAppointmentOpportunity).length;
+    status.pending = Math.max(0, opportunities - status.demo - status.noDemo);
+    for (const d of ds) if (String(d.appointment_outcome ?? "").startsWith("Demo Completed") && isSale(d)) { sold++; revenue += Number(d.sale_amount) || 0; }
   } else {
     for (const r of setRows) {
       const ds = activity ? (r.debriefs ?? []).filter((d) => debriefInRange(d, from, to)) : (r.debriefs ?? []);
@@ -175,14 +186,11 @@ export function leadFunnel(rows, opts = {}) {
   const notSet = notSetRows.length;
   // Counting visits, a booking with no debrief yet is still Set and still
   // Awaiting, so the column sums: Set = Ran + No See + Awaiting.
+  const ranVisits = status.demo + status.noDemo + status.pending;
   if (byVisit) {
-    const booked = opts.appointments ?? 0;
-    const debriefed = status.demo + status.noDemo + status.pending + status.noSee + status.awaiting;
-    status.awaiting += Math.max(0, booked - debriefed);
+    status.awaiting = Math.max(0, (opts.appointments ?? 0) - ranVisits - status.noSee);
   }
-  const set = byVisit
-    ? status.demo + status.noDemo + status.pending + status.noSee + status.awaiting
-    : setRows.length;
+  const set = byVisit ? ranVisits + status.noSee + status.awaiting : setRows.length;
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const soldCount = activity && opts.signedSales != null ? opts.signedSales : sold;
   const ran = status.demo + status.noDemo + status.pending;

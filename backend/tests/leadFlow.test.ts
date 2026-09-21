@@ -136,11 +136,12 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
       leads: 15, valid: 13, disqualified: 2, notSet: 5,   // the lead columns do not move
       set: 8, setFromEarlier: 1, setRate: null, byVisit: true,
       appointments: 8,                                    // visits dated in September, resets included
-      // Counted as VISITS, the way the Sales dashboard counts: j4 was a
-      // no-show and then a reset demo, which is two visits, not one lead.
-      // j7's DQ is still with a manager, so its visit is awaiting.
-      ran: 5, noSee: 2, awaiting: 1,
-      demo: 4, noDemo: 1, pending: 0,
+      // Counted as VISITS off the Sales dashboard's own populations: j4 was a
+      // no-show and then a reset demo, which is two visits, not one lead, and
+      // j7's DQ counts as an appointment and a no-demo there whether or not a
+      // manager has approved it yet.
+      ran: 6, noSee: 2, awaiting: 0,
+      demo: 4, noDemo: 2, pending: 0,
       // The Sold card reports the Sales dashboard's Sales and Revenue: every
       // sale SIGNED in September — the two demos above plus Ruben's June demo,
       // closed by phone on 9 September. His visit is June's, his sale is
