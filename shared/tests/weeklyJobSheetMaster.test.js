@@ -27,7 +27,7 @@ describe("master column map", () => {
     for (const col of MASTER_MANUAL) expect(["text", "check", "date", "money", "pct"]).toContain(col.type);
     expect(MASTER_CHECKBOXES.map((c) => c.col)).toEqual(expect.arrayContaining(["D", "E", "F", "G", "H", "I", "J", "X", "AG", "AI", "AJ", "AK", "AL", "AM", "AQ", "AT", "AU", "BF"]));
     // B..D are JobProgress's now: the status text (renamed from the team's "PIF" tick), the PIF date, the completed tick.
-    expect(MASTER_COLUMNS.find((c) => c.col === "B")).toMatchObject({ key: "pifStatus", header: "PAID-IN-FULL: JOB COMPLETED", renamedFrom: ["PIF"] });
+    expect(MASTER_COLUMNS.find((c) => c.col === "B")).toMatchObject({ key: "pifStatus", header: "PAID-IN-FULL", renamedFrom: ["PIF", "PAID-IN-FULL: JOB COMPLETED"] });
     expect(MASTER_COLUMNS.find((c) => c.col === "C")).toMatchObject({ key: "pifDate", type: "date" });
     expect(MASTER_COLUMNS.find((c) => c.col === "D")).toMatchObject({ key: "jobComplete", type: "check" });
     expect(MASTER_COLUMNS.find((c) => c.col === "AE").list).toEqual(["Atlas", "GAF", "Hardie", "Certainteed"]);

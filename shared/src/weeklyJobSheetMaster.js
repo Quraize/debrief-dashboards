@@ -26,7 +26,7 @@ export const MASTER_COLUMNS = [
   // 2026-09-21 JobProgress fills them (weeklyJobSheet.jobStatus): B carries
   // the status text and was renamed — `renamedFrom` lets the push recognise
   // the old heading on the tab, rewrite it and drop the checkbox validation.
-  c("B", "PAID-IN-FULL: JOB COMPLETED", { key: "pifStatus", fill: "magenta", width: 24, renamedFrom: ["PIF"] }),
+  c("B", "PAID-IN-FULL", { key: "pifStatus", fill: "magenta", width: 24, renamedFrom: ["PIF", "PAID-IN-FULL: JOB COMPLETED"] }),
   c("C", "PIF Date", { key: "pifDate", type: "date", fill: "magenta", width: 8 }),
   c("D", "Job Complete", { key: "jobComplete", type: "check", fill: "magenta" }),
   c("E", "Job Folder", { type: "check", fill: null }),

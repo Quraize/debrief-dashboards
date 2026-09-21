@@ -172,7 +172,7 @@ describe("table and CSV", () => {
     const csv = toSheetCsv([row({ sub: 'Lucy "LC" Construction' })]);
     const lines = csv.split("\r\n");
     expect(lines).toHaveLength(2);
-    expect(lines[0].startsWith('"Town/Address/Customer","PAID-IN-FULL: JOB COMPLETED"')).toBe(true);
+    expect(lines[0].startsWith('"Town/Address/Customer","PAID-IN-FULL"')).toBe(true);
     expect(lines[1]).toContain('"Lucy ""LC"" Construction"');
     expect(lines[1].split('","')).toHaveLength(SHEET_COLUMNS.length + LINK_COLUMNS.length);
   });

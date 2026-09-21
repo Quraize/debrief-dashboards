@@ -276,7 +276,7 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     const ws = wb.getWorksheet("WEEKLY JOB SHEET")!;
     // Row 1: the tab's headers at the tab's own letters, including the far-right JP columns.
     expect(ws.getCell("A1").value).toBe("Town/Address/Customer");
-    expect(ws.getCell("B1").value).toBe("PAID-IN-FULL: JOB COMPLETED");
+    expect(ws.getCell("B1").value).toBe("PAID-IN-FULL");
     expect(ws.getCell("M1").value).toBe("Job Stage");
     expect(ws.getCell("AB1").value).toBe("Balance Owed");
     expect(ws.getCell("AC1").value).toBe("Job #");

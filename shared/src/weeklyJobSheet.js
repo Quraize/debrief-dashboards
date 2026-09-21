@@ -19,7 +19,7 @@ export const SHEET_COLUMNS = [
   // number lives in AC (managers' decision, 2026-09-09).
   { col: "A", header: "Town/Address/Customer", key: "label" },
   // B..D were hand-ticked; since 2026-09-21 JobProgress fills them (jobStatus).
-  { col: "B", header: "PAID-IN-FULL: JOB COMPLETED", key: "pifStatus" },
+  { col: "B", header: "PAID-IN-FULL", key: "pifStatus" },
   { col: "C", header: "PIF Date", key: "pifDate", type: "date" },
   { col: "D", header: "Job Complete", key: "jobComplete", type: "check" },
   { col: "E", header: "Job Folder" },

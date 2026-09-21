@@ -237,8 +237,8 @@ describe("paid-in-full / completed — columns B..D", () => {
     const grid = [tab, ["9/7/2026-9/13/2026"], ["Wayne/1 Main St/Customer 1", true, null, false, ...Array(HU - 4).fill(null), "1"], ["Weekly Total"], [CUMULATIVE_LABEL]];
     const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [paid, row("2")] }], NO_MONTH);
     const cells = cellsOf(plan);
-    expect(at(cells, 0, B)).toBe("PAID-IN-FULL: JOB COMPLETED");
-    expect(plan.summary.headersRenamed).toEqual([{ from: "PIF", to: "PAID-IN-FULL: JOB COMPLETED", col: "B" }]);
+    expect(at(cells, 0, B)).toBe("PAID-IN-FULL");
+    expect(plan.summary.headersRenamed).toEqual([{ from: "PIF", to: "PAID-IN-FULL", col: "B" }]);
     expect(plan.ops.filter((o) => o.type === "clearValidation")).toEqual([{ type: "clearValidation", col: B }]);
     // The existing row (row 2) is updated: status text, PIF date, completed tick.
     expect(at(cells, 2, B)).toBe("PAID-IN-FULL: JOB COMPLETED");
