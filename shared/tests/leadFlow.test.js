@@ -91,6 +91,16 @@ describe("leadFunnel — activity basis: the work done in the range", () => {
     for (const k of ["leads", "valid", "disqualified", "notSet"]) expect(activity[k], k).toBe(cohort[k]);
   });
 
+  it("shows the dashboards' signed-month money on the Sold card, keeping its own as demoRevenue", () => {
+    const rows = [r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Sale", { sale_amount: 126182 })] })];
+    // Rosco Coleman and Ruben Sanchez demoed earlier and signed in September:
+    // their money is September's on the Sales dashboard, so it is here too.
+    expect(leadFunnel(rows, { ...OPTS, signedRevenue: 168081 })).toMatchObject({ sold: 1, revenue: 168081, demoRevenue: 126182 });
+    // Not given, nothing changes. Cohort keeps its own money — a different question.
+    expect(leadFunnel(rows, OPTS)).toMatchObject({ revenue: 126182, demoRevenue: 126182 });
+    expect(leadFunnel(rows, { ...OPTS, basis: "cohort", signedRevenue: 168081 })).toMatchObject({ revenue: 126182, demoRevenue: 126182 });
+  });
+
   it("reports the visit total so the Marketing dashboard reconciles, and defaults to cohort when asked nothing", () => {
     const rows = [r("Demo No Sale", { apptIn: true, debriefs: [on("2026-09-12", "Demo Completed — Sale", { sale_amount: 1 })] })];
     // Two visits on one lead (a reset): one lead in Set, two on the calendar.

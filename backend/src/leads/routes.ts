@@ -37,6 +37,30 @@ interface FlowRow {
   debriefs: Record<string, unknown>[];
 }
 
+/**
+ * The revenue the Sales dashboard reports for a range, by the same rule:
+ * non-insurance debriefs whose EFFECTIVE sale date — the signed date, else the
+ * appointment date — falls in the range, and which `isSale()` counts as a sale
+ * (a positive amount, an actual close type, or a sale outcome). Kept in step
+ * with shared/src/kpi.js: computeKPIs → filterByEffectiveSaleDate + isSale.
+ */
+const SALE_CLOSE_ACTUAL = ["First Call Close", "Rehash Close", "Follow-Up Close", "Reset Close", "Sale After Follow-Up"];
+const SALE_OUTCOMES = ["Demo Completed — Sale", "Demo Completed — Sale / Credit Decline", "Demo Completed — Sale / Cancellation"];
+
+async function signedMonthRevenue(from: string, to: string): Promise<number> {
+  return withServiceRole(async (c) => {
+    const { rows } = await c.query<{ revenue: string }>(
+      `SELECT coalesce(sum(d.sale_amount), 0)::text AS revenue
+         FROM debrief d
+        WHERE coalesce(d.sale_signed_date, d.appointment_date) BETWEEN $1::date AND $2::date
+          AND coalesce(d.business_division, '') <> 'Insurance'
+          AND coalesce(d.product, '') <> 'Insurance'
+          AND (d.sale_amount > 0 OR d.sale_close_type = ANY($3) OR d.appointment_outcome = ANY($4))`,
+      [from, to, SALE_CLOSE_ACTUAL, SALE_OUTCOMES]);
+    return Number(rows[0]?.revenue ?? 0);
+  }, "leads:flow-revenue", { quiet: true });
+}
+
 export function registerLeadRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: FlowQuery }>(
     "/api/leads/flow",
@@ -78,7 +102,8 @@ export function registerLeadRoutes(app: FastifyInstance): void {
       // Every sales appointment dated in the range, resets included — the
       // number the Marketing dashboard counts, so the two can be reconciled.
       const appointments = data.reduce((n, r) => n + (r.appointments_in_range ?? 0), 0);
-      return reply.send({ from, to, ...leadFunnel(data, { basis, from, to, appointments }) });
+      const signedRevenue = await signedMonthRevenue(from, to);
+      return reply.send({ from, to, ...leadFunnel(data, { basis, from, to, appointments, signedRevenue }) });
     },
   );
 }

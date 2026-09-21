@@ -34,10 +34,11 @@ async function appt(id: string, jobId: string, sales = true, date = "2026-09-10"
 async function debrief(leadId: string, outcome: string, over: Record<string, unknown> = {}) {
   await db.owner.query(
     `INSERT INTO debrief (submitted_by, customer_name, appointment_date, sales_rep, appointment_setter, appointment_type, appointment_outcome,
-                          crm_lead_id, crm_job_id, sale_amount, approval_status, created_by)
-     VALUES ('rep@allied.test', $1, $8::date, 'Jason Malarchak', 'Ashley Pascual', $2, $3, $4, $5, $6, $7, 'rep@allied.test')`,
+                          crm_lead_id, crm_job_id, sale_amount, approval_status, created_by, sale_signed_date)
+     VALUES ('rep@allied.test', $1, $8::date, 'Jason Malarchak', 'Ashley Pascual', $2, $3, $4, $5, $6, $7, 'rep@allied.test', $9::date)`,
     [`Customer ${leadId}`, over["appointment_type"] ?? "First Appointment", outcome, over["crm_lead_id"] ?? leadId,
-      over["crm_job_id"] ?? null, over["sale_amount"] ?? null, over["approval_status"] ?? null, over["appointment_date"] ?? "2026-09-10"]);
+      over["crm_job_id"] ?? null, over["sale_amount"] ?? null, over["approval_status"] ?? null, over["appointment_date"] ?? "2026-09-10",
+      over["sale_signed_date"] ?? null]);
 }
 
 describe.skipIf(!reachable)("GET /api/leads/flow", () => {
@@ -95,6 +96,10 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
     // A September lead whose visit is booked for October: set in cohort, not
     // yet work done in September, and never "Not Set" — it IS booked.
     await job("j19", "2609-0019-01", "Appointment Set", "2026-09-20 10:00"); await appt("a19", "j19", true, "2026-10-05");
+    // Ruben Sanchez's shape: a June demo the rep closed by phone in September.
+    // June's demo, September's money.
+    await job("j20", "2606-0020-01", "Demo No Sale", "2026-06-20 10:00"); await appt("a20", "j20", true, "2026-06-27");
+    await debrief("2606-0020-01", "Demo Completed — Sale", { sale_amount: 14399, appointment_date: "2026-06-27", sale_signed_date: "2026-09-09" });
   });
   afterAll(async () => {
     await app?.close();
@@ -133,10 +138,25 @@ describe.skipIf(!reachable)("GET /api/leads/flow", () => {
       appointments: 8,                                    // visits dated in September, resets included
       ran: 5, noSee: 1, awaiting: 2,
       demo: 4, noDemo: 1, pending: 0,
-      sold: 2, notSold: 2, revenue: 51000,                // 20,000 + the August lead's 31,000
+      sold: 2, notSold: 2, demoRevenue: 51000,            // 20,000 + the August lead's 31,000
+      // The Sold card reports the Sales dashboard's money: every sale signed
+      // in September — the two demos above plus Ruben's June demo, closed by
+      // phone on 9 September. His visit is June's; his money is September's.
+      revenue: 65399,
     });
     expect(f.ran + f.noSee + f.awaiting).toBe(f.set);
     expect(f.demo + f.noDemo + f.pending).toBe(f.ran);
+  });
+
+  it("leaves June its demo and gives September the money, and never overrides the cohort question", async () => {
+    // June: Ruben's visit and his demo, but the Sold card shows no money — he
+    // signed in September, so that is where the Sales dashboard puts it.
+    const jun = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-06-01&to=2026-06-30", ...auth })).json();
+    expect(jun).toMatchObject({ basis: "activity", set: 1, demo: 1, sold: 1, demoRevenue: 14399, revenue: 0 });
+    // Cohort is a different question and keeps its own money: September's own
+    // leads sold 20,000, whatever was signed in September from earlier demos.
+    const coh = (await app.inject({ method: "GET", url: "/api/leads/flow?from=2026-09-01&to=2026-09-30&basis=cohort", ...auth })).json();
+    expect(coh).toMatchObject({ basis: "cohort", revenue: 20000, demoRevenue: 20000 });
   });
 
   it("gives the August lead its August visit, and nothing of September", async () => {

@@ -137,7 +137,7 @@ function Funnel({ f, activity }) {
       <Connector />
       <Column>
         <Box tone="gold" label="Sold" value={f.sold} share={f.soldRate} of="of demos" sub={money(f.revenue)}
-          note="Leads that have sold to date, later phone or email closes included" />
+          note="Leads that have sold to date, later phone or email closes included. The money is every sale signed in this period, the same figure as the Sales dashboard, so a demo from an earlier month that signed now is counted here." />
         <Box tone="slate" label="No Sale" value={f.notSold} share={f.notSoldRate} of="of demos" />
       </Column>
     </div>

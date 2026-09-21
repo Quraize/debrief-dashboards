@@ -103,7 +103,9 @@ function debriefInRange(d, from, to) {
  *   Leads (jp_job rows), insurance already excluded. A row with no
  *   `created_in_range` flag is treated as having arrived in the range, so the
  *   cohort query — which returns only those — needs no flag at all.
- * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null }} [opts]
+ * @param {{ basis?: "activity"|"cohort", from?: string, to?: string, appointments?: number|null,
+ *   signedRevenue?: number|null }} [opts] `signedRevenue` is the dashboards' signed-month
+ *   total for the range; when given it is what the Sold card reports.
  */
 export function leadFunnel(rows, opts = {}) {
   const activity = opts.basis === "activity";
@@ -155,7 +157,14 @@ export function leadFunnel(rows, opts = {}) {
     ranRate: pct(ran, set), noSeeRate: pct(status.noSee, set), awaitingRate: pct(status.awaiting, set),
     demo, noDemo: status.noDemo, pending: status.pending,
     demoRate: pct(demo, ran), noDemoRate: pct(status.noDemo, ran), pendingRate: pct(status.pending, ran),
-    sold, notSold: demo - sold, revenue, soldRate: pct(sold, demo), notSoldRate: pct(demo - sold, demo),
+    sold, notSold: demo - sold, soldRate: pct(sold, demo), notSoldRate: pct(demo - sold, demo),
+    // The Sold card shows the SAME money as the Sales dashboard: every sale
+    // signed in the range, whenever its demo happened (Rosco Coleman demoed
+    // in August and signed on 3 September — September's money). The funnel's
+    // own figure, the sales made by the demos counted above, stays as
+    // `demoRevenue` so nothing that reads it loses its meaning.
+    revenue: activity ? (opts.signedRevenue ?? revenue) : revenue,
+    demoRevenue: revenue,
   };
 }
 
