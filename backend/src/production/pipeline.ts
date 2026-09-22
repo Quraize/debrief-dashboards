@@ -9,6 +9,10 @@
  * same way, stamped with the writer.
  */
 import { dbApp, withUser, type SessionContext } from "../db/client.js";
+
+/** The slice of a pg client the loaders need, so a user session or the service role can drive them. */
+export interface Queryable { query<R>(text: string, values?: unknown[]): Promise<{ rows: R[]; rowCount?: number | null }> }
+export type Runner = <T>(fn: (c: Queryable) => Promise<T>) => Promise<T>;
 import { isInstallCode } from "@allied/shared/production";
 import { soldPipeline } from "@allied/shared/soldPipeline";
 import { BOARD_TIMEZONE, jobProgressUrl, todayInBoardZone } from "./board.js";
@@ -19,21 +23,30 @@ interface Row {
   contract_signed_date: string | null; total_job_revenue: string | null; total_job_price: string | null;
   rep_names: string | null; visits: { day: string; code: string | null }[] | null;
   blocker: string | null; owner: string | null; next_action: string | null; note_updated_by: string | null; note_updated_at: Date | null;
+  s_suggestion: string | null; s_confidence: string | null; s_rule_key: string | null; s_model: string | null; s_created_at: Date | null; s_accepted_at: Date | null;
 }
 
 export interface PipelineNoteInput { blocker?: string | null; owner?: string | null; nextAction?: string | null }
 
 export async function soldPipelineReport(ctx: SessionContext, today = todayInBoardZone()) {
-  const rows = await withUser(dbApp(), ctx, async (c) => {
+  return loadPipeline((fn) => withUser(dbApp(), ctx, fn), today);
+}
+
+/** The report, driven by whichever runner the caller has: a user session or the service. */
+export async function loadPipeline(run: Runner, today = todayInBoardZone()) {
+  const rows = await run(async (c) => {
     const { rows } = await c.query<Row>(
       `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, cu.customer_name, l.city, l.address,
               j.current_stage, j.division, j.trades, j.contract_signed_date::text,
               j.total_job_revenue::text, j.total_job_price::text, j.rep_names,
-              sch.visits, n.blocker, n.owner, n.next_action, n.updated_by AS note_updated_by, n.updated_at AS note_updated_at
+              sch.visits, n.blocker, n.owner, n.next_action, n.updated_by AS note_updated_by, n.updated_at AS note_updated_at,
+              s.suggestion AS s_suggestion, s.confidence AS s_confidence, s.rule_key AS s_rule_key, s.model AS s_model,
+              s.created_at AS s_created_at, s.accepted_at AS s_accepted_at
          FROM jp_job j
          LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
          LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
          LEFT JOIN job_pipeline_note n ON n.jp_job_id = j.jp_job_id
+         LEFT JOIN job_next_action_suggestion s ON s.jp_job_id = j.jp_job_id
          LEFT JOIN LATERAL (
            SELECT json_agg(json_build_object('day', (s.start_at AT TIME ZONE $1)::date::text, 'code', s.job_type_code) ORDER BY s.start_at) AS visits
              FROM jp_schedule s WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
@@ -55,6 +68,11 @@ export async function soldPipelineReport(ctx: SessionContext, today = todayInBoa
       updatedBy: r.note_updated_by, updatedAt: r.note_updated_at ? r.note_updated_at.toISOString() : null,
     } : null,
     jpUrl: jobProgressUrl(r.jp_customer_id, r.jp_job_id),
+    // The standing suggestion, shown only while nobody has written a Next Action.
+    suggested: r.s_suggestion ? {
+      text: r.s_suggestion, confidence: r.s_confidence, ruleKey: r.s_rule_key, model: r.s_model,
+      at: r.s_created_at ? r.s_created_at.toISOString() : null, accepted: !!r.s_accepted_at,
+    } : null,
   }));
   return soldPipeline(jobs, today);
 }

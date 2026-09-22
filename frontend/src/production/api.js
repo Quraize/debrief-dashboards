@@ -11,6 +11,12 @@ export const productionApi = {
   pipeline: () => get("/api/production/pipeline"),
   /** Production's Blocker / Owner / Next Action for one job. Empty string clears a field. */
   pipelineNote: (jobId, { blocker, owner, nextAction }) => post(`/api/production/pipeline/${encodeURIComponent(jobId)}/note`, { blocker, owner, nextAction }),
+  /** Next Action suggestions: status of the nightly run, run it now, accept one, and the managers' instructions. */
+  nextActionStatus: () => get("/api/production/pipeline/next-actions"),
+  suggestNextActions: ({ force = false } = {}) => post("/api/production/pipeline/next-actions/run", { force }),
+  acceptSuggestion: (jobId) => post(`/api/production/pipeline/${encodeURIComponent(jobId)}/suggestion/accept`, {}),
+  instructions: () => get("/api/production/pipeline/instructions"),
+  saveInstructions: (body) => post("/api/production/pipeline/instructions", { body }),
   /** Every job in a tracked workflow stage, grouped like the JobProgress Jobs screen. */
   jobs: () => get("/api/production/jobs"),
   /** The same jobs as rows of the production master sheet's WEEKLY JOB SHEET tab. */

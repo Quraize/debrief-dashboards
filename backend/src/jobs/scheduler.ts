@@ -28,6 +28,7 @@ import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 import { runDebriefReminders, reminderSchedule, type ReminderRunResult } from "../reminders/debriefReminders.js";
 import { pushWeeklyJobSheet, sheetPushSettings, type SheetPushResult } from "../production/sheetPush.js";
 import { runUniteCallSync, type UniteSyncCounts } from "../integrations/intermedia/syncCalls.js";
+import { runNextActions, nextActionSettings, type NextActionCounts } from "../production/nextActions.js";
 import { uniteConfig } from "../integrations/intermedia/client.js";
 
 export const SYNC_QUEUE = "leap-sync";
@@ -56,6 +57,11 @@ const SHEET_PUSH_JOB_OPTS: PgBoss.SendOptions = {
   retryDelay: 300,
   expireInSeconds: 900,
 };
+/** Next Action suggestions for the Sold-Job Pipeline: once a night. */
+export const NEXT_ACTIONS_QUEUE = "next-actions";
+const NEXT_ACTIONS_DEFAULT_CRON = "15 10 * * *"; // 6:15am New York (EDT) — before the morning meeting
+const NEXT_ACTIONS_JOB_OPTS: PgBoss.SendOptions = { retryLimit: 1, retryDelay: 600, expireInSeconds: 900 };
+
 /** Phone system (Intermedia Unite): outside calls into the mirror, every 15 min. */
 export const UNITE_CALLS_QUEUE = "unite-calls";
 const UNITE_CALLS_DEFAULT_CRON = "*/15 * * * *";
@@ -240,6 +246,24 @@ export function customerSyncSchedule(): { enabled: boolean; cron: string; reason
   }
   if (!process.env.LEAP_API_TOKEN) return { enabled: false, cron, reason: "LEAP_API_TOKEN not set" };
   return { enabled: true, cron, reason: "" };
+}
+
+/** Same master switch as the syncs, plus the Anthropic key; NEXT_ACTION_ENABLED=false turns it off. */
+export function nextActionsSchedule(): { enabled: boolean; cron: string; reason: string } {
+  const cron = process.env.NEXT_ACTION_CRON ?? NEXT_ACTIONS_DEFAULT_CRON;
+  if (process.env.SYNC_SCHEDULE_ENABLED !== "true") return { enabled: false, cron, reason: "SYNC_SCHEDULE_ENABLED is not true" };
+  const s = nextActionSettings();
+  return s.enabled ? { enabled: true, cron, reason: "" } : { enabled: false, cron, reason: s.reason };
+}
+
+export async function handleNextActionsJob(deps: { run?: typeof runNextActions } = {}): Promise<NextActionCounts> {
+  const run = deps.run ?? runNextActions;
+  const result = await run({ startedBy: "scheduler" });
+  if (result.status === "failed") throw new Error(result.errorMessage ?? "next actions run failed");
+  const c = result.counts;
+  console.info(`[scheduler] next actions: ${c.rows} pipeline job(s), ${c.suggested} suggested by ${result.model}, ${c.ruleOnly} by rule, `
+    + `${c.unchanged} unchanged, ${c.humanOwned} written by the team, ${c.failed + c.refused} without; ~$${c.estimatedCostUsd ?? "?"}`);
+  return c;
 }
 
 /** On when the Unite service account is on file; UNITE_SYNC_ENABLED=false turns it off. */
@@ -475,6 +499,21 @@ export async function startScheduler(options: SchedulerOptions = {}): Promise<vo
       { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) },
       async () => handleCustomerSyncJob(),
     );
+  }
+
+  // ── Next Action suggestions: nightly ──
+  const naQueue = await instance.getQueue(NEXT_ACTIONS_QUEUE);
+  if (!naQueue) await instance.createQueue(NEXT_ACTIONS_QUEUE, { name: NEXT_ACTIONS_QUEUE, policy: "singleton" });
+  const na = nextActionsSchedule();
+  if (na.enabled) {
+    await instance.schedule(NEXT_ACTIONS_QUEUE, na.cron, { startedBy: "scheduler" }, { ...NEXT_ACTIONS_JOB_OPTS, tz: "UTC" });
+    console.info(`[scheduler] ${NEXT_ACTIONS_QUEUE} scheduled: "${na.cron}" (UTC)`);
+  } else {
+    await instance.unschedule(NEXT_ACTIONS_QUEUE);
+    console.info(`[scheduler] next action suggestions disabled (${na.reason})`);
+  }
+  if (options.worker !== false) {
+    await instance.work(NEXT_ACTIONS_QUEUE, { pollingIntervalSeconds: Number(process.env.SYNC_POLL_SECONDS ?? 5) }, async () => handleNextActionsJob());
   }
 
   // ── Phone system (Intermedia Unite) ──

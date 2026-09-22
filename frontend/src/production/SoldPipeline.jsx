@@ -20,7 +20,7 @@ import { BUCKETS, pipelineTotals } from "@allied/shared/soldPipeline";
 import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
-import { Loader2, ExternalLink, Search, Pencil, Check } from "lucide-react";
+import { Loader2, ExternalLink, Search, Pencil, Check, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import { productionApi } from "./api";
 
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
@@ -39,6 +39,7 @@ const TONE = {
 export default function SoldPipeline() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: () => base44.auth.me().catch(() => null) });
   const allowed = !!me && PRODUCTION_ROLES.includes(me.role);
+  const isManager = !!me && ["admin", "sales_manager", "project_manager"].includes(me.role);
   const { data, isLoading, error } = useQuery({ queryKey: ["production-pipeline"], queryFn: productionApi.pipeline, enabled: allowed, staleTime: 60_000 });
   const [bucket, setBucket] = useState("unscheduled");
   const [q, setQ] = useState("");
@@ -101,6 +102,8 @@ export default function SoldPipeline() {
           </div>
         </div>
       </div>
+
+      {allowed && <NextActionsBar isManager={isManager} />}
 
       {isLoading || !t ? (
         error ? <p className="text-sm text-red-600">The pipeline could not be loaded right now.</p>
@@ -202,18 +205,19 @@ function PipelineRow({ r }) {
       <td className="px-3 py-2 whitespace-nowrap">{fmtWeek(r.expectedWeek)}</td>
       <NoteCell r={r} field="blocker" value={r.blocker} derived={r.blockerDerived} />
       <NoteCell r={r} field="owner" value={r.owner} placeholder="assign…" />
-      <NoteCell r={r} field="nextAction" value={r.nextAction} placeholder="what happens next…" />
+      <NextActionCell r={r} />
       <td className="px-3 py-2">{r.jpUrl && <a href={r.jpUrl} target="_blank" rel="noreferrer" className="text-accent" title="Open in JobProgress"><ExternalLink className="w-4 h-4" /></a>}</td>
     </tr>
   );
 }
 
 /** One editable note cell: click to edit, Enter or blur to save, Escape to cancel. */
-function NoteCell({ r, field, value, derived = false, placeholder = "" }) {
+function NoteCell({ r, field, value, derived = false, placeholder = "", startOpen = false, onClose }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditingState] = useState(startOpen);
   const [draft, setDraft] = useState("");
+  const setEditing = (v) => { setEditingState(v); if (!v && onClose) onClose(); };
   const save = useMutation({
     mutationFn: (text) => productionApi.pipelineNote(r.jobId, {
       blocker: field === "blocker" ? text : (r.blockerDerived ? null : r.blocker),
@@ -243,6 +247,123 @@ function NoteCell({ r, field, value, derived = false, placeholder = "" }) {
       <span className={derived ? "text-muted-foreground italic" : value ? "" : "text-muted-foreground"}>{value || placeholder}</span>
       <Pencil className="w-3 h-3 inline ml-1 opacity-0 group-hover:opacity-60" />
     </td>
+  );
+}
+
+/**
+ * Next Action: what a person wrote, else what the system suggests — in
+ * italics, with one click to accept it or a pencil to write your own. The
+ * suggestion never overwrites a person's note; accepting is the person's act.
+ */
+function NextActionCell({ r }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [writing, setWriting] = useState(false);
+  const accept = useMutation({
+    mutationFn: () => productionApi.acceptSuggestion(r.jobId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["production-pipeline"] }),
+    onError: (e) => toast({ title: "Could not accept", description: e.message, variant: "destructive" }),
+  });
+  if (r.nextAction || writing || !r.suggested?.text) {
+    return <NoteCell r={r} field="nextAction" value={r.nextAction} placeholder="what happens next…" startOpen={writing} onClose={() => setWriting(false)} />;
+  }
+  const s = r.suggested;
+  const byRule = s.model === "rule" || s.model === "rule-fallback";
+  const dot = s.confidence === "high" ? "bg-green-500" : s.confidence === "low" ? "bg-amber-500" : "bg-blue-500";
+  return (
+    <td className="px-3 py-2 whitespace-normal break-words align-top">
+      <div className="flex items-start gap-1.5">
+        <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${dot}`} title={`${s.confidence ?? "medium"} confidence · ${byRule ? "from the stage rule" : `from ${s.model}`}${s.at ? ` · ${new Date(s.at).toLocaleString()}` : ""}`} />
+        <span className="italic text-muted-foreground"><span className="not-italic text-[10px] uppercase tracking-wide font-semibold mr-1">Suggested</span>{s.text}</span>
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <button onClick={() => accept.mutate()} disabled={accept.isPending}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 hover:underline disabled:opacity-50" title="Make this the Next Action">
+          {accept.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Accept
+        </button>
+        <button onClick={() => setWriting(true)} className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:underline" title="Write your own instead">
+          <Pencil className="w-3 h-3" /> Write own
+        </button>
+      </div>
+    </td>
+  );
+}
+
+/** Run the suggestions now, see when they last ran and what it cost, and edit the instructions the model follows. */
+function NextActionsBar({ isManager }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const { data: st } = useQuery({ queryKey: ["next-action-status"], queryFn: productionApi.nextActionStatus, staleTime: 30_000 });
+  const run = useMutation({
+    mutationFn: () => productionApi.suggestNextActions({}),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["production-pipeline"] }); qc.invalidateQueries({ queryKey: ["next-action-status"] });
+      const c = res.counts;
+      toast({ title: "Suggestions updated", description: `${c.suggested} suggested by the model, ${c.ruleOnly} by rule, ${c.unchanged} unchanged${c.estimatedCostUsd != null ? ` · about $${c.estimatedCostUsd.toFixed(3)}` : ""}.` });
+    },
+    onError: (e) => toast({ title: "Suggestion run failed", description: e.message, variant: "destructive" }),
+  });
+  const last = st?.lastRun;
+  const cronLabel = st?.cron === "15 10 * * *" ? "nightly at 6:15am" : st?.cron ? `on schedule (${st.cron} UTC)` : "nightly";
+  return (
+    <div className="bg-white rounded-xl border border-border shadow-sm">
+      <div className="flex flex-wrap items-center gap-3 p-3">
+        <Sparkles className="w-4 h-4 text-accent" />
+        <div className="text-sm">
+          <span className="font-semibold">Next-action suggestions</span>
+          <span className="text-muted-foreground"> · {st?.enabled ? `${cronLabel} · ${st.model}` : (st?.reason || "off")}</span>
+          {last && (
+            <span className="text-muted-foreground"> · last run {new Date(last.startedAt).toLocaleString()}{last.status !== "completed" ? <span className="text-red-600"> failed{last.errorMessage ? `: ${last.errorMessage}` : ""}</span>
+              : last.counts ? ` — ${last.counts.suggested} by model, ${last.counts.ruleOnly} by rule, ${last.counts.unchanged} unchanged${last.counts.estimatedCostUsd != null ? `, ~$${Number(last.counts.estimatedCostUsd).toFixed(3)}` : ""}` : ""}</span>
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-primary">
+            {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />} Instructions the AI follows
+          </button>
+          <button onClick={() => run.mutate()} disabled={run.isPending || !st?.enabled}
+            className="bg-primary text-primary-foreground rounded-lg px-3 py-1.5 text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50" title={st?.enabled ? "Re-suggest for every job whose facts changed" : (st?.reason || "")}>
+            {run.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Suggest next actions now
+          </button>
+        </div>
+      </div>
+      {open && <InstructionsEditor isManager={isManager} />}
+    </div>
+  );
+}
+
+function InstructionsEditor({ isManager }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery({ queryKey: ["next-action-instructions"], queryFn: productionApi.instructions });
+  const [draft, setDraft] = useState(null);
+  const text = draft ?? data?.body ?? "";
+  const save = useMutation({
+    mutationFn: () => productionApi.saveInstructions(text),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["next-action-instructions"] }); setDraft(null); toast({ title: "Instructions saved", description: "The next run will follow them. Press Suggest now to apply them today." }); },
+    onError: (e) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
+  });
+  if (isLoading) return <div className="p-3"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>;
+  return (
+    <div className="border-t border-border p-3 space-y-2">
+      <p className="text-xs text-muted-foreground max-w-3xl">
+        These are the standing instructions the model works inside when it phrases a next action. Write them the way you would brief a new
+        coordinator: what comes first, who owns what, when to escalate. The model cannot go outside them, and every suggestion is still
+        just a suggestion until someone accepts it.
+        {data?.isDefault ? " Showing the starter text; edit it and save to make it yours." : data?.updatedBy ? ` Last saved by ${data.updatedBy} on ${new Date(data.updatedAt).toLocaleString()}.` : ""}
+        {!isManager && " Only managers can change it."}
+      </p>
+      <textarea value={text} onChange={(e) => setDraft(e.target.value)} readOnly={!isManager} rows={12}
+        className="w-full text-sm border border-input rounded-lg px-3 py-2 font-mono leading-relaxed read-only:bg-secondary/40" />
+      {isManager && (
+        <div className="flex items-center gap-2">
+          <button onClick={() => save.mutate()} disabled={save.isPending || draft === null || text.trim().length < 40}
+            className="bg-accent text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50">{save.isPending ? "Saving…" : "Save instructions"}</button>
+          {draft !== null && <button onClick={() => setDraft(null)} className="text-xs text-muted-foreground hover:underline">Discard changes</button>}
+        </div>
+      )}
+    </div>
   );
 }
 

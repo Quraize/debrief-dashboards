@@ -14,6 +14,8 @@ import { buildWeeklySheetWorkbook } from "./weeklyJobSheetXlsx.js";
 import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush, recentSheetPushes } from "./sheetPush.js";
 import { runJobStageSync } from "./syncJobStages.js";
 import { soldPipelineReport, savePipelineNote } from "./pipeline.js";
+import { runNextActions, acceptSuggestion, getInstructions, saveInstructions, nextActionStatus } from "./nextActions.js";
+import { dbApp, withUser } from "../db/client.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
 interface WeekQuery { from?: string; to?: string; basis?: string }
@@ -39,6 +41,45 @@ export function registerProductionRoutes(app: FastifyInstance): void {
       return reply.send(note);
     },
   );
+
+  // ── Next Action suggestions ──
+  const managersOnly = requireRole("admin", "sales_manager", "project_manager");
+  app.get("/api/production/pipeline/next-actions", { preHandler: [requireAuth, productionOnly] },
+    async (_req: FastifyRequest, reply: FastifyReply) => reply.send(await nextActionStatus()));
+  app.post<{ Body: { force?: boolean } }>("/api/production/pipeline/next-actions/run", { preHandler: [requireAuth, requireCsrf, productionOnly] },
+    async (req, reply) => {
+      console.info(`[production] next actions run by=${req.user!.email} force=${!!req.body?.force} ip=${clientIp(req)}`);
+      const result = await runNextActions({ startedBy: `manual:${req.user!.email}`, force: !!req.body?.force });
+      if (result.status === "failed") return reply.code(502).send({ error: "The suggestion run failed.", detail: result.errorMessage, ...result });
+      return reply.send(result);
+    });
+  app.post<{ Params: { jobId: string } }>("/api/production/pipeline/:jobId/suggestion/accept", { preHandler: [requireAuth, requireCsrf, productionOnly] },
+    async (req, reply) => {
+      try {
+        const out = await acceptSuggestion({ email: req.user!.email, role: req.user!.role }, req.params.jobId);
+        console.info(`[production] suggestion accepted job=${req.params.jobId} by=${req.user!.email}`);
+        return reply.send(out);
+      } catch (err) {
+        const e = err as Error & { statusCode?: number };
+        return reply.code(e.statusCode ?? 500).send({ error: e.message });
+      }
+    });
+  app.get("/api/production/pipeline/instructions", { preHandler: [requireAuth, productionOnly] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const ctx = { email: req.user!.email, role: req.user!.role };
+      return reply.send(await getInstructions((fn) => withUser(dbApp(), ctx, fn)));
+    });
+  app.post<{ Body: { body?: string } }>("/api/production/pipeline/instructions", { preHandler: [requireAuth, requireCsrf, managersOnly] },
+    async (req, reply) => {
+      try {
+        const out = await saveInstructions({ email: req.user!.email, role: req.user!.role }, req.body?.body ?? "");
+        console.info(`[production] next-action instructions saved by=${req.user!.email} chars=${out.body.length}`);
+        return reply.send(out);
+      } catch (err) {
+        const e = err as Error & { statusCode?: number };
+        return reply.code(e.statusCode ?? 500).send({ error: e.message });
+      }
+    });
 
   app.get<{ Querystring: BoardQuery }>(
     "/api/production/board",
