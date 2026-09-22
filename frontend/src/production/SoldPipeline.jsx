@@ -19,6 +19,7 @@ import { PRODUCTION_ROLES } from "@allied/shared/constants";
 import { BUCKETS, pipelineTotals } from "@allied/shared/soldPipeline";
 import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
+import ScrollTable from "@/components/ScrollTable";
 import { Loader2, ExternalLink, Search, Pencil, Check } from "lucide-react";
 import { productionApi } from "./api";
 
@@ -144,11 +145,12 @@ export default function SoldPipeline() {
             {rows.length === 0 ? (
               <p className="text-sm text-muted-foreground p-6 text-center">Nothing in this view.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <ScrollTable>
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-muted-foreground bg-secondary/50 border-b border-border text-xs uppercase tracking-wide">
-                      <th className="px-3 py-2">Customer</th>
+                  {/* Sticky header and sticky first column: the customer stays put while the wide part scrolls. */}
+                  <thead className="sticky top-0 z-10 bg-secondary">
+                    <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide">
+                      <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">Customer</th>
                       <th className="px-3 py-2">Job</th>
                       <th className="px-3 py-2 text-right">Contract $</th>
                       <th className="px-3 py-2">Sold</th>
@@ -166,7 +168,7 @@ export default function SoldPipeline() {
                     {rows.map((r) => <PipelineRow key={r.jobId} r={r} />)}
                   </tbody>
                 </table>
-              </div>
+              </ScrollTable>
             )}
           </div>
         </>
@@ -178,8 +180,8 @@ export default function SoldPipeline() {
 function PipelineRow({ r }) {
   const bucket = BUCKETS.find((b) => b.key === r.bucket);
   return (
-    <tr className={`border-b border-border/50 hover:bg-secondary/30 ${r.noContractValue ? "bg-red-50/40" : ""}`}>
-      <td className="px-3 py-2 whitespace-nowrap">
+    <tr className={`border-b border-border/50 hover:bg-secondary ${r.noContractValue ? "bg-red-50" : "bg-white"}`}>
+      <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))]">
         <div className="font-semibold text-primary">{r.customer || "—"}</div>
         <div className="text-xs text-muted-foreground">{[r.city, r.address].filter(Boolean).join(" · ")}{r.rep ? ` · sold by ${r.rep}` : ""}</div>
       </td>
