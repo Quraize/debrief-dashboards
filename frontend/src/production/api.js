@@ -7,6 +7,10 @@ export const productionApi = {
   board: (params) => get(`/api/production/board${qs(params)}`),
   /** Pull the production calendar (and the jobs by stage) from JobProgress right now. */
   refresh: () => post("/api/production/sync"),
+  /** Sold-Job Pipeline: every signed job not yet paid, bucketed, with the CEO's totals. */
+  pipeline: () => get("/api/production/pipeline"),
+  /** Production's Blocker / Owner / Next Action for one job. Empty string clears a field. */
+  pipelineNote: (jobId, { blocker, owner, nextAction }) => post(`/api/production/pipeline/${encodeURIComponent(jobId)}/note`, { blocker, owner, nextAction }),
   /** Every job in a tracked workflow stage, grouped like the JobProgress Jobs screen. */
   jobs: () => get("/api/production/jobs"),
   /** The same jobs as rows of the production master sheet's WEEKLY JOB SHEET tab. */

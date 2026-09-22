@@ -7,6 +7,7 @@ import { STAGE_GROUPS } from "@allied/shared/jobStages";
 import { RefreshCw, Loader2, ExternalLink, MapPin, Search, Users, CalendarDays, Clock } from "lucide-react";
 import { productionApi } from "./api";
 import ScheduleMap from "./ScheduleMap";
+import PipelineHeadline from "./PipelineHeadline";
 
 function relative(iso) {
   if (!iso) return "";
@@ -113,6 +114,9 @@ export default function ProductionJobs() {
           </button>
         </div>
       </div>
+
+      {/* The sold-job pipeline's headline totals; the detail is its own tab. */}
+      <PipelineHeadline />
 
       {/* Groups, like the JobProgress Jobs screen. All selected by default. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

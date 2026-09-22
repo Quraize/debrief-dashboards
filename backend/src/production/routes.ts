@@ -13,12 +13,32 @@ import { weeklyJobSheet, parseWeekFilter, filterSheetRows } from "./weeklyJobShe
 import { buildWeeklySheetWorkbook } from "./weeklyJobSheetXlsx.js";
 import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush, recentSheetPushes } from "./sheetPush.js";
 import { runJobStageSync } from "./syncJobStages.js";
+import { soldPipelineReport, savePipelineNote } from "./pipeline.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
 interface WeekQuery { from?: string; to?: string; basis?: string }
 
 export function registerProductionRoutes(app: FastifyInstance): void {
   const productionOnly = requireRole(...PRODUCTION_ROLES);
+
+  // ── Sold-Job Pipeline / Unscheduled Work ──
+  app.get(
+    "/api/production/pipeline",
+    { preHandler: [requireAuth, productionOnly] },
+    async (req: FastifyRequest, reply: FastifyReply) => reply.send(await soldPipelineReport({ email: req.user!.email, role: req.user!.role })),
+  );
+  app.post<{ Params: { jobId: string }; Body: { blocker?: string | null; owner?: string | null; next_action?: string | null; nextAction?: string | null } }>(
+    "/api/production/pipeline/:jobId/note",
+    { preHandler: [requireAuth, requireCsrf, productionOnly] },
+    async (req, reply) => {
+      const { jobId } = req.params;
+      if (!jobId || jobId.length > 64) return reply.code(400).send({ error: "jobId is required" });
+      const b = req.body ?? {};
+      const note = await savePipelineNote({ email: req.user!.email, role: req.user!.role }, jobId, { blocker: b.blocker, owner: b.owner, nextAction: b.nextAction ?? b.next_action });
+      console.info(`[production] pipeline note job=${jobId} by=${req.user!.email} ip=${clientIp(req)}`);
+      return reply.send(note);
+    },
+  );
 
   app.get<{ Querystring: BoardQuery }>(
     "/api/production/board",

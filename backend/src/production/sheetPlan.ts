@@ -20,6 +20,7 @@
  * Status column instead.
  */
 import { MASTER_COLUMNS, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
+import { weekBounds } from "@allied/shared/production";
 import { labelLink } from "@allied/shared/weeklyJobSheet";
 import { isInstallCode } from "@allied/shared/production";
 import { stageKey } from "@allied/shared/jobStages";
@@ -597,13 +598,4 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   }
 }
 
-/** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
-export function weekBounds(day: string, offset = 0): { from: string; to: string } {
-  const [y, m, d] = day.slice(0, 10).split("-").map(Number);
-  const base = new Date(Date.UTC(y!, m! - 1, d!));
-  const dow = (base.getUTCDay() + 6) % 7; // Monday = 0
-  const mon = new Date(base.getTime() - dow * 86_400_000 + offset * 7 * 86_400_000);
-  const sun = new Date(mon.getTime() + 6 * 86_400_000);
-  const f = (x: Date) => x.toISOString().slice(0, 10);
-  return { from: f(mon), to: f(sun) };
-}
+export { weekBounds };

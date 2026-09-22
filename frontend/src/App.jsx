@@ -32,6 +32,7 @@ import MarketingDashboard from '@/pages/MarketingDashboard';
 import InsuranceDashboard from '@/pages/InsuranceDashboard';
 import ProductionSchedule from '@/production/ProductionSchedule';
 import ProductionJobs from '@/production/ProductionJobs';
+import SoldPipeline from "@/production/SoldPipeline";
 import WeeklyJobSheet from '@/production/WeeklyJobSheet';
 import DebriefApprovals from '@/pages/DebriefApprovals';
 import UniteCalls from '@/pages/UniteCalls';
@@ -103,6 +104,7 @@ const AuthenticatedApp = () => {
           <Route path="/phone-system" element={<UniteCalls />} />
           <Route path="/production/schedule" element={<ProductionSchedule />} />
           <Route path="/production/jobs" element={<ProductionJobs />} />
+          <Route path="/production/pipeline" element={<SoldPipeline />} />
           <Route path="/production/weekly-job-sheet" element={<WeeklyJobSheet />} />
           <Route path="/account" element={<Account />} />
           <Route path="/users" element={<Users />} />

@@ -32,6 +32,17 @@ export const JOB_TYPE_LABELS = {
  */
 export const INSTALL_CODES = ["RR", "SR", "RR+SR", "GUTTERS", "WR", "SOLAR", "SHED"];
 
+/** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
+export function weekBounds(day, offset = 0) {
+  const [y, m, d] = String(day).slice(0, 10).split("-").map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  const dow = (base.getUTCDay() + 6) % 7; // Monday = 0
+  const mon = new Date(base.getTime() - dow * 86_400_000 + offset * 7 * 86_400_000);
+  const sun = new Date(mon.getTime() + 6 * 86_400_000);
+  const f = (x) => x.toISOString().slice(0, 10);
+  return { from: f(mon), to: f(sun) };
+}
+
 /** True when a schedule code marks an install visit (tolerant of "RR + SR", "RR/SR"). */
 export function isInstallCode(code) {
   const c = norm(code).toUpperCase().replace(/\s+/g, "").replace("/", "+");
