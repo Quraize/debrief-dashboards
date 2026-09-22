@@ -290,9 +290,8 @@ export interface ReminderStatus {
   lastRun: { completed_on: string; state: string } | null;
 }
 
-export async function reminderStatus(lastRun: ReminderStatus["lastRun"], env = process.env): Promise<ReminderStatus> {
+export async function reminderStatus(lastRun: ReminderStatus["lastRun"], env = process.env, now = new Date()): Promise<ReminderStatus> {
   const s = reminderSettings(env);
-  const now = new Date();
   const due = await findDueReminders(now, s);
   const unmatched = [...new Set(due.filter((d) => !(d.recipient_active && d.recipient_email)).map((d) => d.sales_rep.trim()))].sort();
   const { repNames, last7Days } = await withServiceRole(async (c) => {

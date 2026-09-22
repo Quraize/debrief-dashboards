@@ -294,7 +294,8 @@ describe.skipIf(!reachable)("runDebriefReminders", () => {
     await expect(sendTestReminder("me@example.com", "admin", null, {})).rejects.toMatchObject({ statusCode: 501 });
 
     await jp("due", { sales_rep: "Somebody New" });
-    const status = await reminderStatus(null, { SMTP_USER: "n@x.com", SMTP_PASSWORD: "p" });
+    // Pinned to the fixture's clock: the "due" row is 3 hours before NOW, not before whenever the test happens to run.
+    const status = await reminderStatus(null, { SMTP_USER: "n@x.com", SMTP_PASSWORD: "p" }, NOW);
     expect(status).toMatchObject({ enabled: false, dueNow: 1, dueWithoutRecipient: 1, unmatchedReps: ["Somebody New"], mail: { configured: true } });
     expect(status.repNames[0]).toMatchObject({ rep_name: "Somebody New", appointments: 1 });
     expect(JSON.stringify(status)).not.toContain('"p"');
