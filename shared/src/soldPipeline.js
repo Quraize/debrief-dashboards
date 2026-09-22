@@ -131,12 +131,22 @@ export function soldPipeline(jobs, today) {
   // Oldest sale first: nothing ages off, so the stale ones sit where they are seen.
   rows.sort((a, b) => String(a.contractSignedDate).localeCompare(String(b.contractSignedDate)) || String(a.jobNumber ?? "").localeCompare(String(b.jobNumber ?? "")));
 
+  return { today, thisWeek, nextWeek, totals: pipelineTotals(rows, today), rows };
+}
+
+/**
+ * The headline numbers for a set of pipeline rows. Separate from the report
+ * so a page that has filtered the rows — by sold date, by install date — can
+ * show totals for exactly what is on screen. "This week" and "next week" are
+ * always the real calendar weeks around `today`, whatever the filter.
+ */
+export function pipelineTotals(rows, today) {
+  const thisWeek = weekBounds(today), nextWeek = weekBounds(today, 1);
   const sum = (list) => Math.round(list.reduce((n, r) => n + (r.contract ?? 0), 0) * 100) / 100;
   const inWeek = (r, w) => r.scheduledDate !== null && r.scheduledDate >= w.from && r.scheduledDate <= w.to;
-  const by = Object.fromEntries(BUCKETS.map((b) => [b.key, rows.filter((r) => r.bucket === b.key)]));
+  const by = Object.fromEntries(BUCKETS.map((b) => [b.key, (rows ?? []).filter((r) => r.bucket === b.key)]));
+  rows = rows ?? [];
   return {
-    today, thisWeek, nextWeek,
-    totals: {
       jobs: rows.length,
       totalPipeline: sum(rows),
       unscheduled: sum(by.unscheduled), unscheduledJobs: by.unscheduled.length,
@@ -149,7 +159,5 @@ export function soldPipeline(jobs, today) {
       expectedNextWeek: sum(rows.filter((r) => inWeek(r, nextWeek))), expectedNextWeekJobs: rows.filter((r) => inWeek(r, nextWeek)).length,
       /** Pipeline jobs whose contract value is missing in JobProgress: every $ figure above is short by these. */
       noContractValue: rows.filter((r) => r.noContractValue).length,
-    },
-    rows,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { soldPipeline, inPipeline, bucketFor, derivedBlocker, expectedWeek, BUCKETS } from "../src/soldPipeline.js";
+import { soldPipeline, pipelineTotals, inPipeline, bucketFor, derivedBlocker, expectedWeek, BUCKETS } from "../src/soldPipeline.js";
 import { weekBounds } from "../src/production.js";
 
 const TODAY = "2026-09-23"; // a Wednesday; the week is 9/21–9/27, next is 9/28–10/4
@@ -99,6 +99,16 @@ describe("soldPipeline — the report", () => {
     expect(e).toMatchObject({ bucket: "inProduction", scheduledDate: "2026-09-14", nextInstallDate: null, expectedWeek: "2026-09-14" });
     expect(p.rows.find((r) => r.jobId === "g")).toMatchObject({ noContractValue: true, contract: null, blocker: "Insurance claim pending" });
     expect(BUCKETS.map((b) => b.key)).toEqual(["unscheduled", "scheduled", "inProduction", "awaitingPayment"]);
+  });
+
+  it("recomputes the cards for a filtered set of rows, keeping the real calendar weeks", () => {
+    // The page filters by sold date or install date and adds up what is showing.
+    expect(pipelineTotals(p.rows, TODAY)).toEqual(p.totals);
+    const septemberSales = p.rows.filter((r) => r.contractSignedDate >= "2026-09-01");   // a, c, d
+    expect(pipelineTotals(septemberSales, TODAY)).toMatchObject({ jobs: 3, totalPipeline: 26749 + 58899 + 15000, unscheduled: 26749, scheduled: 58899 + 15000, expectedThisWeek: 58899, expectedNextWeek: 15000, noContractValue: 0 });
+    const thisWeekInstalls = p.rows.filter((r) => r.scheduledDate && r.scheduledDate >= "2026-09-21" && r.scheduledDate <= "2026-09-27"); // c only
+    expect(pipelineTotals(thisWeekInstalls, TODAY)).toMatchObject({ jobs: 1, scheduled: 58899, unscheduled: 0, expectedThisWeek: 58899, expectedNextWeek: 0 });
+    expect(pipelineTotals([], TODAY)).toMatchObject({ jobs: 0, totalPipeline: 0 });
   });
 
   it("is empty-safe", () => {

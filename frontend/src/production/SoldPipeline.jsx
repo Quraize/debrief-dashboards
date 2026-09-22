@@ -16,7 +16,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
 import { PRODUCTION_ROLES } from "@allied/shared/constants";
-import { BUCKETS } from "@allied/shared/soldPipeline";
+import { BUCKETS, pipelineTotals } from "@allied/shared/soldPipeline";
+import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { Loader2, ExternalLink, Search, Pencil, Check } from "lucide-react";
 import { productionApi } from "./api";
 
@@ -40,18 +42,33 @@ export default function SoldPipeline() {
   const [bucket, setBucket] = useState("unscheduled");
   const [q, setQ] = useState("");
   const [noValueOnly, setNoValueOnly] = useState(false);
+  // The range chips every dashboard has, applied to the date you choose: when
+  // the job was SOLD, or when its install STARTS. A pipeline is a snapshot, so
+  // the default is everything.
+  const [range, setRange] = useState(ALL_TIME_FILTER);
+  const [cs, setCs] = useState("");
+  const [ce, setCe] = useState("");
+  const [basis, setBasis] = useState("sold");
+
+  // Rows inside the date range, whatever bucket is picked — the cards add these up.
+  const inRange = useMemo(() => {
+    const all = data?.rows ?? [];
+    if (range === ALL_TIME_FILTER) return all;
+    return all.filter((r) => inDateRange(basis === "sold" ? r.contractSignedDate : r.scheduledDate, range, cs, ce));
+  }, [data, range, cs, ce, basis]);
+  const t = useMemo(() => (data ? pipelineTotals(inRange, data.today) : null), [inRange, data]);
 
   const rows = useMemo(() => {
-    let list = data?.rows ?? [];
+    let list = inRange;
     if (bucket !== "all") list = list.filter((r) => r.bucket === bucket);
     if (noValueOnly) list = list.filter((r) => r.noContractValue);
     const s = q.trim().toLowerCase();
     if (s) list = list.filter((r) => [r.customer, r.jobNumber, r.city, r.address, r.stage, r.rep, r.owner, r.blocker, r.nextAction].some((v) => String(v ?? "").toLowerCase().includes(s)));
     return list;
-  }, [data, bucket, q, noValueOnly]);
+  }, [inRange, bucket, q, noValueOnly]);
 
   if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">Production access required.</div>;
-  const t = data?.totals;
+  const filtered = range !== ALL_TIME_FILTER;
 
   return (
     <div className="space-y-4">
@@ -65,11 +82,35 @@ export default function SoldPipeline() {
         </p>
       </div>
 
+      <div className="flex flex-col lg:flex-row lg:items-start gap-3">
+        <DateRangeFilter filter={range} setFilter={setRange} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe}
+          filters={QUEUE_DATE_FILTERS} className="flex-1" />
+        <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1.5">Range applies to</div>
+          <div className="flex rounded-lg border border-border overflow-hidden" role="group" aria-label="Which date the range filters">
+            {[["sold", "Sold date"], ["install", "Install date"]].map(([k, label]) => (
+              <button key={k} onClick={() => setBasis(k)} aria-pressed={basis === k}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${basis === k ? "bg-accent text-white" : "bg-white text-muted-foreground hover:bg-secondary"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-1.5 max-w-[14rem]">
+            {basis === "sold" ? "Jobs whose contract was signed in the range." : "Jobs whose first install visit starts in the range; unscheduled jobs have no date, so they drop out."}
+          </div>
+        </div>
+      </div>
+
       {isLoading || !t ? (
         error ? <p className="text-sm text-red-600">The pipeline could not be loaded right now.</p>
           : <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : (
         <>
+          {filtered && (
+            <p className="text-xs text-muted-foreground">
+              Showing {inRange.length} of {data.rows.length} pipeline jobs, by {basis === "sold" ? "sold date" : "install date"}. The cards add up what is showing; the two weekly cards are always the real calendar weeks.
+            </p>
+          )}
           {/* Headline totals — the numbers the CEO asked for, in his order. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <Card tone="navy" label="Total Sold Pipeline" value={money(t.totalPipeline)} sub={`${t.jobs} sold jobs, not yet paid`} onClick={() => setBucket("all")} active={bucket === "all"} />
