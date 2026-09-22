@@ -113,7 +113,7 @@ export default function SoldPipeline() {
             </p>
           )}
           {/* Headline totals — the numbers the CEO asked for, in his order. */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-9 gap-3">
             <Card tone="navy" label="Total Sold Pipeline" value={money(t.totalPipeline)} sub={`${t.jobs} sold jobs, not yet paid`} onClick={() => setBucket("all")} active={bucket === "all"} />
             <Card tone="green" label="Scheduled Pipeline" value={money(t.scheduled + t.inProduction)} sub={`${t.scheduledJobs} booked · ${t.inProductionJobs} in production`} onClick={() => setBucket("scheduled")} active={bucket === "scheduled"} />
             <Card tone="red" label="Unscheduled Sold Pipeline" value={money(t.unscheduled)} sub={`${t.unscheduledJobs} jobs with no production date`} onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
@@ -149,18 +149,21 @@ export default function SoldPipeline() {
                 <table className="w-full text-sm">
                   {/* Sticky header and sticky first column: the customer stays put while the wide part scrolls. */}
                   <thead className="sticky top-0 z-10 bg-secondary">
-                    <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide">
+                    <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide whitespace-nowrap">
                       <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">Customer</th>
-                      <th className="px-3 py-2">Job</th>
+                      <th className="px-3 py-2">Town / Address</th>
+                      <th className="px-3 py-2">Sold By</th>
+                      <th className="px-3 py-2">Job #</th>
+                      <th className="px-3 py-2">Trade</th>
                       <th className="px-3 py-2 text-right">Contract $</th>
-                      <th className="px-3 py-2">Sold</th>
+                      <th className="px-3 py-2">Sold Date</th>
                       <th className="px-3 py-2 text-right">Days</th>
                       <th className="px-3 py-2">Current Stage</th>
                       <th className="px-3 py-2">Scheduled Date</th>
                       <th className="px-3 py-2">Expected Week</th>
-                      <th className="px-3 py-2">Blocker</th>
-                      <th className="px-3 py-2">Owner</th>
-                      <th className="px-3 py-2">Next Action</th>
+                      <th className="px-3 py-2 min-w-[16rem]">Blocker</th>
+                      <th className="px-3 py-2 min-w-[10rem]">Owner</th>
+                      <th className="px-3 py-2 min-w-[18rem]">Next Action</th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
@@ -181,19 +184,19 @@ function PipelineRow({ r }) {
   const bucket = BUCKETS.find((b) => b.key === r.bucket);
   return (
     <tr className={`border-b border-border/50 hover:bg-secondary ${r.noContractValue ? "bg-red-50" : "bg-white"}`}>
-      <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))]">
-        <div className="font-semibold text-primary">{r.customer || "—"}</div>
-        <div className="text-xs text-muted-foreground">{[r.city, r.address].filter(Boolean).join(" · ")}{r.rep ? ` · sold by ${r.rep}` : ""}</div>
-      </td>
-      <td className="px-3 py-2 whitespace-nowrap text-xs">{r.jobNumber || "—"}<div className="text-muted-foreground">{r.trades || r.division || ""}</div></td>
+      <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))] font-semibold text-primary">{r.customer || "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap">{[r.city, r.address].filter(Boolean).join(", ") || "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap">{r.rep || "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.jobNumber || "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap">{r.trades || r.division || "—"}</td>
       <td className={`px-3 py-2 text-right tabular-nums font-semibold ${r.noContractValue ? "text-red-700" : ""}`} title={r.noContractValue ? "No contract value in JobProgress" : ""}>
         {r.noContractValue ? "none" : money(r.contract)}
       </td>
       <td className="px-3 py-2 whitespace-nowrap">{fmtDay(r.contractSignedDate)}</td>
       <td className={`px-3 py-2 text-right tabular-nums ${r.daysSinceSold > 90 && r.bucket === "unscheduled" ? "text-red-700 font-semibold" : ""}`}>{r.daysSinceSold}</td>
-      <td className="px-3 py-2">
-        <span className={`inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded border mr-1 ${TONE[bucket?.tone ?? "slate"]}`}>{bucket?.label}</span>
-        <span className="text-xs">{r.stage || "—"}</span>
+      <td className="px-3 py-2 whitespace-nowrap">
+        <span className={`inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded border mr-1.5 ${TONE[bucket?.tone ?? "slate"]}`}>{bucket?.label}</span>
+        {r.stage || "—"}
       </td>
       <td className="px-3 py-2 whitespace-nowrap">{fmtDay(r.scheduledDate)}{r.nextInstallDate && r.nextInstallDate !== r.scheduledDate ? <div className="text-xs text-muted-foreground">next {fmtDay(r.nextInstallDate)}</div> : null}</td>
       <td className="px-3 py-2 whitespace-nowrap">{fmtWeek(r.expectedWeek)}</td>
@@ -228,14 +231,14 @@ function NoteCell({ r, field, value, derived = false, placeholder = "" }) {
           <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={derived ? value : placeholder}
             onKeyDown={(e) => { if (e.key === "Enter") save.mutate(draft); if (e.key === "Escape") setEditing(false); }}
             onBlur={() => save.mutate(draft)}
-            className="text-sm border border-input rounded px-2 py-1 w-44" />
+            className="text-sm border border-input rounded px-2 py-1 w-full min-w-[12rem]" />
           {save.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5 text-green-600" />}
         </div>
       </td>
     );
   }
   return (
-    <td className="px-3 py-2 group cursor-text max-w-[16rem]" onClick={start}
+    <td className="px-3 py-2 group cursor-text whitespace-normal break-words align-top" onClick={start}
       title={derived ? "Read from the JobProgress stage — click to write your own" : (r.noteUpdatedBy ? `${r.noteUpdatedBy}, ${new Date(r.noteUpdatedAt).toLocaleString()}` : "Click to edit")}>
       <span className={derived ? "text-muted-foreground italic" : value ? "" : "text-muted-foreground"}>{value || placeholder}</span>
       <Pencil className="w-3 h-3 inline ml-1 opacity-0 group-hover:opacity-60" />

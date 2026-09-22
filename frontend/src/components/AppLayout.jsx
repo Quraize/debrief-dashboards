@@ -54,6 +54,10 @@ const ALL_NAV = [...DASHBOARDS, ...OPERATIONS];
 
 /** Where a production-only account may go. Everything else redirects to the board. */
 const PRODUCTION_ONLY_PREFIXES = ["/production", "/account"];
+// Pages built around one wide table read better with the whole screen: the
+// 1280px cap that suits a row of cards squeezes fourteen columns into the
+// middle third of a big monitor and leaves the margins empty.
+const FULL_WIDTH_PREFIXES = ["/production/pipeline", "/production/weekly-job-sheet", "/lead-flow"];
 const PRODUCTION_HOME = "/production/schedule";
 
 export default function AppLayout() {
@@ -184,7 +188,7 @@ export default function AppLayout() {
 
         {/* Main content */}
         <main className="flex-1 min-w-0 pb-20 lg:pb-8">
-          <div className="p-4 sm:p-6 max-w-7xl mx-auto" key={location.pathname}>
+          <div className={`p-4 sm:p-6 mx-auto ${FULL_WIDTH_PREFIXES.some((p) => location.pathname.startsWith(p)) ? "" : "max-w-7xl"}`} key={location.pathname}>
             <Outlet />
           </div>
         </main>
