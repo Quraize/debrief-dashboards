@@ -83,7 +83,7 @@ describe.skipIf(!reachable)("scheduler", () => {
     expect((await boss.getSchedules()).map((s) => s.name)).toEqual([scheduler.SYNC_QUEUE]);
     expect(scheduler.priceScanSchedule().reason).toMatch(/ANTHROPIC_API_KEY/);
 
-    // Both credentials present → both schedules.
+    // Both credentials present → every credential-gated schedule, the nightly next-action suggestions included.
     await scheduler.stopScheduler({ graceful: false });
     process.env.ANTHROPIC_API_KEY = "sk-test";
     process.env.LEAP_API_TOKEN = "leap-test";
@@ -91,7 +91,8 @@ describe.skipIf(!reachable)("scheduler", () => {
     boss = scheduler.getBoss()!;
     const names = (await boss.getSchedules()).map((s) => s.name).sort();
     expect(names).toEqual(
-      [scheduler.SYNC_QUEUE, scheduler.PRICE_SCAN_QUEUE, scheduler.PRODUCTION_SCHEDULE_QUEUE, scheduler.CUSTOMER_SYNC_QUEUE].sort());
+      [scheduler.SYNC_QUEUE, scheduler.PRICE_SCAN_QUEUE, scheduler.PRODUCTION_SCHEDULE_QUEUE, scheduler.CUSTOMER_SYNC_QUEUE, scheduler.NEXT_ACTIONS_QUEUE].sort());
+    expect(scheduler.nextActionsSchedule()).toMatchObject({ enabled: true, cron: "15 10 * * *" });
     expect((await boss.getQueue(scheduler.PRODUCTION_SCHEDULE_QUEUE))?.policy).toBe("singleton");
 
     // Cleanup for the tests that follow (they expect the sync schedule off).
