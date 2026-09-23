@@ -33,6 +33,22 @@ describe("All Time", () => {
   });
 });
 
+describe("Next Week", () => {
+  it("is the Monday-to-Sunday week after this one, and matches only dates inside it", () => {
+    const thisWeek = getDateRangeBounds("This Week");
+    const next = getDateRangeBounds("Next Week");
+    const plus = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    expect(next.start).toBe(plus(thisWeek.start, 7));
+    expect(next.end).toBe(plus(next.start, 6));
+    expect(new Date(next.start + "T00:00:00").getDay()).toBe(1);  // a Monday
+    expect(inDateRange(next.start, "Next Week")).toBe(true);
+    expect(inDateRange(next.end, "Next Week")).toBe(true);
+    expect(inDateRange(plus(next.end, 1), "Next Week")).toBe(false);
+    expect(inDateRange(thisWeek.start, "Next Week")).toBe(false);
+    expect(QUEUE_DATE_FILTERS[QUEUE_DATE_FILTERS.indexOf("Last Week") + 1]).toBe("Next Week");
+  });
+});
+
 describe("filter lists", () => {
   it("offers Last Week beside This Week on the dashboards, and gives the queue its own list", () => {
     expect(DATE_FILTERS[DATE_FILTERS.indexOf("This Week") + 1]).toBe("Last Week");

@@ -182,7 +182,8 @@ export const DATE_FILTERS = ["Today","Yesterday","This Week","Last Week","This M
 // The Open Debrief Queue is a to-do list, so its default is everything still open;
 // the short ranges are for working a day or a week at a time. Weeks start Monday.
 export const ALL_TIME_FILTER = "All Time";
-export const QUEUE_DATE_FILTERS = [ALL_TIME_FILTER,"Today","Yesterday","Last 7 Days","This Week","Last Week","This Month","Last Month","Custom Range"];
+// "Next Week" is for the forward-looking pages (the pipeline, the queue): what is booked to start or run.
+export const QUEUE_DATE_FILTERS = [ALL_TIME_FILTER,"Today","Yesterday","Last 7 Days","This Week","Last Week","Next Week","This Month","Last Month","Custom Range"];
 
 // Admin Settings list manager categories
 export const LIST_CATEGORIES = [
@@ -246,6 +247,7 @@ export function inDateRange(dateStr, filter, customStart, customEnd) {
     case "Yesterday": { const s = startToday - 86400000; return d.getTime() >= s && d.getTime() < startToday; }
     case "This Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000; return d.getTime() >= ws && d.getTime() < ws + 7 * 86400000; }
     case "Last Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000; return d.getTime() >= ws - 7 * 86400000 && d.getTime() < ws; }
+    case "Next Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000 + 7 * 86400000; return d.getTime() >= ws && d.getTime() < ws + 7 * 86400000; }
     case "Last 7 Days": return d.getTime() >= startToday - 6 * 86400000 && d.getTime() < endToday;
     case "This Month": return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
     case "Last Month": { const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1); return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth(); }
@@ -280,6 +282,12 @@ export function getDateRangeBounds(filter, customStart, customEnd) {
     case "Last Week": {
       const day = (today.getDay() + 6) % 7;
       const ws = new Date(today); ws.setDate(today.getDate() - day - 7);
+      const we = new Date(ws); we.setDate(ws.getDate() + 6);
+      return { start: fmt(ws), end: fmt(we) };
+    }
+    case "Next Week": {
+      const day = (today.getDay() + 6) % 7;
+      const ws = new Date(today); ws.setDate(today.getDate() - day + 7);
       const we = new Date(ws); we.setDate(ws.getDate() + 6);
       return { start: fmt(ws), end: fmt(we) };
     }
