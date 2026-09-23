@@ -135,7 +135,9 @@ describe("planSheet on a tab the team has been working in", () => {
   it("removes a stale copy that carries nothing hand-filled, and keeps one the team wrote in", () => {
     // Two rows the feed no longer places in this week: one untouched (checkbox defaults only), one with a manufacturer typed in.
     const g = grid();
+    // The real Faggello row: synced money, a synced tick, and the ledger FORMULAS' computed results (BM..BS), which are the sheet's, not the team's.
     const empty: (string | number | boolean | null)[] = []; empty[0] = "Teaneck/380 Woods Road/Faggello"; empty[HU] = "88"; empty[B] = "NO"; empty[colIndex("D")] = false; empty[colIndex("AJ")] = true; empty[R] = 27971;
+    empty[colIndex("BH")] = 4254.77; empty[colIndex("BM")] = 6639.77; empty[colIndex("BN")] = 21331.23; empty[colIndex("BO")] = 0.763; empty[colIndex("BR")] = 0; empty[colIndex("BS")] = 0;
     const typed: (string | number | boolean | null)[] = []; typed[0] = "Fair Lawn/1 Elm/Smith"; typed[HU] = "99"; typed[colIndex("AE")] = "GAF";
     g.splice(3, 0, empty, typed);   // rows 3 and 4, before Denike (now 5) and the total (now 6)
     const plan = planSheet(g, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);

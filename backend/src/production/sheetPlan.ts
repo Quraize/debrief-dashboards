@@ -422,8 +422,14 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     ops.push({ type: "deleteRows", at, count });
     grid.splice(at, count);
   };
-  /** True when the team typed or ticked anything in a hand-filled column of this row. */
-  const hasHandFilled = (cells: CellValue[] | undefined) => (MASTER_MANUAL as Column[]).some((c) => {
+  /**
+   * True when the team typed or ticked anything in a hand-filled column of
+   * this row. Formula columns (the ledger percentages, BM..BS) are not the
+   * team's: the sheet computes them from synced cells, and a 0.0% on an
+   * otherwise empty row is not a reason to keep it.
+   */
+  const HAND_COLUMNS = (MASTER_MANUAL as Column[]).filter((c) => !c.formula);
+  const hasHandFilled = (cells: CellValue[] | undefined) => HAND_COLUMNS.some((c) => {
     const v = cells?.[ACTIVE[c.col]!];
     if (v === null || v === undefined || v === false) return false;
     const s = cellStr(v);
