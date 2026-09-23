@@ -296,6 +296,13 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{(pushResult.summary.jobsRemoved ?? 0) > 0 ? `, ${pushResult.summary.jobsRemoved} stale row(s) removed (nothing hand-filled on them)` : ""}{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {((pushResult.summary.jobsAdopted ?? 0) + (pushResult.summary.jobsElsewhere ?? 0) + (pushResult.summary.jobsUnmatched ?? 0)) > 0 && (
+              <div className="text-muted-foreground">
+                ⇄ Pasted rows: {pushResult.summary.jobsAdopted ?? 0} taken over by the feed (ID written in, your cells kept)
+                {(pushResult.summary.jobsElsewhere ?? 0) > 0 ? ` · ${pushResult.summary.jobsElsewhere} belong to another week by JobProgress's install date and are stamped stale here so the revenue counts once` : ""}
+                {(pushResult.summary.jobsUnmatched ?? 0) > 0 ? ` · ${pushResult.summary.jobsUnmatched} not matched to any JobProgress job — check the customer or job # on those rows` : ""}.
+              </div>
+            )}
             {(pushResult.summary.checkboxLeftoversCleared ?? 0) > 0 && (
               <div className="text-muted-foreground">✎ {pushResult.summary.checkboxLeftoversCleared} leftover TRUE/FALSE cell(s) cleared from the PAID-IN-FULL column.</div>
             )}

@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   planSheet, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
-  SYNC_STATUS_STALE, SUMMARY_MARKER, CUMULATIVE_LABEL, type CellWrite,
+  SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, type CellWrite,
 } from "../src/production/sheetPlan.js";
 import { toRequests, lockRequests } from "../src/production/sheetPush.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
@@ -325,6 +325,65 @@ describe("PAID-IN-FULL — columns B..D", () => {
     expect(plan.ops.some((o) => o.type === "clearValidation")).toBe(false);
     expect(cells.find((c) => c.row === 2 && c.col === B)).toEqual({ row: 2, col: B, value: null });
     expect(at(cells, 2, D)).toBe(false);
+  });
+});
+
+describe("rows pasted from the old sheet (no JobProgress ID)", () => {
+  const AC = colIndex("AC"), BG = colIndex("BG"), HV = colIndex("HV");
+  const pasted = (label: string, over: Record<number, string | number | boolean> = {}) => {
+    const r: (string | number | boolean | null)[] = []; r[0] = label; r[R] = 11111; r[BG] = "hand note";
+    for (const [k, v] of Object.entries(over)) r[Number(k)] = v;
+    return r;
+  };
+  const week = (rows: SheetRow[]) => [{ from: "2026-09-07", to: "2026-09-13", rows }];
+
+  it("takes over a pasted row for the same job by its text, writing the ID and the money and leaving the team's cells", () => {
+    const grid = [headerRow(), ["9/7/2026-9/13/2026"], pasted("Wayne/1 Main St/Customer 1"), ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, week([row("1")]), NO_MONTH);
+    expect(inserts(plan)).toEqual([]);                                    // no twin added
+    expect(plan.summary).toMatchObject({ jobsAdopted: 1, jobsAdded: 0, jobsUpdated: 0, jobsUnmatched: 0, jobsElsewhere: 0 });
+    expect(plan.summary.weeks[0]).toMatchObject({ adopted: ["Wayne/1 Main St/Customer 1"] });
+    const cells = cellsOf(plan);
+    expect(at(cells, 2, HU)).toBe("1");                                   // the ID, so next time it matches like any row
+    expect(at(cells, 2, R)).toBe(10000);                                  // JobProgress's gross replaces the hand-typed 11111
+    expect(cells.some((c) => c.row === 2 && c.col === BG)).toBe(false);  // the hand note is untouched
+    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIF(HY3:HY3,"<>Not on the JobProgress calendar this week",R3:R3)' });
+  });
+
+  it("matches by Job # when the text differs, and refuses an ambiguous match", () => {
+    // Different wording in A, but the job number in AC settles it.
+    const byNumber = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("WAYNE - 1 Main Street - Cust. One", { [AC]: "2609-1-01" }), ["Weekly Total"], [CUMULATIVE_LABEL]], week([row("1")]), NO_MONTH);
+    expect(byNumber.summary.jobsAdopted).toBe(1);
+    expect(at(cellsOf(byNumber), 2, HU)).toBe("1");
+    // Two pasted rows with the same text and one feed job: neither is adopted; the job is added and both are flagged.
+    const twins = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("Wayne/1 Main St/Customer 1"), pasted("Wayne/1 Main St/Customer 1"), ["Weekly Total"], [CUMULATIVE_LABEL]], week([row("1")]), NO_MONTH);
+    expect(twins.summary).toMatchObject({ jobsAdopted: 0, jobsAdded: 1, jobsUnmatched: 2 });
+    const tc = cellsOf(twins);
+    expect(at(tc, 2, HY)).toBe(SYNC_STATUS_UNMATCHED); expect(at(tc, 3, HY)).toBe(SYNC_STATUS_UNMATCHED);
+    // Two feed jobs at one address (a contractor) and one pasted row: the text names two jobs, so nothing is adopted.
+    const sameAddress = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("Wayne/1 Main St/Customer 1"), ["Weekly Total"], [CUMULATIVE_LABEL]],
+      week([row("1"), row("2", { label: "Wayne/1 Main St/Customer 1", jobNumber: null })]), NO_MONTH);
+    expect(sameAddress.summary).toMatchObject({ jobsAdopted: 0, jobsAdded: 2, jobsUnmatched: 1 });
+  });
+
+  it("lets JobProgress's install date decide the week: a pasted row in the wrong block is stamped stale so the revenue counts once", () => {
+    // The team pasted Customer 1 under 9/7; JobProgress has its install in the week of 9/14.
+    const grid = [headerRow(),
+      ["9/14/2026-9/20/2026"], ["Weekly Total"], [CUMULATIVE_LABEL],
+      ["9/7/2026-9/13/2026"], pasted("Wayne/1 Main St/Customer 1"), ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [{ from: "2026-09-14", to: "2026-09-20", rows: [row("1")] }, { from: "2026-09-07", to: "2026-09-13", rows: [] }], NO_MONTH);
+    expect(plan.summary).toMatchObject({ jobsAdded: 1, jobsAdopted: 0, jobsElsewhere: 1, jobsUnmatched: 0 });
+    expect(plan.summary.weeks.find((w) => w.label === "9/7/2026-9/13/2026")).toMatchObject({ elsewhere: ["Wayne/1 Main St/Customer 1 → 9/14/2026-9/20/2026"] });
+    const cells = cellsOf(plan);
+    // The job is written into the 9/14 block (inserted at row 2)…
+    expect(at(cells, 2, HU)).toBe("1"); expect(at(cells, 2, R)).toBe(10000);
+    // …and the pasted row (now row 6 after the insert) is stamped stale with its ID and link, so the SUMIF leaves it out here.
+    expect(at(cells, 6, HU)).toBe("1"); expect(at(cells, 6, HY)).toBe(SYNC_STATUS_STALE); expect(at(cells, 6, HV)).toContain("/job/1/");
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 6 && r.style === "stale"))).toBe(true);
+    // A pasted row nobody in the feed knows is flagged, not touched.
+    const lost = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("Nowhere/0 No St/Nobody"), ["Weekly Total"], [CUMULATIVE_LABEL]], week([]), NO_MONTH);
+    expect(lost.summary).toMatchObject({ jobsUnmatched: 1, jobsElsewhere: 0 });
+    expect(at(cellsOf(lost), 2, HY)).toBe(SYNC_STATUS_UNMATCHED);
   });
 });
 

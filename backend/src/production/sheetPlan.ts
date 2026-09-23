@@ -56,9 +56,15 @@ export interface PlanSummary {
   jobsNotThisWeek: number;
   /** Stale copies removed because no hand-filled cell would be lost. */
   jobsRemoved: number;
+  /** Hand-pasted rows (no JobProgress ID) the feed took over: matched by Job # or by Town/Address/Customer, ID written in. */
+  jobsAdopted: number;
+  /** Hand-pasted rows whose job JobProgress places in ANOTHER week: stamped stale here so the revenue counts once, there. */
+  jobsElsewhere: number;
+  /** Hand-pasted rows the feed could not match to any job — flagged for the team. */
+  jobsUnmatched: number;
   cellsWritten: number;
   /** Per week: what happened, for the dry-run report. */
-  weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[]; removed: string[] }[];
+  weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[]; removed: string[]; adopted: string[]; elsewhere: string[]; unmatched: string[] }[];
   /** The month lines as written, for the dry-run report. */
   months: { label: string; jobs: number; gross: number }[];
   /** Week blocks that are past their Thursday and must be read-only, with their final row span. */
@@ -104,6 +110,8 @@ export interface Plan { ops: PlanOp[]; summary: PlanSummary }
 
 export const SYNC_STATUS_OK = "Synced from JobProgress";
 export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
+/** A hand-pasted row (no JobProgress ID) the feed could not match to any job it placed. */
+export const SYNC_STATUS_UNMATCHED = "Not matched to a JobProgress job";
 export const SUMMARY_MARKER = "MONTH AT A GLANCE";
 // "(through this week)" because the row on the newest block adds the weeks
 // that have not happened yet — it is the month's schedule to that point, not
@@ -392,7 +400,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -485,10 +493,28 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   }
 
   const ordered = [...weeks].sort((a, b) => b.from.localeCompare(a.from)); // newest first, like the tab
+
+  // Rows the team pasted from the old sheet carry no JobProgress ID, so they
+  // are recognised by Job # (AC) or by Town/Address/Customer (A) instead —
+  // and only when that key names exactly one job the feed is placing, so two
+  // jobs at one address can never be confused. `norm` makes the comparison
+  // blind to case and spacing.
+  const norm = (v: CellValue | undefined) => cellStr(v).toLowerCase().replace(/\s+/g, " ").replace(/\/+$/, "").trim();
+  const feedByKey = new Map<string, { row: SheetRow; from: string; to: string }[]>();
+  for (const w of ordered) for (const r of w.rows) {
+    for (const k of [r.jobNumber ? `#${norm(r.jobNumber)}` : null, r.label ? `@${norm(r.label)}` : null]) {
+      if (!k) continue;
+      (feedByKey.get(k) ?? feedByKey.set(k, []).get(k)!).push({ row: r, from: w.from, to: w.to });
+    }
+  }
+  /** The one feed job a key names, or null when none or several. */
+  const feedFor = (k: string) => { const hits = feedByKey.get(k) ?? []; return hits.length === 1 ? hits[0]! : null; };
+  const rowKeys = (cells: CellValue[] | undefined) => [norm(cells?.[ACTIVE["AC"]!]) ? `#${norm(cells?.[ACTIVE["AC"]!])}` : null, norm(cells?.[0]) ? `@${norm(cells?.[0])}` : null].filter((k): k is string => !!k);
+
   for (const week of ordered) {
     const label = weekLabel(week.from, week.to);
     const rows = [...week.rows].sort((a, b) => (b.saleDate ?? "").localeCompare(a.saleDate ?? "") || (a.jobNumber ?? "").localeCompare(b.jobNumber ?? ""));
-    const report = { label, existing: false, added: [] as string[], updated: [] as string[], notThisWeek: [] as string[], removed: [] as string[] };
+    const report = { label, existing: false, added: [] as string[], updated: [] as string[], notThisWeek: [] as string[], removed: [] as string[], adopted: [] as string[], elsewhere: [] as string[], unmatched: [] as string[] };
     let blocks = parseBlocks(grid);
     let block = blocks.find((b) => b.from === week.from && b.to === week.to) ?? null;
 
@@ -519,6 +545,19 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
       if (id) byJobId.set(id, idx);
     }
+    // ID-less rows in this block (pasted from the old sheet), by their keys — a key that
+    // names two such rows is ambiguous and adopts neither.
+    const unclaimed = new Map<string, number[]>();
+    for (const idx of block.jobIdx) {
+      if (cellStr(grid[idx]?.[JOB_ID_COL()])) continue;
+      for (const k of rowKeys(grid[idx])) (unclaimed.get(k) ?? unclaimed.set(k, []).get(k)!).push(idx);
+    }
+    const claimed = new Set<number>();
+    const adoptable = (k: string): number | undefined => {
+      const hits = (unclaimed.get(k) ?? []).filter((i) => !claimed.has(i));
+      // The key must name exactly one pasted row AND exactly one feed job.
+      return hits.length === 1 && feedFor(k) ? hits[0] : undefined;
+    };
     const seen = new Set<string>();
     const additions: SheetRow[] = [];
     for (const r of rows) {
@@ -527,9 +566,18 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
         write(updateRowCells(idx, r, opts.syncedAt));
         style(toneStyle(idx, r));
         summary.jobsUpdated++; report.updated.push(r.label); seen.add(r.jobId);
-      } else {
-        additions.push(r);
+        continue;
       }
+      // Take over a pasted row for this job rather than adding a twin beside it.
+      const adopt = (r.jobNumber ? adoptable(`#${norm(r.jobNumber)}`) : undefined) ?? (r.label ? adoptable(`@${norm(r.label)}`) : undefined);
+      if (adopt !== undefined) {
+        claimed.add(adopt);
+        write(updateRowCells(adopt, r, opts.syncedAt));   // synced cells only — the team's cells on the row stay
+        style(toneStyle(adopt, r));
+        summary.jobsAdopted++; report.adopted.push(r.label); seen.add(r.jobId);
+        continue;
+      }
+      additions.push(r);
     }
     if (additions.length) {
       // Before the Weekly Total row (or, if the block has none, right after its last job).
@@ -568,10 +616,35 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     style(staleRows);
     // Bottom-up, so each index is still right when its turn comes; then re-read the block.
     for (const idx of toRemove.sort((a, b) => b - a)) remove(idx, 1);
-    if (toRemove.length) {
-      blocks = parseBlocks(grid);
-      block = blocks.find((b) => b.from === week.from && b.to === week.to)!;
+    blocks = parseBlocks(grid);
+    block = blocks.find((b) => b.from === week.from && b.to === week.to)!;
+
+    // Pasted rows still without an ID. If the feed places that job in ANOTHER
+    // week, JobProgress's install date wins: the row is stamped stale here (out
+    // of this block's totals, so the revenue counts once, in its real week) and
+    // given its ID so it behaves like any stale copy from now on. If the feed
+    // does not know the job at all, it is flagged for the team.
+    const orphan: CellWrite[] = [];
+    for (const idx of block.jobIdx) {
+      if (cellStr(grid[idx]?.[JOB_ID_COL()])) continue;
+      const label = cellStr(grid[idx]?.[0]) || `row ${idx + 1}`;
+      const hit = rowKeys(grid[idx]).map(feedFor).find((h) => h !== null) ?? null;
+      if (hit && !(hit.from === week.from && hit.to === week.to)) {
+        orphan.push({ row: idx, col: ACTIVE["HU"]!, value: hit.row.jobId });
+        if (hit.row.jpUrl) orphan.push({ row: idx, col: ACTIVE["HV"]!, value: hit.row.jpUrl });
+        orphan.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
+        if (opts.syncedAt) orphan.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
+        summary.jobsElsewhere++; report.elsewhere.push(`${label} → ${weekLabel(hit.from, hit.to)}`);
+        staleRows.push({ row: idx, style: "stale" });
+      } else if (cellStr(grid[idx]?.[ACTIVE["HY"]!]) !== SYNC_STATUS_UNMATCHED) {
+        orphan.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_UNMATCHED });
+        summary.jobsUnmatched++; report.unmatched.push(label);
+      } else {
+        summary.jobsUnmatched++; report.unmatched.push(label);
+      }
     }
+    write(orphan);
+    style(staleRows.filter((s) => orphan.some((c) => c.row === s.row)));
     // The total row's ranges follow the block as it grows.
     if (block.totalIdx !== null && block.jobIdx.length) {
       write(totalRowCells(block.totalIdx, block.jobIdx[0]!, block.jobIdx[block.jobIdx.length - 1]!));
