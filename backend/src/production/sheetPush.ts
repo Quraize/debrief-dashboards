@@ -251,11 +251,9 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   cumulative: { backgroundColor: rgb("92D050"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
   // The month block is the platform's own; navy on white so it never reads as a week.
   summary: { backgroundColor: rgb("2E4877"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("FFFFFF") } },
-  // A job row whose install moved to another week: kept for the team's cells
-  // and out of the totals. Plain black text — a grey was tried and vanished
-  // against the team's hand-applied fills; this also restores rows greyed by
-  // that earlier push. Fills are never touched.
-  stale: { textFormat: { italic: false, foregroundColor: rgb("000000") } },
+  // There is deliberately no style for a stale job row. A row-wide text
+  // format replaced the team's font colours and bold with plain black; the
+  // stamp in HY is the whole of what a stale row gets.
   // The PAID-IN-FULL cell (B) on a job row: YES green, NO red, and amber for
   // a paid stage whose ledger still shows a balance. Set on every push, so a
   // job that gets paid turns from red to green.

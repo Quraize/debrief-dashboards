@@ -32,7 +32,10 @@ type Column = { col: string; header: string; key?: string; type: string; hidden?
 export interface WeekInput { from: string; to: string; rows: SheetRow[] }
 
 export interface CellWrite { row: number; col: number; value: CellValue | { formula: string } }
-export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "stale" | "paid" | "unpaid" | "mismatch";
+// The planner formats only what is its own: the rows it creates (label, total,
+// cumulative, month summary) and the PAID-IN-FULL cell. A job row's other cells
+// — the team's fills, font colours, bold — are never written to.
+export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "paid" | "unpaid" | "mismatch";
 /** A row's format; `cols` = [start, end) limits it to some columns (default: the whole row). */
 export interface RowStyle { row: number; style: RowStyleName; cols?: [number, number] }
 export type PlanOp =
@@ -598,8 +601,9 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     // it. If the team typed or ticked anything on this row it is stamped and
     // kept, so nothing they wrote is lost. If every hand-filled column is
     // blank, there is nothing to lose and the row is removed.
+    // Stamping is a VALUE in HY (and the sync time in HX), nothing more: the
+    // row's formatting is the team's and is never touched.
     const stale: CellWrite[] = [];
-    const staleRows: RowStyle[] = [];
     const toRemove: number[] = [];
     for (const idx of block.jobIdx) {
       const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
@@ -609,11 +613,9 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
         stale.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
         if (opts.syncedAt) stale.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
         summary.jobsNotThisWeek++; report.notThisWeek.push(label);
-        staleRows.push({ row: idx, style: "stale" });
       }
     }
     write(stale);
-    style(staleRows);
     // Bottom-up, so each index is still right when its turn comes; then re-read the block.
     for (const idx of toRemove.sort((a, b) => b - a)) remove(idx, 1);
     blocks = parseBlocks(grid);
@@ -635,7 +637,6 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
         orphan.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
         if (opts.syncedAt) orphan.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
         summary.jobsElsewhere++; report.elsewhere.push(`${label} → ${weekLabel(hit.from, hit.to)}`);
-        staleRows.push({ row: idx, style: "stale" });
       } else if (cellStr(grid[idx]?.[ACTIVE["HY"]!]) !== SYNC_STATUS_UNMATCHED) {
         orphan.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_UNMATCHED });
         summary.jobsUnmatched++; report.unmatched.push(label);
@@ -644,7 +645,6 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       }
     }
     write(orphan);
-    style(staleRows.filter((s) => orphan.some((c) => c.row === s.row)));
     // The total row's ranges follow the block as it grows.
     if (block.totalIdx !== null && block.jobIdx.length) {
       write(totalRowCells(block.totalIdx, block.jobIdx[0]!, block.jobIdx[block.jobIdx.length - 1]!));

@@ -129,7 +129,8 @@ describe("planSheet on a tab the team has been working in", () => {
     expect((at(cells, 6, R) as { formula: string }).formula).not.toContain("R6"); // not its own row
     // Denike (row 3) is not in the feed's week: stamped, kept, greyed — and out of the totals via the SUMIF.
     expect(at(cells, 3, HY)).toBe(SYNC_STATUS_STALE);
-    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 3 && r.style === "stale"))).toBe(true);
+    // …and nothing about the row's formatting is touched: the team's colours stay.
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 3))).toBe(false);
     expect(plan.summary.weeks[0]).toMatchObject({ existing: true, added: ["Wayne/2 Main St/Customer 2"], updated: ["Wayne/1 Main St/Customer 1"], notThisWeek: ["Old Tappan/84 Willow/Denike"] });
   });
   it("removes a stale copy that carries nothing hand-filled, and keeps one the team wrote in", () => {
@@ -379,11 +380,39 @@ describe("rows pasted from the old sheet (no JobProgress ID)", () => {
     expect(at(cells, 2, HU)).toBe("1"); expect(at(cells, 2, R)).toBe(10000);
     // …and the pasted row (now row 6 after the insert) is stamped stale with its ID and link, so the SUMIF leaves it out here.
     expect(at(cells, 6, HU)).toBe("1"); expect(at(cells, 6, HY)).toBe(SYNC_STATUS_STALE); expect(at(cells, 6, HV)).toContain("/job/1/");
-    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 6 && r.style === "stale"))).toBe(true);
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 6))).toBe(false);   // no formatting written to a pasted row
     // A pasted row nobody in the feed knows is flagged, not touched.
     const lost = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("Nowhere/0 No St/Nobody"), ["Weekly Total"], [CUMULATIVE_LABEL]], week([]), NO_MONTH);
     expect(lost.summary).toMatchObject({ jobsUnmatched: 1, jobsElsewhere: 0 });
     expect(at(cellsOf(lost), 2, HY)).toBe(SYNC_STATUS_UNMATCHED);
+  });
+});
+
+describe("the team's formatting is never touched", () => {
+  it("writes formatting only to the rows it creates and to the PAID-IN-FULL cell — never row-wide on a job row", () => {
+    const B = colIndex("B");
+    const grid = [headerRow(),
+      ["9/14/2026-9/20/2026"], ["Weekly Total"], [CUMULATIVE_LABEL],
+      ["9/7/2026-9/13/2026"],
+      ["Wayne/1 Main St/Customer 1", null, null, null, ...Array(HU - 4).fill(null), "1"],          // known, updated
+      ["Old Tappan/84 Willow/Denike", null, null, null, ...Array(HU - 4).fill(null), "77"],          // stale, kept
+      ["Fair Lawn/1 Elm/Pasted", ...Array(HU - 1).fill(null)],                                          // pasted, adopted or flagged
+      ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [
+      { from: "2026-09-14", to: "2026-09-20", rows: [row("9")] },                                   // creates rows in the top block
+      { from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2"), row("3", { label: "Fair Lawn/1 Elm/Pasted" })] },
+    ], { ...NO_MONTH, today: "2026-09-18" });
+    const labels = new Set<number>();
+    for (const b of parseBlocks(plan.ops.length ? grid : grid)) { labels.add(b.labelIdx); if (b.totalIdx !== null) labels.add(b.totalIdx); if (b.cumulativeIdx !== null) labels.add(b.cumulativeIdx); }
+    for (const op of plan.ops) {
+      if (op.type !== "style") continue;
+      for (const r of op.rows) {
+        const ownRow = ["label", "total", "cumulative", "summary"].includes(r.style);
+        // Either it is one of the planner's own rows, or it is the B-cell tone and nothing wider.
+        expect(ownRow || (["paid", "unpaid", "mismatch"].includes(r.style) && r.cols?.[0] === B && r.cols?.[1] === B + 1), JSON.stringify(r)).toBe(true);
+      }
+    }
+    expect(plan.ops.some((o) => o.type === "style")).toBe(true);   // the guard is not vacuous
   });
 });
 
