@@ -15,6 +15,7 @@ import { pushWeeklyJobSheet, sheetPushSettings, lastSheetPush, recentSheetPushes
 import { runJobStageSync } from "./syncJobStages.js";
 import { soldPipelineReport, savePipelineNote } from "./pipeline.js";
 import { runNextActions, acceptSuggestion, getInstructions, saveInstructions, nextActionStatus } from "./nextActions.js";
+import { revenueReport } from "./revenue.js";
 import { dbApp, withUser } from "../db/client.js";
 
 interface BoardQuery { date?: string; from?: string; to?: string }
@@ -42,6 +43,10 @@ export function registerProductionRoutes(app: FastifyInstance): void {
       return reply.send(note);
     },
   );
+
+  // ── Production Revenue + AR / Payment Summary — management only ──
+  app.get("/api/production/revenue", { preHandler: [requireAuth, pipelineOnly] },
+    async (req: FastifyRequest, reply: FastifyReply) => reply.send(await revenueReport({ email: req.user!.email, role: req.user!.role })));
 
   // ── Next Action suggestions — the same management gate ──
   app.get("/api/production/pipeline/next-actions", { preHandler: [requireAuth, pipelineOnly] },

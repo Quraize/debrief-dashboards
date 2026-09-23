@@ -24,6 +24,8 @@ interface Row {
   rep_names: string | null; visits: { day: string; code: string | null }[] | null;
   blocker: string | null; owner: string | null; next_action: string | null; note_updated_by: string | null; note_updated_at: Date | null;
   s_suggestion: string | null; s_confidence: string | null; s_rule_key: string | null; s_model: string | null; s_created_at: Date | null; s_accepted_at: Date | null;
+  total_payment_received: string | null; total_amount_owed: string | null; completion_date: string | null;
+  payments: { amount: string; date: string | null; method: string | null; status: string | null; canceled: boolean }[] | null;
 }
 
 export interface PipelineNoteInput { blocker?: string | null; owner?: string | null; nextAction?: string | null }
@@ -32,8 +34,18 @@ export async function soldPipelineReport(ctx: SessionContext, today = todayInBoa
   return loadPipeline((fn) => withUser(dbApp(), ctx, fn), today);
 }
 
-/** The report, driven by whichever runner the caller has: a user session or the service. */
+/** The pipeline report, driven by whichever runner the caller has: a user session or the service. */
 export async function loadPipeline(run: Runner, today = todayInBoardZone()) {
+  return soldPipeline(await loadJobs(run), today);
+}
+
+/**
+ * Every signed, non-insurance job with what both money views need: stage,
+ * contract, received and owed, install visits, each payment, production's
+ * notes and the standing suggestion. The pipeline and the revenue summary
+ * read this same list, so they can never disagree about a job.
+ */
+export async function loadJobs(run: Runner) {
   const rows = await run(async (c) => {
     const { rows } = await c.query<Row>(
       `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, cu.customer_name, l.city, l.address,
@@ -41,7 +53,9 @@ export async function loadPipeline(run: Runner, today = todayInBoardZone()) {
               j.total_job_revenue::text, j.total_job_price::text, j.rep_names,
               sch.visits, n.blocker, n.owner, n.next_action, n.updated_by AS note_updated_by, n.updated_at AS note_updated_at,
               s.suggestion AS s_suggestion, s.confidence AS s_confidence, s.rule_key AS s_rule_key, s.model AS s_model,
-              s.created_at AS s_created_at, s.accepted_at AS s_accepted_at
+              s.created_at AS s_created_at, s.accepted_at AS s_accepted_at,
+              j.total_payment_received::text, j.total_amount_owed::text, j.completion_date::text,
+              pay.payments
          FROM jp_job j
          LEFT JOIN jp_customer cu ON cu.jp_customer_id = j.jp_customer_id
          LEFT JOIN jp_job_location l ON l.jp_job_id = j.jp_job_id
@@ -50,16 +64,22 @@ export async function loadPipeline(run: Runner, today = todayInBoardZone()) {
          LEFT JOIN LATERAL (
            SELECT json_agg(json_build_object('day', (s.start_at AT TIME ZONE $1)::date::text, 'code', s.job_type_code) ORDER BY s.start_at) AS visits
              FROM jp_schedule s WHERE s.jp_job_id = j.jp_job_id AND s.deleted_at IS NULL) sch ON true
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object('amount', p.amount::text, 'date', p.payment_date::text, 'method', coalesce(p.method_label, p.method),
+                                             'status', p.status, 'canceled', p.canceled) ORDER BY p.payment_date NULLS LAST, p.jp_payment_id) AS payments
+             FROM jp_job_payment p WHERE p.jp_job_id = j.jp_job_id AND p.deleted_at IS NULL) pay ON true
         WHERE j.contract_signed_date IS NOT NULL AND NOT j.is_insurance`,
       [BOARD_TIMEZONE]);
     return rows;
   });
 
-  const jobs = rows.map((r) => ({
+  return rows.map((r) => ({
     jobId: r.jp_job_id, customerId: r.jp_customer_id, jobNumber: r.job_number, customer: r.customer_name,
     city: r.city, address: r.address, stage: r.current_stage, division: r.division, trades: r.trades,
     contractSignedDate: r.contract_signed_date,
     contract: r.total_job_revenue ?? r.total_job_price,
+    received: r.total_payment_received, owed: r.total_amount_owed, completionDate: r.completion_date,
+    payments: r.payments ?? [],
     // Install visits only (RR, SR, GUTTERS…): a site assessment is not a production date.
     installDays: [...new Set((r.visits ?? []).filter((v) => isInstallCode(v.code)).map((v) => v.day))].sort(),
     rep: r.rep_names,
@@ -74,7 +94,6 @@ export async function loadPipeline(run: Runner, today = todayInBoardZone()) {
       at: r.s_created_at ? r.s_created_at.toISOString() : null, accepted: !!r.s_accepted_at,
     } : null,
   }));
-  return soldPipeline(jobs, today);
 }
 
 const clean = (v: unknown): string | null => {

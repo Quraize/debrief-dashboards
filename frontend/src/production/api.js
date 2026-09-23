@@ -11,6 +11,8 @@ export const productionApi = {
   pipeline: () => get("/api/production/pipeline"),
   /** Production's Blocker / Owner / Next Action for one job. Empty string clears a field. */
   pipelineNote: (jobId, { blocker, owner, nextAction }) => post(`/api/production/pipeline/${encodeURIComponent(jobId)}/note`, { blocker, owner, nextAction }),
+  /** Revenue & AR: started revenue, paid, owed, expected collections, AR and its aging. */
+  revenue: () => get("/api/production/revenue"),
   /** Next Action suggestions: status of the nightly run, run it now, accept one, and the managers' instructions. */
   nextActionStatus: () => get("/api/production/pipeline/next-actions"),
   suggestNextActions: ({ force = false } = {}) => post("/api/production/pipeline/next-actions/run", { force }),

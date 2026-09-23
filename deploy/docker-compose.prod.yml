@@ -129,6 +129,7 @@ services:
       NEXT_ACTION_MODEL: ${NEXT_ACTION_MODEL:-claude-haiku-4-5}
       NEXT_ACTION_ENABLED: ${NEXT_ACTION_ENABLED:-true}
       NEXT_ACTION_CRON: ${NEXT_ACTION_CRON:-15 10 * * *}
+      AR_OVERDUE_DAYS: ${AR_OVERDUE_DAYS:-30}
       # Map tiles for the production boards. Optional: without a key the maps
       # fall back to a keyless provider. See backend/.env.example.
       INTERMEDIA_CLIENT_ID: ${INTERMEDIA_CLIENT_ID:-}

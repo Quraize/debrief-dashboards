@@ -46,6 +46,7 @@ const ADMIN_OPERATIONS = [
 const PRODUCTION_NAV = [
   { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
   { to: "/production/pipeline", label: "Sold Pipeline", icon: BadgeDollarSign, roles: PIPELINE_ROLES },
+  { to: "/production/revenue", label: "Revenue & AR", icon: BarChart3, roles: PIPELINE_ROLES },
   { to: "/production/jobs", label: "Jobs by Stage", icon: HardHat },
   { to: "/production/weekly-job-sheet", label: "Weekly Job Sheet", icon: Table2 },
 ];
@@ -57,7 +58,7 @@ const PRODUCTION_ONLY_PREFIXES = ["/production", "/account"];
 // Pages built around one wide table read better with the whole screen: the
 // 1280px cap that suits a row of cards squeezes fourteen columns into the
 // middle third of a big monitor and leaves the margins empty.
-const FULL_WIDTH_PREFIXES = ["/production/pipeline", "/production/weekly-job-sheet", "/lead-flow"];
+const FULL_WIDTH_PREFIXES = ["/production/pipeline", "/production/revenue", "/production/weekly-job-sheet", "/lead-flow"];
 const PRODUCTION_HOME = "/production/schedule";
 
 export default function AppLayout() {
