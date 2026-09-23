@@ -15,7 +15,7 @@ const PASSWORD = "correct horse battery staple";
 let db: TestDb;
 let app: FastifyInstance;
 type Auth = { cookies: Record<string, string>; headers: Record<string, string> };
-let prod: Auth, pm: Auth, rep: Auth;
+let crew: Auth, pm: Auth, rep: Auth;
 
 function cookieFrom(res: { headers: Record<string, unknown> }, name: string): string {
   const raw = res.headers["set-cookie"];
@@ -69,7 +69,7 @@ describe.skipIf(!reachable)("Next Action suggestions", () => {
     delete process.env.ANTHROPIC_API_KEY;
     const { buildApp } = await import("../src/app.js");
     app = await buildApp();
-    prod = await login("prod@allied.test", "production");
+    crew = await login("crew@allied.test", "production");
     pm = await login("pm@allied.test", "project_manager");
     rep = await login("rep@allied.test", "outside_sales_rep");
     await db.owner.query(`INSERT INTO jp_customer (jp_customer_id, customer_name) VALUES ('9001','Lisa Diss')`);
@@ -120,7 +120,7 @@ describe.skipIf(!reachable)("Next Action suggestions", () => {
     const j1 = calls.find((c) => c.facts["jobNumber"] === "2609-0001-01")!.facts;
     expect(j1).toMatchObject({ customer: "Lisa Diss", status: "unscheduled", daysSinceSold: expect.any(Number), rule: { key: "handoff" } });
 
-    const pipe = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...prod })).json();
+    const pipe = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...pm })).json();
     const by = Object.fromEntries(pipe.rows.map((x: { jobId: string }) => [x.jobId, x]));
     expect(by["j1"].suggested).toMatchObject({ text: "Sales rep submits the sold sheet today; sold 7 days ago.", confidence: "high", model: "claude-haiku-4-5", ruleKey: "handoff", accepted: false });
     expect(by["j2"].suggested.text).toContain("Office enters the contract price");
@@ -139,22 +139,23 @@ describe.skipIf(!reachable)("Next Action suggestions", () => {
   });
 
   it("accepting copies the suggestion into the note and stamps who took it; the instructions are the managers' to change", async () => {
-    const acc = await app.inject({ method: "POST", url: "/api/production/pipeline/j1/suggestion/accept", ...prod });
+    const acc = await app.inject({ method: "POST", url: "/api/production/pipeline/j1/suggestion/accept", ...pm });
     expect(acc.statusCode).toBe(200);
-    expect(acc.json()).toMatchObject({ jobId: "j1", nextAction: "Sales rep submits the sold sheet today; sold 7 days ago.", acceptedBy: "prod@allied.test" });
-    const row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...prod })).json().rows.find((x: { jobId: string }) => x.jobId === "j1");
-    expect(row).toMatchObject({ nextAction: "Sales rep submits the sold sheet today; sold 7 days ago.", noteUpdatedBy: "prod@allied.test" });
+    expect(acc.json()).toMatchObject({ jobId: "j1", nextAction: "Sales rep submits the sold sheet today; sold 7 days ago.", acceptedBy: "pm@allied.test" });
+    const row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...pm })).json().rows.find((x: { jobId: string }) => x.jobId === "j1");
+    expect(row).toMatchObject({ nextAction: "Sales rep submits the sold sheet today; sold 7 days ago.", noteUpdatedBy: "pm@allied.test" });
     expect(row.suggested.accepted).toBe(true);
-    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j5/suggestion/accept", ...prod })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j5/suggestion/accept", ...pm })).statusCode).toBe(404);
 
-    // Instructions: everyone on production reads them, only managers write them, and short ones are refused.
-    let ins = (await app.inject({ method: "GET", url: "/api/production/pipeline/instructions", ...prod })).json();
+    // Instructions: managers read and write them, production is refused, and short ones are rejected.
+    let ins = (await app.inject({ method: "GET", url: "/api/production/pipeline/instructions", ...pm })).json();
     expect(ins).toMatchObject({ isDefault: true, updatedBy: null }); expect(ins.body).toContain("Money first");
-    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/instructions", ...prod, payload: { body: "Insurance jobs first. Always name the rep. Escalate anything over 30 days." } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/api/production/pipeline/instructions", ...crew })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/instructions", ...crew, payload: { body: "Insurance jobs first. Always name the rep. Escalate anything over 30 days." } })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/production/pipeline/instructions", ...pm, payload: { body: "too short" } })).statusCode).toBe(400);
     const saved = await app.inject({ method: "POST", url: "/api/production/pipeline/instructions", ...pm, payload: { body: "Insurance jobs first. Always name the rep. Escalate anything over 30 days." } });
     expect(saved.statusCode).toBe(200);
-    ins = (await app.inject({ method: "GET", url: "/api/production/pipeline/instructions", ...prod })).json();
+    ins = (await app.inject({ method: "GET", url: "/api/production/pipeline/instructions", ...pm })).json();
     expect(ins).toMatchObject({ isDefault: false, updatedBy: "pm@allied.test", body: "Insurance jobs first. Always name the rep. Escalate anything over 30 days." });
 
     // New instructions change the hash, so the next run asks again with the managers' words.
@@ -166,17 +167,20 @@ describe.skipIf(!reachable)("Next Action suggestions", () => {
     expect(calls[0]!.system).toContain("Insurance jobs first.");
   });
 
-  it("status reports the schedule and the last run; a sales rep and an anonymous caller are refused", async () => {
-    const st = (await app.inject({ method: "GET", url: "/api/production/pipeline/next-actions", ...prod })).json();
+  it("status reports the schedule and the last run; production, a sales rep and an anonymous caller are refused", async () => {
+    const st = (await app.inject({ method: "GET", url: "/api/production/pipeline/next-actions", ...pm })).json();
     expect(st).toMatchObject({ enabled: false, reason: "ANTHROPIC_API_KEY not set", model: "claude-haiku-4-5" });
     expect(st.lastRun).toMatchObject({ status: "completed", startedBy: "test" });
     // Without a key the run refuses cleanly and says why, logged as failed.
-    const noKey = await app.inject({ method: "POST", url: "/api/production/pipeline/next-actions/run", ...prod, payload: {} });
+    const noKey = await app.inject({ method: "POST", url: "/api/production/pipeline/next-actions/run", ...pm, payload: {} });
     expect(noKey.statusCode).toBe(502); expect(noKey.json().detail).toBe("ANTHROPIC_API_KEY not set");
     for (const url of ["/api/production/pipeline/next-actions", "/api/production/pipeline/instructions"]) {
+      expect((await app.inject({ method: "GET", url, ...crew })).statusCode).toBe(403);
       expect((await app.inject({ method: "GET", url, ...rep })).statusCode).toBe(403);
       expect((await app.inject({ method: "GET", url })).statusCode).toBe(401);
     }
+    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j1/suggestion/accept", ...crew })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/next-actions/run", ...crew, payload: {} })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j1/suggestion/accept", ...rep })).statusCode).toBe(403);
   });
 });

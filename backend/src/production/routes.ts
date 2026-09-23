@@ -5,7 +5,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { requireAuth, requireCsrf, requireRole, clientIp } from "../middleware/auth.js";
-import { PRODUCTION_ROLES } from "@allied/shared/constants";
+import { PRODUCTION_ROLES, PIPELINE_ROLES } from "@allied/shared/constants";
 import { boardForRange, validateRange, todayInBoardZone } from "./board.js";
 import { refreshSchedules } from "./syncSchedules.js";
 import { jobsBoard } from "./jobsBoard.js";
@@ -23,15 +23,16 @@ interface WeekQuery { from?: string; to?: string; basis?: string }
 export function registerProductionRoutes(app: FastifyInstance): void {
   const productionOnly = requireRole(...PRODUCTION_ROLES);
 
-  // ── Sold-Job Pipeline / Unscheduled Work ──
+  // ── Sold-Job Pipeline / Unscheduled Work — management only (admin, sales manager, project manager) ──
+  const pipelineOnly = requireRole(...PIPELINE_ROLES);
   app.get(
     "/api/production/pipeline",
-    { preHandler: [requireAuth, productionOnly] },
+    { preHandler: [requireAuth, pipelineOnly] },
     async (req: FastifyRequest, reply: FastifyReply) => reply.send(await soldPipelineReport({ email: req.user!.email, role: req.user!.role })),
   );
   app.post<{ Params: { jobId: string }; Body: { blocker?: string | null; owner?: string | null; next_action?: string | null; nextAction?: string | null } }>(
     "/api/production/pipeline/:jobId/note",
-    { preHandler: [requireAuth, requireCsrf, productionOnly] },
+    { preHandler: [requireAuth, requireCsrf, pipelineOnly] },
     async (req, reply) => {
       const { jobId } = req.params;
       if (!jobId || jobId.length > 64) return reply.code(400).send({ error: "jobId is required" });
@@ -42,18 +43,17 @@ export function registerProductionRoutes(app: FastifyInstance): void {
     },
   );
 
-  // ── Next Action suggestions ──
-  const managersOnly = requireRole("admin", "sales_manager", "project_manager");
-  app.get("/api/production/pipeline/next-actions", { preHandler: [requireAuth, productionOnly] },
+  // ── Next Action suggestions — the same management gate ──
+  app.get("/api/production/pipeline/next-actions", { preHandler: [requireAuth, pipelineOnly] },
     async (_req: FastifyRequest, reply: FastifyReply) => reply.send(await nextActionStatus()));
-  app.post<{ Body: { force?: boolean } }>("/api/production/pipeline/next-actions/run", { preHandler: [requireAuth, requireCsrf, productionOnly] },
+  app.post<{ Body: { force?: boolean } }>("/api/production/pipeline/next-actions/run", { preHandler: [requireAuth, requireCsrf, pipelineOnly] },
     async (req, reply) => {
       console.info(`[production] next actions run by=${req.user!.email} force=${!!req.body?.force} ip=${clientIp(req)}`);
       const result = await runNextActions({ startedBy: `manual:${req.user!.email}`, force: !!req.body?.force });
       if (result.status === "failed") return reply.code(502).send({ error: "The suggestion run failed.", detail: result.errorMessage, ...result });
       return reply.send(result);
     });
-  app.post<{ Params: { jobId: string } }>("/api/production/pipeline/:jobId/suggestion/accept", { preHandler: [requireAuth, requireCsrf, productionOnly] },
+  app.post<{ Params: { jobId: string } }>("/api/production/pipeline/:jobId/suggestion/accept", { preHandler: [requireAuth, requireCsrf, pipelineOnly] },
     async (req, reply) => {
       try {
         const out = await acceptSuggestion({ email: req.user!.email, role: req.user!.role }, req.params.jobId);
@@ -64,12 +64,12 @@ export function registerProductionRoutes(app: FastifyInstance): void {
         return reply.code(e.statusCode ?? 500).send({ error: e.message });
       }
     });
-  app.get("/api/production/pipeline/instructions", { preHandler: [requireAuth, productionOnly] },
+  app.get("/api/production/pipeline/instructions", { preHandler: [requireAuth, pipelineOnly] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const ctx = { email: req.user!.email, role: req.user!.role };
       return reply.send(await getInstructions((fn) => withUser(dbApp(), ctx, fn)));
     });
-  app.post<{ Body: { body?: string } }>("/api/production/pipeline/instructions", { preHandler: [requireAuth, requireCsrf, managersOnly] },
+  app.post<{ Body: { body?: string } }>("/api/production/pipeline/instructions", { preHandler: [requireAuth, requireCsrf, pipelineOnly] },
     async (req, reply) => {
       try {
         const out = await saveInstructions({ email: req.user!.email, role: req.user!.role }, req.body?.body ?? "");

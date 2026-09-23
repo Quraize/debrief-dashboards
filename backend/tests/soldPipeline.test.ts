@@ -14,7 +14,7 @@ const PASSWORD = "correct horse battery staple";
 let db: TestDb;
 let app: FastifyInstance;
 type Auth = { cookies: Record<string, string>; headers: Record<string, string> };
-let prod: Auth, rep: Auth;
+let pm: Auth, crew: Auth, rep: Auth;
 
 function cookieFrom(res: { headers: Record<string, unknown> }, name: string): string {
   const raw = res.headers["set-cookie"];
@@ -49,7 +49,8 @@ describe.skipIf(!reachable)("Sold-Job Pipeline", () => {
     process.env.AUTH_LOGIN_RATE_MAX = "10000"; process.env.RATE_LIMIT_GLOBAL_MAX = "10000";
     const { buildApp } = await import("../src/app.js");
     app = await buildApp();
-    prod = await login("prod@allied.test", "production");
+    pm = await login("pm@allied.test", "project_manager");
+    crew = await login("crew@allied.test", "production");
     rep = await login("rep@allied.test", "outside_sales_rep");
     await db.owner.query(`INSERT INTO jp_customer (jp_customer_id, customer_name) VALUES ('9001','Lisa Diss'), ('9002','Rolito Guinto')`);
 
@@ -81,7 +82,7 @@ describe.skipIf(!reachable)("Sold-Job Pipeline", () => {
   });
 
   it("buckets every sold, unpaid job and adds up the CEO's totals", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/production/pipeline", ...prod });
+    const res = await app.inject({ method: "GET", url: "/api/production/pipeline", ...pm });
     expect(res.statusCode).toBe(200);
     const p = res.json();
     expect(p.totals).toMatchObject({
@@ -104,19 +105,22 @@ describe.skipIf(!reachable)("Sold-Job Pipeline", () => {
   });
 
   it("lets production write Blocker, Owner and Next Action, stamped, and a blank blocker falls back to the stage", async () => {
-    const save = await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...prod,
+    const save = await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...pm,
       payload: { blocker: "Sold sheet missing the color selection", owner: "Pema", nextAction: "Rep to send color by Friday" } });
     expect(save.statusCode).toBe(200);
-    expect(save.json()).toMatchObject({ jobId: "j1", blocker: "Sold sheet missing the color selection", owner: "Pema", nextAction: "Rep to send color by Friday", updatedBy: "prod@allied.test" });
-    let row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...prod })).json().rows.find((r: { jobId: string }) => r.jobId === "j1");
-    expect(row).toMatchObject({ blocker: "Sold sheet missing the color selection", blockerDerived: false, owner: "Pema", noteUpdatedBy: "prod@allied.test" });
+    expect(save.json()).toMatchObject({ jobId: "j1", blocker: "Sold sheet missing the color selection", owner: "Pema", nextAction: "Rep to send color by Friday", updatedBy: "pm@allied.test" });
+    let row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...pm })).json().rows.find((r: { jobId: string }) => r.jobId === "j1");
+    expect(row).toMatchObject({ blocker: "Sold sheet missing the color selection", blockerDerived: false, owner: "Pema", noteUpdatedBy: "pm@allied.test" });
     // Clearing the blocker hands it back to the stage; owner stays.
-    await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...prod, payload: { blocker: "", owner: "Pema", nextAction: "" } });
-    row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...prod })).json().rows.find((r: { jobId: string }) => r.jobId === "j1");
+    await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...pm, payload: { blocker: "", owner: "Pema", nextAction: "" } });
+    row = (await app.inject({ method: "GET", url: "/api/production/pipeline", ...pm })).json().rows.find((r: { jobId: string }) => r.jobId === "j1");
     expect(row).toMatchObject({ blocker: "Awaiting sold-sheet handoff to production", blockerDerived: true, owner: "Pema", nextAction: null });
   });
 
-  it("is production's: a sales rep and an anonymous caller are refused", async () => {
+  it("is management's: the production role, a sales rep and an anonymous caller are refused", async () => {
+    // Crew leads keep the schedule and the jobs board; the pipeline's money and blockers are for managers.
+    expect((await app.inject({ method: "GET", url: "/api/production/pipeline", ...crew })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...crew, payload: { owner: "me" } })).statusCode).toBe(403);
     expect((await app.inject({ method: "GET", url: "/api/production/pipeline", ...rep })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/production/pipeline/j1/note", ...rep, payload: { owner: "me" } })).statusCode).toBe(403);
     expect((await app.inject({ method: "GET", url: "/api/production/pipeline" })).statusCode).toBe(401);

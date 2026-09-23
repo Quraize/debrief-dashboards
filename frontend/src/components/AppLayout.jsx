@@ -7,7 +7,7 @@ import {
   Home, ClipboardList, Inbox, CalendarDays, BarChart3, Users, PhoneCall,
   AlertTriangle, Download, Settings, Menu, X, HardHat, Upload, FileText, ClipboardCheck, Megaphone, Shield, RefreshCw, BadgeDollarSign, Users as UsersIcon, UserCircle, MapPin, BellRing, Table2, ShieldCheck
 } from "lucide-react";
-import { PRODUCTION_ROLES, isProductionOnly } from "@allied/shared/constants";
+import { PRODUCTION_ROLES, PIPELINE_ROLES, isProductionOnly } from "@allied/shared/constants";
 
 const DASHBOARDS = [
   { to: "/", label: "Overview", icon: Home, end: true },
@@ -45,7 +45,7 @@ const ADMIN_OPERATIONS = [
 // (a separate domain on the same backend) without touching the rest.
 const PRODUCTION_NAV = [
   { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
-  { to: "/production/pipeline", label: "Sold Pipeline", icon: BadgeDollarSign },
+  { to: "/production/pipeline", label: "Sold Pipeline", icon: BadgeDollarSign, roles: PIPELINE_ROLES },
   { to: "/production/jobs", label: "Jobs by Stage", icon: HardHat },
   { to: "/production/weekly-job-sheet", label: "Weekly Job Sheet", icon: Table2 },
 ];
@@ -88,6 +88,8 @@ export default function AppLayout() {
   const productionOnly = isProductionOnly(me?.role);
   const showSales = !productionOnly;
   const showProduction = PRODUCTION_ROLES.includes(me?.role);
+  // Items with a `roles` list show only to those roles (the Sold Pipeline is management's).
+  const productionNav = PRODUCTION_NAV.filter((i) => !i.roles || i.roles.includes(me?.role));
   if (productionOnly && !PRODUCTION_ONLY_PREFIXES.some((p) => location.pathname.startsWith(p))) {
     return <Navigate to={PRODUCTION_HOME} replace />;
   }
@@ -141,7 +143,7 @@ export default function AppLayout() {
           {showProduction && (
             <>
               {showSales && <div className="my-1 border-t border-border/60" />}
-              <NavSection label="Production" items={PRODUCTION_NAV} />
+              <NavSection label="Production" items={productionNav} />
             </>
           )}
           {me?.role === "admin" && (
@@ -172,7 +174,7 @@ export default function AppLayout() {
                 {showProduction && (
                   <>
                     {showSales && <div className="my-1 border-t border-border/60" />}
-                    <NavSection label="Production" items={PRODUCTION_NAV} onClick={() => setOpen(false)} />
+                    <NavSection label="Production" items={productionNav} onClick={() => setOpen(false)} />
                   </>
                 )}
                 {me?.role === "admin" && (

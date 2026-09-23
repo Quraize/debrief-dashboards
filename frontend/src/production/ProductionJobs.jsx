@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
-import { PRODUCTION_ROLES } from "@allied/shared/constants";
+import { PRODUCTION_ROLES, PIPELINE_ROLES } from "@allied/shared/constants";
 import { STAGE_GROUPS } from "@allied/shared/jobStages";
 import { RefreshCw, Loader2, ExternalLink, MapPin, Search, Users, CalendarDays, Clock } from "lucide-react";
 import { productionApi } from "./api";
@@ -115,8 +115,8 @@ export default function ProductionJobs() {
         </div>
       </div>
 
-      {/* The sold-job pipeline's headline totals; the detail is its own tab. */}
-      <PipelineHeadline />
+      {/* The sold-job pipeline's headline totals; the detail is its own tab. Management only. */}
+      {PIPELINE_ROLES.includes(me?.role) && <PipelineHeadline />}
 
       {/* Groups, like the JobProgress Jobs screen. All selected by default. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

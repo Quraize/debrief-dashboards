@@ -167,6 +167,9 @@ export const ROLES = Object.keys(ROLE_LABELS);
 // Who sees the production schedule board (customer addresses on a map). The
 // database enforces the same list in allied_is_production() (migration 0012).
 export const PRODUCTION_ROLES = ["admin", "sales_manager", "project_manager", "production"];
+// The Sold-Job Pipeline is management's view: money, blockers, who owns what.
+// Production crew leads see the schedule and the jobs board, not this.
+export const PIPELINE_ROLES = ["admin", "sales_manager", "project_manager"];
 // `production` is production-ONLY: the schedule board and their own account,
 // no sales pages or data. Every other role is sales-side staff. The database
 // enforces the same split in allied_is_authenticated() (migration 0013).

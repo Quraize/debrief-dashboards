@@ -15,7 +15,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
-import { PRODUCTION_ROLES } from "@allied/shared/constants";
+import { PIPELINE_ROLES } from "@allied/shared/constants";
 import { BUCKETS, pipelineTotals } from "@allied/shared/soldPipeline";
 import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
@@ -38,8 +38,9 @@ const TONE = {
 
 export default function SoldPipeline() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: () => base44.auth.me().catch(() => null) });
-  const allowed = !!me && PRODUCTION_ROLES.includes(me.role);
-  const isManager = !!me && ["admin", "sales_manager", "project_manager"].includes(me.role);
+  // Management only: admin, sales manager, project manager. Everyone allowed here may edit the instructions.
+  const allowed = !!me && PIPELINE_ROLES.includes(me.role);
+  const isManager = allowed;
   const { data, isLoading, error } = useQuery({ queryKey: ["production-pipeline"], queryFn: productionApi.pipeline, enabled: allowed, staleTime: 60_000 });
   const [bucket, setBucket] = useState("unscheduled");
   const [q, setQ] = useState("");
@@ -69,7 +70,7 @@ export default function SoldPipeline() {
     return list;
   }, [inRange, bucket, q, noValueOnly]);
 
-  if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">Production access required.</div>;
+  if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">The Sold Pipeline is for managers: admin, sales manager or project manager.</div>;
   const filtered = range !== ALL_TIME_FILTER;
 
   return (
