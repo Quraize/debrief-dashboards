@@ -262,6 +262,10 @@ function opRequests(op: PlanOp, sheetId: number, lastCol: number, lastRow: numbe
     reqs.push({ insertDimension: { range: { sheetId, dimension: "ROWS", startIndex: op.at, endIndex: op.at + op.count }, inheritFromBefore: false } });
     return;
   }
+  if (op.type === "deleteRows") {
+    reqs.push({ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: op.at, endIndex: op.at + op.count } } });
+    return;
+  }
   if (op.type === "clearValidation") {
     // No rule = remove it, on every body row of the column.
     reqs.push({ setDataValidation: { range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: op.col, endColumnIndex: op.col + 1 } } });

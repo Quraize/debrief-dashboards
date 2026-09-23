@@ -104,7 +104,7 @@ describe("planSheet on a tab the team has been working in", () => {
     g.push(["9/7/2026-9/13/2026"]);
     const j1: (string | number | boolean | null)[] = []; j1[0] = "Wayne/1 Main St/Customer 1"; j1[B] = true; j1[HU] = 1; j1[R] = 9999; j1[colIndex("BG")] = "call before 8";
     g.push(j1);
-    const gone: (string | number | boolean | null)[] = []; gone[0] = "Old Tappan/84 Willow/Denike"; gone[HU] = "77";
+    const gone: (string | number | boolean | null)[] = []; gone[0] = "Old Tappan/84 Willow/Denike"; gone[HU] = "77"; gone[colIndex("BG")] = "call before demo";
     g.push(gone);
     const tot: (string | number | boolean | null)[] = []; tot[0] = "Weekly Total"; tot[R] = 9999;
     g.push(tot);
@@ -131,6 +131,28 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(at(cells, 3, HY)).toBe(SYNC_STATUS_STALE);
     expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 3 && r.style === "stale"))).toBe(true);
     expect(plan.summary.weeks[0]).toMatchObject({ existing: true, added: ["Wayne/2 Main St/Customer 2"], updated: ["Wayne/1 Main St/Customer 1"], notThisWeek: ["Old Tappan/84 Willow/Denike"] });
+  });
+  it("removes a stale copy that carries nothing hand-filled, and keeps one the team wrote in", () => {
+    // Two rows the feed no longer places in this week: one untouched (checkbox defaults only), one with a manufacturer typed in.
+    const g = grid();
+    const empty: (string | number | boolean | null)[] = []; empty[0] = "Teaneck/380 Woods Road/Faggello"; empty[HU] = "88"; empty[B] = "NO"; empty[colIndex("D")] = false; empty[colIndex("AJ")] = true; empty[R] = 27971;
+    const typed: (string | number | boolean | null)[] = []; typed[0] = "Fair Lawn/1 Elm/Smith"; typed[HU] = "99"; typed[colIndex("AE")] = "GAF";
+    g.splice(3, 0, empty, typed);   // rows 3 and 4, before Denike (now 5) and the total (now 6)
+    const plan = planSheet(g, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);
+    // Faggello (row 3) goes; AJ is a synced tick and B a synced answer, so they do not count as hand-filled.
+    expect(plan.ops.filter((o) => o.type === "deleteRows")).toEqual([{ type: "deleteRows", at: 3, count: 1 }]);
+    expect(plan.summary).toMatchObject({ jobsRemoved: 1, jobsNotThisWeek: 2 });
+    expect(plan.summary.weeks[0]).toMatchObject({ removed: ["Teaneck/380 Woods Road/Faggello"], notThisWeek: ["Fair Lawn/1 Elm/Smith", "Old Tappan/84 Willow/Denike"] });
+    // Ops run in order: Smith (row 4) and Denike (row 5) are stamped first, THEN row 3 is deleted and they
+    // shift up to 3 and 4. The total, written after the re-read, already uses the final rows: 2..4, at row 5.
+    const cells = cellsOf(plan);
+    expect(at(cells, 4, HY)).toBe(SYNC_STATUS_STALE);
+    expect(at(cells, 5, HY)).toBe(SYNC_STATUS_STALE);
+    expect(plan.ops.findIndex((o) => o.type === "deleteRows")).toBeGreaterThan(plan.ops.findIndex((o) => o.type === "write" && o.cells.some((c) => c.value === SYNC_STATUS_STALE)));
+    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
+    // And the sheet request is a row deletion at that index.
+    const reqs = toRequests(plan, 5) as Record<string, Record<string, unknown>>[];
+    expect(reqs.find((r) => r["deleteDimension"])!["deleteDimension"]).toEqual({ range: { sheetId: 5, dimension: "ROWS", startIndex: 3, endIndex: 4 } });
   });
   it("puts a missing older week after the existing block and a newer one before it", () => {
     const older = planSheet(grid(), [{ from: "2026-08-31", to: "2026-09-06", rows: [row("5")] }], NO_MONTH);

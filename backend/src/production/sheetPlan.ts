@@ -19,7 +19,7 @@
  * job the feed no longer places in a week is stamped in the hidden JP Sync
  * Status column instead.
  */
-import { MASTER_COLUMNS, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
+import { MASTER_COLUMNS, MASTER_MANUAL, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
 import { weekBounds } from "@allied/shared/production";
 import { labelLink } from "@allied/shared/weeklyJobSheet";
 import { isInstallCode } from "@allied/shared/production";
@@ -40,7 +40,9 @@ export type PlanOp =
   | { type: "write"; cells: CellWrite[] }
   | { type: "style"; rows: RowStyle[] }
   /** Drop a column's data validation (a renamed checkbox column that now holds text). */
-  | { type: "clearValidation"; col: number };
+  | { type: "clearValidation"; col: number }
+  /** Remove rows: only ever a stale copy of a job that carries nothing hand-filled. */
+  | { type: "deleteRows"; at: number; count: number };
 
 /** The cell that takes the paid/unpaid colour: B, the PAID-IN-FULL column. */
 export const TONE_COLS: [number, number] = [1, 2];
@@ -52,9 +54,11 @@ export interface PlanSummary {
   jobsAdded: number;
   jobsUpdated: number;
   jobsNotThisWeek: number;
+  /** Stale copies removed because no hand-filled cell would be lost. */
+  jobsRemoved: number;
   cellsWritten: number;
   /** Per week: what happened, for the dry-run report. */
-  weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[] }[];
+  weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[]; removed: string[] }[];
   /** The month lines as written, for the dry-run report. */
   months: { label: string; jobs: number; gross: number }[];
   /** Week blocks that are past their Thursday and must be read-only, with their final row span. */
@@ -386,7 +390,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -414,6 +418,17 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     ops.push({ type: "insertRows", at, count });
     grid.splice(at, 0, ...Array.from({ length: count }, () => [] as CellValue[]));
   };
+  const remove = (at: number, count: number) => {
+    ops.push({ type: "deleteRows", at, count });
+    grid.splice(at, count);
+  };
+  /** True when the team typed or ticked anything in a hand-filled column of this row. */
+  const hasHandFilled = (cells: CellValue[] | undefined) => (MASTER_MANUAL as Column[]).some((c) => {
+    const v = cells?.[ACTIVE[c.col]!];
+    if (v === null || v === undefined || v === false) return false;
+    const s = cellStr(v);
+    return s !== "" && s.toUpperCase() !== "FALSE";
+  });
   const style = (rows: RowStyle[]) => { if (rows.length) ops.push({ type: "style", rows }); };
 
   // Header: written when the tab is empty or row 1 is blank.
@@ -465,7 +480,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   for (const week of ordered) {
     const label = weekLabel(week.from, week.to);
     const rows = [...week.rows].sort((a, b) => (b.saleDate ?? "").localeCompare(a.saleDate ?? "") || (a.jobNumber ?? "").localeCompare(b.jobNumber ?? ""));
-    const report = { label, existing: false, added: [] as string[], updated: [] as string[], notThisWeek: [] as string[] };
+    const report = { label, existing: false, added: [] as string[], updated: [] as string[], notThisWeek: [] as string[], removed: [] as string[] };
     let blocks = parseBlocks(grid);
     let block = blocks.find((b) => b.from === week.from && b.to === week.to) ?? null;
 
@@ -522,19 +537,33 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     // Jobs on the block that the feed no longer places in this week: stamped, never removed.
     blocks = parseBlocks(grid);
     block = blocks.find((b) => b.from === week.from && b.to === week.to)!;
+    // A job the feed no longer places in this week is a stale copy: usually
+    // the install moved to another week, where the feed has already written
+    // it. If the team typed or ticked anything on this row it is stamped and
+    // kept, so nothing they wrote is lost. If every hand-filled column is
+    // blank, there is nothing to lose and the row is removed.
     const stale: CellWrite[] = [];
     const staleRows: RowStyle[] = [];
+    const toRemove: number[] = [];
     for (const idx of block.jobIdx) {
       const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
       if (id && !seen.has(id) && !additions.some((r) => r.jobId === id)) {
+        const label = cellStr(grid[idx]?.[0]) || id;
+        if (!hasHandFilled(grid[idx])) { toRemove.push(idx); summary.jobsRemoved++; report.removed.push(label); continue; }
         stale.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
         if (opts.syncedAt) stale.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
-        summary.jobsNotThisWeek++; report.notThisWeek.push(cellStr(grid[idx]?.[0]) || id);
+        summary.jobsNotThisWeek++; report.notThisWeek.push(label);
         staleRows.push({ row: idx, style: "stale" });
       }
     }
     write(stale);
     style(staleRows);
+    // Bottom-up, so each index is still right when its turn comes; then re-read the block.
+    for (const idx of toRemove.sort((a, b) => b - a)) remove(idx, 1);
+    if (toRemove.length) {
+      blocks = parseBlocks(grid);
+      block = blocks.find((b) => b.from === week.from && b.to === week.to)!;
+    }
     // The total row's ranges follow the block as it grows.
     if (block.totalIdx !== null && block.jobIdx.length) {
       write(totalRowCells(block.totalIdx, block.jobIdx[0]!, block.jobIdx[block.jobIdx.length - 1]!));
