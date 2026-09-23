@@ -74,6 +74,7 @@ describe("soldPipeline — the report", () => {
       jobs: 8,
       totalPipeline: 26749 + 24000 + 58899 + 15000 + 30000 + 12000 + 0 + 20000,
       unscheduled: 26749 + 24000 + 0 + 20000, unscheduledJobs: 4, awaitingProduction: 4,
+      unscheduledSoldThisMonth: 26749, unscheduledSoldThisMonthJobs: 1,   // only job a was sold in September
       scheduled: 58899 + 15000, scheduledJobs: 2,
       inProduction: 30000, inProductionJobs: 1,
       awaitingPayment: 12000, awaitingPaymentJobs: 1,

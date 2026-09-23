@@ -150,6 +150,9 @@ export function pipelineTotals(rows, today) {
       jobs: rows.length,
       totalPipeline: sum(rows),
       unscheduled: sum(by.unscheduled), unscheduledJobs: by.unscheduled.length,
+      /** The production manager's question: sold THIS MONTH and still not on the calendar. */
+      unscheduledSoldThisMonth: sum(by.unscheduled.filter((r) => String(r.contractSignedDate ?? "").slice(0, 7) === today.slice(0, 7))),
+      unscheduledSoldThisMonthJobs: by.unscheduled.filter((r) => String(r.contractSignedDate ?? "").slice(0, 7) === today.slice(0, 7)).length,
       scheduled: sum(by.scheduled), scheduledJobs: by.scheduled.length,
       inProduction: sum(by.inProduction), inProductionJobs: by.inProduction.length,
       awaitingPayment: sum(by.awaitingPayment), awaitingPaymentJobs: by.awaitingPayment.length,

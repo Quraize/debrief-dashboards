@@ -120,7 +120,9 @@ export default function SoldPipeline() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-9 gap-3">
             <Card tone="navy" label="Total Sold Pipeline" value={money(t.totalPipeline)} sub={`${t.jobs} sold jobs, not yet paid`} onClick={() => setBucket("all")} active={bucket === "all"} />
             <Card tone="green" label="Scheduled Pipeline" value={money(t.scheduled + t.inProduction)} sub={`${t.scheduledJobs} booked · ${t.inProductionJobs} in production`} onClick={() => setBucket("scheduled")} active={bucket === "scheduled"} />
-            <Card tone="red" label="Unscheduled Sold Pipeline" value={money(t.unscheduled)} sub={`${t.unscheduledJobs} jobs with no production date`} onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
+            <Card tone="red" label="Unscheduled Sold Pipeline" value={money(t.unscheduled)}
+              sub={`${t.unscheduledJobs} jobs with no production date · sold this month: ${money(t.unscheduledSoldThisMonth)} (${t.unscheduledSoldThisMonthJobs})`}
+              onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
             <Card tone="red" label="Sold Jobs Awaiting Production" value={t.awaitingProduction} sub="no install visit, stage not scheduled" onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
             <Card tone={t.noContractValue > 0 ? "red" : "green"} label="No Contract Value in JobProgress" value={t.noContractValue}
               sub={t.noContractValue > 0 ? "every $ above is short by these" : "every job carries a price"} onClick={() => setNoValueOnly((v) => !v)} active={noValueOnly} />
