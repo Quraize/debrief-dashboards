@@ -50,6 +50,22 @@ describe("Next Week", () => {
   });
 });
 
+describe("Next Month", () => {
+  it("is the whole calendar month after this one, across a year end too", () => {
+    const thisMonth = getDateRangeBounds("This Month");
+    const next = getDateRangeBounds("Next Month");
+    const [y, m] = thisMonth.start.split("-").map(Number);
+    const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1;
+    expect(next.start).toBe(`${ny}-${String(nm).padStart(2, "0")}-01`);
+    const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+    expect(next.end).toBe(`${ny}-${String(nm).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`);
+    expect(inDateRange(next.start, "Next Month")).toBe(true);
+    expect(inDateRange(next.end, "Next Month")).toBe(true);
+    expect(inDateRange(thisMonth.start, "Next Month")).toBe(false);
+    expect(QUEUE_DATE_FILTERS[QUEUE_DATE_FILTERS.indexOf("Last Month") + 1]).toBe("Next Month");
+  });
+});
+
 describe("filter lists", () => {
   it("offers Last Week beside This Week on the dashboards, and gives the queue its own list", () => {
     expect(DATE_FILTERS[DATE_FILTERS.indexOf("This Week") + 1]).toBe("Last Week");
