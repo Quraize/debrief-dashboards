@@ -37,7 +37,8 @@ describe("Next Week", () => {
   it("is the Monday-to-Sunday week after this one, and matches only dates inside it", () => {
     const thisWeek = getDateRangeBounds("This Week");
     const next = getDateRangeBounds("Next Week");
-    const plus = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    // Day arithmetic in UTC, so the machine's time zone cannot shift a date by a day.
+    const plus = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
     expect(next.start).toBe(plus(thisWeek.start, 7));
     expect(next.end).toBe(plus(next.start, 6));
     expect(new Date(next.start + "T00:00:00").getDay()).toBe(1);  // a Monday
