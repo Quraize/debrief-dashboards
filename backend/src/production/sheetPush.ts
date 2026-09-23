@@ -26,8 +26,10 @@ const FORMAT_ROWS = 5000; // formats/validation cover this many rows; inserted r
 export interface SheetPushSettings {
   enabled: boolean; reason: string; tab: string; spreadsheetId: string | null;
   weeksBack: number; weeksAhead: number; cron: string;
-  /** Week blocks become read-only at the end of their Thursday. SHEET_LOCK_ENABLED=false turns it off. */
+  /** Week blocks become read-only at the end of their Thursday. SHEET_LOCK_ENABLED=false turns it off AND removes the locks already on the tab. */
   lockWeeks: boolean;
+  /** Remove a stale copy of a job that carries nothing hand-filled. SHEET_REMOVE_EMPTY_STALE=true turns it on; off, stale rows are stamped and kept. */
+  removeEmptyStale: boolean;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -40,6 +42,7 @@ export function sheetPushSettings(): SheetPushSettings {
     weeksAhead: Number(process.env.SHEET_PUSH_WEEKS_AHEAD ?? 3),
     cron: process.env.SHEET_PUSH_CRON ?? "20 * * * *",
     lockWeeks: process.env.SHEET_LOCK_ENABLED !== "false",
+    removeEmptyStale: process.env.SHEET_REMOVE_EMPTY_STALE === "true",
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -68,6 +71,8 @@ export interface SheetPushResult {
   requests: number;
   /** Week blocks protected for the first time on this run. */
   locksAdded?: number;
+  /** Automation locks deleted because locking is turned off — the team can move rows again. */
+  locksRemoved?: number;
   errorMessage?: string;
 }
 
@@ -101,22 +106,24 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
       now, today, allRows: feed.rows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
+      removeEmptyStale: settings.removeEmptyStale,
     });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
 
     // Locks after every row insert in the same batch: the spans are final.
-    const existing = plan.summary.locks.length ? await client.listProtectedRanges(sheetId) : [];
-    const locks = lockRequests(plan.summary.locks, existing, sheetId, client.clientEmail, plan.ops.some((o) => o.type === "insertRows"));
+    // With locking off, the tab's existing automation locks must come off too, so read them either way.
+    const existing = plan.summary.locks.length || !settings.lockWeeks ? await client.listProtectedRanges(sheetId) : [];
+    const locks = lockRequests(plan.summary.locks, existing, sheetId, client.clientEmail, plan.ops.some((o) => o.type === "insertRows"), !settings.lockWeeks);
     requests.push(...locks.requests);
 
     if (!options.dryRun && requests.length) await client.batchUpdate(requests);
 
     const weekLabels = plan.summary.weeks.map((w) => w.label);
-    const counts = { dryRun: options.dryRun, requests: requests.length, ...plan.summary, locks: plan.summary.locks.length, locksAdded: locks.added, locksUpdated: locks.updated };
+    const counts = { dryRun: options.dryRun, requests: requests.length, ...plan.summary, locks: plan.summary.locks.length, locksAdded: locks.added, locksUpdated: locks.updated, locksRemoved: locks.removed };
     await closeRun(syncRunId, "completed", counts);
     console.info(`[sheet-push] ${options.dryRun ? "dry run" : "pushed"}: ${plan.summary.jobsAdded} added, ${plan.summary.jobsUpdated} updated, `
-      + `${plan.summary.blocksCreated.length} week block(s) created, ${plan.summary.locks.length} locked (${locks.added} new), ${requests.length} request(s)`);
-    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length, locksAdded: locks.added };
+      + `${plan.summary.blocksCreated.length} week block(s) created, ${plan.summary.locks.length} locked (${locks.added} new, ${locks.removed} unlocked), ${requests.length} request(s)`);
+    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length, locksAdded: locks.added, locksRemoved: locks.removed };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await closeRun(syncRunId, "failed", { dryRun: options.dryRun }, message);
@@ -137,10 +144,21 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
 
 export function lockRequests(
-  locks: WeekLock[], existing: ProtectedRange[], sheetId: number, editorEmail: string, rowsShifted: boolean,
-): { requests: unknown[]; added: number; updated: number } {
+  locks: WeekLock[], existing: ProtectedRange[], sheetId: number, editorEmail: string, rowsShifted: boolean, unlock = false,
+): { requests: unknown[]; added: number; updated: number; removed: number } {
   const requests: unknown[] = [];
-  let added = 0, updated = 0;
+  let added = 0, updated = 0, removed = 0;
+  // Locking turned off: take every automation lock off the tab so the team can
+  // move rows by hand. Only ours — a protection someone else added stays.
+  if (unlock) {
+    for (const p of existing) {
+      if (p.protectedRangeId !== undefined && String(p.description ?? "").startsWith(LOCK_DESCRIPTION(""))) {
+        requests.push({ deleteProtectedRange: { protectedRangeId: p.protectedRangeId } });
+        removed++;
+      }
+    }
+    return { requests, added, updated, removed };
+  }
   for (const l of locks) {
     const range = { sheetId, startRowIndex: l.startRow, endRowIndex: l.endRow };
     const description = LOCK_DESCRIPTION(l.label);
@@ -162,7 +180,7 @@ export function lockRequests(
     } });
     updated++;
   }
-  return { requests, added, updated };
+  return { requests, added, updated, removed };
 }
 
 // ── Plan → Sheets API requests ──────────────────────────────────────────────

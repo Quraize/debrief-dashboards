@@ -382,6 +382,8 @@ export interface PlanOptions {
   monthSummary?: boolean;
   /** Compute week locks (blocks past their Thursday) and their label notes. Default true. */
   lockWeeks?: boolean;
+  /** Remove a stale copy that carries nothing hand-filled (SHEET_REMOVE_EMPTY_STALE). Off: every stale row is stamped and kept. */
+  removeEmptyStale?: boolean;
 }
 
 export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanOptions): Plan {
@@ -555,7 +557,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
       if (id && !seen.has(id) && !additions.some((r) => r.jobId === id)) {
         const label = cellStr(grid[idx]?.[0]) || id;
-        if (!hasHandFilled(grid[idx])) { toRemove.push(idx); summary.jobsRemoved++; report.removed.push(label); continue; }
+        if (opts.removeEmptyStale && !hasHandFilled(grid[idx])) { toRemove.push(idx); summary.jobsRemoved++; report.removed.push(label); continue; }
         stale.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_STALE });
         if (opts.syncedAt) stale.push({ row: idx, col: ACTIVE["HX"]!, value: dateTimeSerial(opts.syncedAt) });
         summary.jobsNotThisWeek++; report.notThisWeek.push(label);

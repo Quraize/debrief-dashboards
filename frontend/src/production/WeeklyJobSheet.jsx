@@ -309,6 +309,9 @@ export default function WeeklyJobSheet() {
                 ↔ Following the tab's headings: {pushResult.summary.columnsFollowed.map((c) => `${c.header} → column ${c.tab} (template ${c.template})`).join(" · ")}
               </div>
             )}
+            {(pushResult.locksRemoved ?? 0) > 0 && (
+              <div className="text-muted-foreground">🔓 {pushResult.locksRemoved} week lock(s) removed — locking is off, rows can be moved by hand.</div>
+            )}
             {(pushResult.summary.locks ?? []).length > 0 && (
               <div className="text-muted-foreground" title="A week becomes read-only at the end of its Thursday. The automation keeps updating JobProgress figures in it; people cannot edit, add or move rows.">
                 🔒 {pushResult.summary.locks.length} week(s) read-only{pushResult.locksAdded ? ` (${pushResult.locksAdded} locked on this run)` : ""}: {pushResult.summary.locks.map((l) => l.label).join(", ")}

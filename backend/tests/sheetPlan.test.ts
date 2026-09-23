@@ -140,7 +140,11 @@ describe("planSheet on a tab the team has been working in", () => {
     empty[colIndex("BH")] = 4254.77; empty[colIndex("BM")] = 6639.77; empty[colIndex("BN")] = 21331.23; empty[colIndex("BO")] = 0.763; empty[colIndex("BR")] = 0; empty[colIndex("BS")] = 0;
     const typed: (string | number | boolean | null)[] = []; typed[0] = "Fair Lawn/1 Elm/Smith"; typed[HU] = "99"; typed[colIndex("AE")] = "GAF";
     g.splice(3, 0, empty, typed);   // rows 3 and 4, before Denike (now 5) and the total (now 6)
-    const plan = planSheet(g, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);
+    // Off by default: every stale row is stamped and kept, nothing is deleted.
+    const kept = planSheet(g.map((r) => [...r]), [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], NO_MONTH);
+    expect(kept.ops.some((o) => o.type === "deleteRows")).toBe(false);
+    expect(kept.summary).toMatchObject({ jobsRemoved: 0, jobsNotThisWeek: 3 });
+    const plan = planSheet(g, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1")] }], { ...NO_MONTH, removeEmptyStale: true });
     // Faggello (row 3) goes; AJ is a synced tick and B a synced answer, so they do not count as hand-filled.
     expect(plan.ops.filter((o) => o.type === "deleteRows")).toEqual([{ type: "deleteRows", at: 3, count: 1 }]);
     expect(plan.summary).toMatchObject({ jobsRemoved: 1, jobsNotThisWeek: 2 });
@@ -405,5 +409,10 @@ describe("week locks — read-only from the end of Thursday", () => {
     });
     // Rows were inserted somewhere above this run: every span is re-asserted.
     expect(lockRequests(locks, existing, 5, "sa@test", true).updated).toBe(2);
+    // Locking turned off: every automation lock comes off, someone else's protection stays, nothing is added.
+    const theirs = { protectedRangeId: 9, description: "Payroll — do not edit", range: { sheetId: 5, startRowIndex: 40, endRowIndex: 41 } };
+    const off = lockRequests(locks, [...existing, theirs], 5, "sa@test", false, true);
+    expect(off).toMatchObject({ added: 0, updated: 0, removed: 2 });
+    expect(off.requests).toEqual([{ deleteProtectedRange: { protectedRangeId: 1 } }, { deleteProtectedRange: { protectedRangeId: 2 } }]);
   });
 });
