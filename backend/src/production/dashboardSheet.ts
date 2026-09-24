@@ -22,7 +22,7 @@
  * the month view sums only those, so a month never counts a job twice.
  */
 import { withServiceRole } from "../db/client.js";
-import type { GoogleSheetsClient, CellValue } from "../integrations/google/sheets.js";
+import { a1, type GoogleSheetsClient, type CellValue } from "../integrations/google/sheets.js";
 import type { SheetRow } from "./weeklyJobSheet.js";
 import { parseBlocks } from "./sheetPlan.js";
 import { weekLabel } from "@allied/shared/weeklyJobSheetMaster";
@@ -32,6 +32,15 @@ import { revenueRow, AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
 export const DASHBOARD_TAB_DEFAULT = "[AUTOMATION] Production KPIs DASHBOARD";
 export const DATA_TAB_DEFAULT = "[AUTOMATION] Dashboard Data";
 export const ALL_WEEKS = "All weeks";
+export const OVERDUE_LABEL = "Overdue: finished jobs still unpaid 30+ days (today, ignores filters)";
+/**
+ * Card headings renamed after the dashboard was first laid out. The tab is
+ * never overwritten, so each push rewrites a heading ONLY while it still
+ * reads the old text — a heading someone has retitled is left alone.
+ */
+export const LABEL_RENAMES: { cell: string; row: number; col: number; from: string; to: string }[] = [
+  { cell: "E9", row: 8, col: 4, from: "Overdue Balance (today, 30+ days)", to: OVERDUE_LABEL },
+];
 const STALE = "Not on the JobProgress calendar this week";
 
 export interface PaymentRow { date: string; amount: number; method: string | null; jobId: string; jobNumber: string | null; customer: string | null }
@@ -194,7 +203,7 @@ export function dashboardLayoutRequests(dashId: number, dataId: number, dataTab:
       ["Gross $", "Total Revenue", "Deposits", "Progress Payments", "Total Received"],
       [metric("H"), metric("I"), metric("J"), metric("K"), metric("L")],
       [],
-      ["Balance Owed", "Collected in Period", "Paid in Full (jobs)", "Not Paid in Full (jobs)", "Overdue Balance (today, 30+ days)"],
+      ["Balance Owed", "Collected in Period", "Paid in Full (jobs)", "Not Paid in Full (jobs)", OVERDUE_LABEL],
       [metric("M"), collected, paidCount("YES"), paidCount("NO"), { formula: `=${DT}!$AO$2` }],
       [null, null, { formula: `="$"&TEXT(${paidMoney("YES")},"#,##0")&" of revenue"` }, { formula: `="$"&TEXT(${paidMoney("NO")},"#,##0")&" of revenue"` }],
     ]),
@@ -234,6 +243,11 @@ export function dashboardLayoutRequests(dashId: number, dataId: number, dataTab:
   ];
 }
 
+/** Rewrites renamed card headings that still carry their old text. */
+export function renameRequests(dashId: number, heads: CellValue[][]): unknown[] {
+  return LABEL_RENAMES.filter((r) => cellStr(heads[r.row]?.[r.col]) === r.from).map((r) => rowsAt(dashId, r.row, r.col, [[r.to]]));
+}
+
 export interface DashboardPushResult { created: boolean; jobRows: number; payments: number; weeks: number; overdue: number }
 
 /** A stable, positive sheet id for a tab we add (so the same batch can address it). */
@@ -260,6 +274,10 @@ export async function pushDashboard(
   if (!dash) reqs.push({ addSheet: { properties: { sheetId: dashId, title: input.dashTab, index: 0, gridProperties: { rowCount: 60, columnCount: 12 } } } });
   reqs.push(...dataTabRequests(dataId, data, input.dashTab));
   if (!dash) reqs.push(...dashboardLayoutRequests(dashId, dataId, input.dataTab, input.today));
+  else {
+    const heads = await client.getValues(a1(input.dashTab, "A1:L12"));
+    reqs.push(...renameRequests(dashId, heads));
+  }
   await client.batchUpdate(reqs);
   return { created: !dash, jobRows: data.counts.jobRows, payments: data.counts.payments, weeks: data.counts.weeks, overdue: data.overdue };
 }

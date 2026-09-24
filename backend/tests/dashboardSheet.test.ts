@@ -3,7 +3,7 @@
  * push leaves it, and the dashboard's layout. Pure — no database, no Google.
  */
 import { describe, it, expect } from "vitest";
-import { dashboardData, dataTabRequests, dashboardLayoutRequests, monthLabel, ALL_WEEKS, type PaymentRow } from "../src/production/dashboardSheet.js";
+import { dashboardData, dataTabRequests, dashboardLayoutRequests, renameRequests, monthLabel, ALL_WEEKS, OVERDUE_LABEL, type PaymentRow } from "../src/production/dashboardSheet.js";
 import { colIndex, CUMULATIVE_LABEL } from "../src/production/sheetPlan.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
 
@@ -69,6 +69,21 @@ describe("dashboardData", () => {
   });
 });
 
+describe("renameRequests", () => {
+  it("renames the overdue heading on an existing dashboard only while it still has the old text", () => {
+    const heads: (string | null)[][] = Array.from({ length: 12 }, () => []);
+    heads[8]![4] = "Overdue Balance (today, 30+ days)";
+    const reqs = renameRequests(5, heads as never) as Record<string, Record<string, unknown>>[];
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]!["updateCells"]).toMatchObject({ start: { sheetId: 5, rowIndex: 8, columnIndex: 4 } });
+    expect(JSON.stringify(reqs)).toContain(OVERDUE_LABEL);
+    heads[8]![4] = "Money we are chasing";          // someone retitled it: theirs stays
+    expect(renameRequests(5, heads as never)).toEqual([]);
+    heads[8]![4] = OVERDUE_LABEL;                     // already renamed: nothing to do
+    expect(renameRequests(5, heads as never)).toEqual([]);
+  });
+});
+
 describe("dashboardLayoutRequests", () => {
   const reqs = dashboardLayoutRequests(5, 7, "[AUTOMATION] Dashboard Data", "2026-09-24") as Record<string, unknown>[];
   const text = JSON.stringify(reqs);
@@ -83,7 +98,7 @@ describe("dashboardLayoutRequests", () => {
   });
 
   it("makes every card a formula that switches between the month (first row per job) and the one week", () => {
-    for (const card of ["Gross $", "Total Revenue", "Deposits", "Progress Payments", "Total Received", "Balance Owed", "Collected in Period", "Paid in Full (jobs)", "Not Paid in Full (jobs)", "Overdue Balance (today, 30+ days)"]) expect(text).toContain(card);
+    for (const card of ["Gross $", "Total Revenue", "Deposits", "Progress Payments", "Total Received", "Balance Owed", "Collected in Period", "Paid in Full (jobs)", "Not Paid in Full (jobs)", OVERDUE_LABEL]) expect(text).toContain(card);
     expect(text).toContain(`=IF($E$4=\\"${ALL_WEEKS}\\",SUMIFS('[AUTOMATION] Dashboard Data'!$H:$H,'[AUTOMATION] Dashboard Data'!$D:$D,$B$4,'[AUTOMATION] Dashboard Data'!$O:$O,1),SUMIFS('[AUTOMATION] Dashboard Data'!$H:$H,'[AUTOMATION] Dashboard Data'!$C:$C,$E$4))`);
     // Collected reads payment dates, not job rows.
     expect(text).toContain("SUMIFS('[AUTOMATION] Dashboard Data'!$V:$V,'[AUTOMATION] Dashboard Data'!$R:$R,\\\">=\\\"&VLOOKUP($E$4");
