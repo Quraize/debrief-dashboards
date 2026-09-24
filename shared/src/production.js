@@ -32,6 +32,19 @@ export const JOB_TYPE_LABELS = {
  */
 export const INSTALL_CODES = ["RR", "SR", "RR+SR", "GUTTERS", "WR", "SOLAR", "SHED"];
 
+/**
+ * A Monday–Sunday week, cut at a month end: [{from, to}] when the week sits in
+ * one month, two segments when it crosses one (9/28–9/30 and 10/1–10/4), so
+ * each month's weekly totals and running total hold only that month's days.
+ */
+export function splitAtMonthEnd({ from, to }) {
+  if (String(from).slice(0, 7) === String(to).slice(0, 7)) return [{ from, to }];
+  const [y, m] = String(from).slice(0, 7).split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);            // last day of from's month
+  const first = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);           // the 1st of the next
+  return [{ from, to: last }, { from: first, to }];
+}
+
 /** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
 export function weekBounds(day, offset = 0) {
   const [y, m, d] = String(day).slice(0, 10).split("-").map(Number);

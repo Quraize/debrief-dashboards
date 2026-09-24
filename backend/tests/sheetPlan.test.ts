@@ -7,7 +7,7 @@ import {
   planSheet, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
   SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, PREAPPROVED_LABEL, SYNC_STATUS_LEFT_PREAPPROVED, isPreApproved, type CellWrite,
 } from "../src/production/sheetPlan.js";
-import { toRequests, lockRequests } from "../src/production/sheetPush.js";
+import { toRequests, lockRequests, pushWeeks } from "../src/production/sheetPush.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
 import { MASTER_COLUMNS } from "@allied/shared/weeklyJobSheetMaster";
 
@@ -508,6 +508,45 @@ describe("the team's formatting is never touched", () => {
       }
     }
     expect(plan.ops.some((o) => o.type === "style")).toBe(true);   // the guard is not vacuous
+  });
+});
+
+describe("weeks split at a month end", () => {
+  const job = (id: string, days: string[]) => row(id, { visits: days.map((day) => ({ day, code: "RR" })), installDates: days });
+
+  it("pushes 9/28–9/30 and 10/1–10/4 as two weeks, a job in the half its install starts, never both", () => {
+    const rows = [job("sep", ["2026-09-29"]), job("oct", ["2026-10-02"]), job("span", ["2026-09-30", "2026-10-01"]), job("next", ["2026-10-06"])];
+    const weeks = pushWeeks(rows, "2026-09-24", 0, 2, "2026-09-28");
+    expect(weeks.map((w) => `${w.from}..${w.to}`)).toEqual(["2026-09-21..2026-09-27", "2026-09-28..2026-09-30", "2026-10-01..2026-10-04", "2026-10-05..2026-10-11"]);
+    expect(weeks[1]!.rows.map((r) => r.jobId).sort()).toEqual(["sep", "span"]);     // the two-day job starts 9/30: September's
+    expect(weeks[2]!.rows.map((r) => r.jobId)).toEqual(["oct"]);
+    expect(weeks[3]!.rows.map((r) => r.jobId)).toEqual(["next"]);
+    // Before the cut-over date weeks stay whole.
+    expect(pushWeeks(rows, "2026-09-24", 0, 2, "2026-10-05").map((w) => `${w.from}..${w.to}`)).toContain("2026-09-28..2026-10-04");
+  });
+
+  it("locks both halves together on the Friday of the week", () => {
+    expect(lockDate("2026-09-28")).toBe("2026-10-02");
+    expect(lockDate("2026-10-01")).toBe("2026-10-02");
+    expect(lockDate("2026-09-21")).toBe("2026-09-25");
+  });
+
+  it("relabels a whole-week block already on the tab as the first half, adds the second, and keeps each month's totals apart", () => {
+    const grid: (string | number | boolean | null)[][] = [headerRow(), ["9/28/2026-10/4/2026"]];
+    const sep: (string | number | boolean | null)[] = []; sep[0] = "Wayne/1 Main St/Customer 1"; sep[HU] = "1";
+    const oct: (string | number | boolean | null)[] = []; oct[0] = "Wayne/2 Main St/Customer 2"; oct[HU] = "2";
+    grid.push(sep, oct, ["Weekly Total"], [CUMULATIVE_LABEL]);
+    const weeks = [{ from: "2026-10-01", to: "2026-10-04", rows: [row("2")] }, { from: "2026-09-28", to: "2026-09-30", rows: [row("1")] }];
+    const plan = planSheet(grid, weeks, { ...NO_MONTH, today: "2026-09-24" });
+    expect(plan.summary.weeksSplit).toEqual(["9/28/2026-9/30/2026"]);
+    const after = gridAfter(grid, plan) as (string | number | boolean | null)[][];
+    const blocks = parseBlocks(after);
+    expect(blocks.map((b) => `${b.from}..${b.to}`)).toEqual(["2026-10-01..2026-10-04", "2026-09-28..2026-09-30"]);
+    // Job 1 is updated where it was; job 2 moves to October's block and its old row is stamped stale in September's.
+    expect(blocks[0]!.jobIdx.map((i) => after[i]![HU])).toEqual(["2"]);
+    const sepRows = blocks[1]!.jobIdx.map((i) => [after[i]![HU], after[i]![HY]]);
+    expect(sepRows).toEqual([["1", "Synced from JobProgress"], ["2", SYNC_STATUS_STALE]]);
+    expect(blocks.filter((b) => b.from.startsWith("2026-10")).length).toBe(1);
   });
 });
 

@@ -19,6 +19,7 @@ import { MASTER_COLUMNS, FILLS, NUM_FMT } from "@allied/shared/weeklyJobSheetMas
 import { weeklyJobSheetAsService, filterSheetRows, type SheetRow } from "./weeklyJobSheet.js";
 import { planSheet, weekBounds, colIndex, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
 import { BOARD_TIMEZONE } from "./board.js";
+import { splitAtMonthEnd, isInstallCode } from "@allied/shared/production";
 
 export const DEFAULT_TAB = "[AUTOMATION]WEEKLY JOB SHEET";
 const FORMAT_ROWS = 5000; // formats/validation cover this many rows; inserted rows fall inside
@@ -30,6 +31,8 @@ export interface SheetPushSettings {
   lockWeeks: boolean;
   /** Remove a stale copy of a job that carries nothing hand-filled. SHEET_REMOVE_EMPTY_STALE=true turns it on; off, stale rows are stamped and kept. */
   removeEmptyStale: boolean;
+  /** Weeks starting on or after this Monday are cut at a month end (SHEET_SPLIT_WEEKS_FROM); earlier weeks stay whole. */
+  splitFrom: string;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -43,6 +46,7 @@ export function sheetPushSettings(): SheetPushSettings {
     cron: process.env.SHEET_PUSH_CRON ?? "20 * * * *",
     lockWeeks: process.env.SHEET_LOCK_ENABLED !== "false",
     removeEmptyStale: process.env.SHEET_REMOVE_EMPTY_STALE === "true",
+    splitFrom: process.env.SHEET_SPLIT_WEEKS_FROM || "2026-09-28",
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -97,11 +101,7 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
     const feed = await (options.feed ?? weeklyJobSheetAsService)();
     const today = officeDay(now);
-    const weeks: WeekInput[] = [];
-    for (let k = -weeksBack; k <= weeksAhead; k++) {
-      const b = weekBounds(today, k);
-      weeks.push({ ...b, rows: filterSheetRows(feed.rows, { from: b.from, to: b.to, basis: "install" }) });
-    }
+    const weeks = pushWeeks(feed.rows, today, weeksBack, weeksAhead, settings.splitFrom);
 
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
@@ -142,6 +142,25 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 // grew, so a lock always covers the whole block.
 
 export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
+
+/**
+ * The weeks one push covers, each with its jobs. A week from `splitFrom` on
+ * that crosses a month end becomes two, cut at the month end; a job lands in
+ * the half where its first install visit of that week falls, never both, so
+ * its revenue is counted once and in the right month.
+ */
+export function pushWeeks(rows: SheetRow[], today: string, back: number, ahead: number, splitFrom: string): WeekInput[] {
+  const out: WeekInput[] = [];
+  for (let k = -back; k <= ahead; k++) {
+    const b = weekBounds(today, k);
+    const inWeek = filterSheetRows(rows, { from: b.from, to: b.to, basis: "install" });
+    const segs = b.from >= splitFrom ? splitAtMonthEnd(b) : [b];
+    if (segs.length === 1) { out.push({ ...b, rows: inWeek }); continue; }
+    const firstDay = (r: SheetRow) => r.visits.filter((v) => isInstallCode(v.code) && v.day >= b.from && v.day <= b.to).map((v) => v.day).sort()[0]!;
+    for (const s of segs) out.push({ ...s, rows: inWeek.filter((r) => { const d = firstDay(r); return d >= s.from && d <= s.to; }) });
+  }
+  return out;
+}
 
 export function lockRequests(
   locks: WeekLock[], existing: ProtectedRange[], sheetId: number, editorEmail: string, rowsShifted: boolean, unlock = false,

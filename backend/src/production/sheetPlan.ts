@@ -66,6 +66,8 @@ export interface PlanSummary {
   jobsElsewhere: number;
   /** Hand-pasted rows the feed could not match to any job — flagged for the team. */
   jobsUnmatched: number;
+  /** Whole-week blocks relabelled to the first half of a week now split at a month end. */
+  weeksSplit: string[];
   /** The Sales Pre-Approved / Unscheduled block: what it holds and what moved. */
   preApproved: { created: boolean; jobs: number; added: string[]; left: string[]; kept: string[]; carried: string[] } | null;
   cellsWritten: number;
@@ -92,7 +94,10 @@ export interface WeekLock { label: string; from: string; to: string; startRow: n
 
 /** The office day a week becomes read-only: end of its Thursday = 00:00 Friday. */
 export function lockDate(from: string): string {
-  const [y, m, d] = from.slice(0, 10).split("-").map(Number);
+  // The Friday of the calendar week `from` sits in — so both halves of a week
+  // split at a month end (9/28–9/30, 10/1–10/4) lock together, on 10/2.
+  const monday = weekBounds(from.slice(0, 10)).from;
+  const [y, m, d] = monday.split("-").map(Number);
   return new Date(Date.UTC(y!, m! - 1, d! + 4)).toISOString().slice(0, 10);
 }
 
@@ -412,7 +417,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, preApproved: null, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, preApproved: null, weeksSplit: [], cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -596,6 +601,23 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   /** The one feed job a key names, or null when none or several. */
   const feedFor = (k: string) => { const hits = feedByKey.get(k) ?? []; return hits.length === 1 ? hits[0]! : null; };
   const rowKeys = (cells: CellValue[] | undefined) => [norm(cells?.[ACTIVE["AC"]!]) ? `#${norm(cells?.[ACTIVE["AC"]!])}` : null, norm(cells?.[0]) ? `@${norm(cells?.[0])}` : null].filter((k): k is string => !!k);
+
+  // A week the tab still holds whole (9/28–10/4) that is now pushed in halves:
+  // its block becomes the first half, relabelled in place, instead of the
+  // halves being added beside it. Its other-month jobs move by the usual rules.
+  {
+    const relabels: CellWrite[] = [];
+    for (const w of ordered) {
+      const whole = weekBounds(w.from);
+      if (w.from !== whole.from || w.to === whole.to) continue;          // not the first half of a split week
+      const existing = parseBlocks(grid);
+      if (existing.some((b) => b.from === w.from && b.to === w.to)) continue;
+      const legacy = existing.find((b) => b.from === whole.from && b.to === whole.to);
+      if (legacy) relabels.push({ row: legacy.labelIdx, col: 0, value: weekLabel(w.from, w.to) });
+    }
+    write(relabels);
+    summary.weeksSplit = relabels.map((c) => String(c.value));
+  }
 
   for (const week of ordered) {
     const label = weekLabel(week.from, week.to);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR } from "../src/production.js";
+import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR, splitAtMonthEnd } from "../src/production.js";
 
 describe("parseScheduleTitle — the office's title convention", () => {
   // Every title below was observed verbatim on the September 2026 production calendar.
@@ -54,5 +54,15 @@ describe("jobTypeColor", () => {
     expect(jobTypeColor("RR")).toBe(jobTypeColor("RR"));
     expect(jobTypeColor("ZZZ")).toBe(DEFAULT_TYPE_COLOR);
     expect(jobTypeColor(null)).toBe(DEFAULT_TYPE_COLOR);
+  });
+});
+
+describe("splitAtMonthEnd", () => {
+  it("cuts a week that crosses a month end, and leaves the rest alone", () => {
+    expect(splitAtMonthEnd({ from: "2026-09-28", to: "2026-10-04" })).toEqual([{ from: "2026-09-28", to: "2026-09-30" }, { from: "2026-10-01", to: "2026-10-04" }]);
+    expect(splitAtMonthEnd({ from: "2026-09-21", to: "2026-09-27" })).toEqual([{ from: "2026-09-21", to: "2026-09-27" }]);
+    expect(splitAtMonthEnd({ from: "2026-12-28", to: "2027-01-03" })).toEqual([{ from: "2026-12-28", to: "2026-12-31" }, { from: "2027-01-01", to: "2027-01-03" }]);
+    expect(splitAtMonthEnd({ from: "2027-02-22", to: "2027-02-28" })).toEqual([{ from: "2027-02-22", to: "2027-02-28" }]);   // February ends on a Sunday
+    expect(splitAtMonthEnd({ from: "2028-02-28", to: "2028-03-05" })).toEqual([{ from: "2028-02-28", to: "2028-02-29" }, { from: "2028-03-01", to: "2028-03-05" }]); // leap year
   });
 });
