@@ -73,7 +73,9 @@ describe("soldPipeline — the report", () => {
     expect(p.totals).toMatchObject({
       jobs: 8,
       totalPipeline: 26749 + 24000 + 58899 + 15000 + 30000 + 12000 + 0 + 20000,
-      unscheduled: 26749 + 24000 + 0 + 20000, unscheduledJobs: 4, awaitingProduction: 4,
+      unscheduled: 26749 + 24000 + 0 + 20000, unscheduledJobs: 4,
+      // The production manager's split: handoff + sales review are ready; insurance + no deposit are parked.
+      readyToSchedule: 26749 + 24000, readyToScheduleJobs: 2, parked: 0 + 20000, parkedJobs: 2, awaitingProduction: 2,
       unscheduledSoldThisMonth: 26749, unscheduledSoldThisMonthJobs: 1,   // only job a was sold in September
       scheduled: 58899 + 15000, scheduledJobs: 2,
       inProduction: 30000, inProductionJobs: 1,

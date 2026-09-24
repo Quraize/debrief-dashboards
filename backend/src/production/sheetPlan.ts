@@ -22,7 +22,7 @@
 import { MASTER_COLUMNS, MASTER_MANUAL, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
 import { weekBounds } from "@allied/shared/production";
 import { labelLink } from "@allied/shared/weeklyJobSheet";
-import { inPipeline, bucketFor } from "@allied/shared/soldPipeline";
+import { inPipeline, bucketFor, isReadyStage } from "@allied/shared/soldPipeline";
 import { isInstallCode } from "@allied/shared/production";
 import { stageKey } from "@allied/shared/jobStages";
 import type { SheetRow } from "./weeklyJobSheet.js";
@@ -826,13 +826,14 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
 }
 
 /**
- * A sold job with no production date — the Sold Pipeline's Unscheduled bucket,
+ * A sold job ready to schedule — the Sold Pipeline's "Ready to schedule" card,
  * by the same shared rules, read off a sheet row: signed, not paid, not dead,
- * no install visit, and a stage that is not already scheduled or started.
+ * no install visit, and in one of the production manager's ready stages.
  */
 export function isPreApproved(r: SheetRow, today: string): boolean {
   const job = { contractSignedDate: r.saleDate, stage: r.stage, installDays: [...new Set((r.visits ?? []).filter((v) => isInstallCode(v.code)).map((v) => v.day))].sort() };
-  return inPipeline(job) && bucketFor(job, today) === "unscheduled";
+  // Ready to schedule only: jobs parked on credit, a carrier or a deposit stay on the Sold Pipeline page.
+  return inPipeline(job) && bucketFor(job, today) === "unscheduled" && isReadyStage(r.stage);
 }
 
 export { weekBounds };

@@ -18,7 +18,8 @@ export default function PipelineHeadline() {
     { label: "Total Sold Pipeline", value: money(t.totalPipeline), cls: "text-primary" },
     { label: "Scheduled", value: money(t.scheduled + t.inProduction), cls: "text-green-700" },
     { label: "Unscheduled", value: money(t.unscheduled), cls: t.unscheduled > 0 ? "text-red-700" : "text-green-700" },
-    { label: "Awaiting production", value: t.awaitingProduction, cls: t.awaitingProduction > 0 ? "text-red-700" : "text-green-700" },
+    { label: "Ready to schedule", value: `${money(t.readyToSchedule)} (${t.readyToScheduleJobs})`, cls: t.readyToScheduleJobs > 0 ? "text-red-700" : "text-green-700" },
+    { label: "Parked", value: `${money(t.parked)} (${t.parkedJobs})`, cls: "text-amber-700" },
     { label: "Expected this week", value: money(t.expectedThisWeek), cls: "text-blue-700" },
     { label: "Expected next week", value: money(t.expectedNextWeek), cls: "text-blue-700" },
   ];

@@ -87,7 +87,8 @@ describe.skipIf(!reachable)("Sold-Job Pipeline", () => {
     const p = res.json();
     expect(p.totals).toMatchObject({
       jobs: 5, totalPipeline: 26749 + 58899 + 3350 + 12000,
-      unscheduled: 26749, unscheduledJobs: 2, awaitingProduction: 2,      // j1 and the no-value j8
+      unscheduled: 26749, unscheduledJobs: 2,                              // j1 and the no-value j8
+      readyToScheduleJobs: 1, parkedJobs: 1, awaitingProduction: 1,        // j1 (handoff) is ready; j8 (insurance pending) is parked
       scheduled: 58899 + 3350, scheduledJobs: 2,
       inProduction: 0, awaitingPayment: 12000, awaitingPaymentJobs: 1,
       noContractValue: 1,

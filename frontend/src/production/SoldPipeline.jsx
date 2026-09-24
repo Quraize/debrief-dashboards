@@ -45,6 +45,8 @@ export default function SoldPipeline() {
   const [bucket, setBucket] = useState("unscheduled");
   const [q, setQ] = useState("");
   const [noValueOnly, setNoValueOnly] = useState(false);
+  const [readiness, setReadiness] = useState(null);   // within Unscheduled: "ready" | "parked" | null (both)
+  const pick = (b, r = null) => { setBucket(b); setReadiness(r); };
   // The range chips every dashboard has, applied to the date you choose: when
   // the job was SOLD, or when its install STARTS. A pipeline is a snapshot, so
   // the default is everything.
@@ -64,11 +66,12 @@ export default function SoldPipeline() {
   const rows = useMemo(() => {
     let list = inRange;
     if (bucket !== "all") list = list.filter((r) => r.bucket === bucket);
+    if (bucket === "unscheduled" && readiness) list = list.filter((r) => r.readiness === readiness);
     if (noValueOnly) list = list.filter((r) => r.noContractValue);
     const s = q.trim().toLowerCase();
     if (s) list = list.filter((r) => [r.customer, r.jobNumber, r.city, r.address, r.stage, r.rep, r.owner, r.blocker, r.nextAction].some((v) => String(v ?? "").toLowerCase().includes(s)));
     return list;
-  }, [inRange, bucket, q, noValueOnly]);
+  }, [inRange, bucket, readiness, q, noValueOnly]);
 
   if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">The Sold Pipeline is for managers: admin, sales manager or project manager.</div>;
   const filtered = range !== ALL_TIME_FILTER;
@@ -118,27 +121,33 @@ export default function SoldPipeline() {
           )}
           {/* Headline totals — the numbers the CEO asked for, in his order. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-9 gap-3">
-            <Card tone="navy" label="Total Sold Pipeline" value={money(t.totalPipeline)} sub={`${t.jobs} sold jobs, not yet paid`} onClick={() => setBucket("all")} active={bucket === "all"} />
-            <Card tone="green" label="Scheduled Pipeline" value={money(t.scheduled + t.inProduction)} sub={`${t.scheduledJobs} booked · ${t.inProductionJobs} in production`} onClick={() => setBucket("scheduled")} active={bucket === "scheduled"} />
+            <Card tone="navy" label="Total Sold Pipeline" value={money(t.totalPipeline)} sub={`${t.jobs} sold jobs, not yet paid`} onClick={() => pick("all")} active={bucket === "all"} />
+            <Card tone="green" label="Scheduled Pipeline" value={money(t.scheduled + t.inProduction)} sub={`${t.scheduledJobs} booked · ${t.inProductionJobs} in production`} onClick={() => pick("scheduled")} active={bucket === "scheduled"} />
             <Card tone="red" label="Unscheduled Sold Pipeline" value={money(t.unscheduled)}
               sub={`${t.unscheduledJobs} jobs with no production date · sold this month: ${money(t.unscheduledSoldThisMonth)} (${t.unscheduledSoldThisMonthJobs})`}
-              onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
-            <Card tone="red" label="Sold Jobs Awaiting Production" value={t.awaitingProduction} sub="no install visit, stage not scheduled" onClick={() => setBucket("unscheduled")} active={bucket === "unscheduled"} />
+              onClick={() => pick("unscheduled")} active={bucket === "unscheduled" && !readiness} />
+            <Card tone="red" label="Ready to Schedule" value={money(t.readyToSchedule)}
+              sub={`${t.readyToScheduleJobs} job${t.readyToScheduleJobs === 1 ? "" : "s"} cleared, waiting on production to book`}
+              onClick={() => pick("unscheduled", "ready")} active={bucket === "unscheduled" && readiness === "ready"} />
+            <Card tone="amber" label="Parked" value={money(t.parked)}
+              sub={`${t.parkedJobs} waiting on credit, an insurance carrier or a deposit`}
+              onClick={() => pick("unscheduled", "parked")} active={bucket === "unscheduled" && readiness === "parked"} />
+            <Card tone="red" label="Sold Jobs Awaiting Production" value={t.awaitingProduction} sub="ready to schedule, no install visit yet" onClick={() => pick("unscheduled", "ready")} active={bucket === "unscheduled" && readiness === "ready"} />
             <Card tone={t.noContractValue > 0 ? "red" : "green"} label="No Contract Value in JobProgress" value={t.noContractValue}
               sub={t.noContractValue > 0 ? "every $ above is short by these" : "every job carries a price"} onClick={() => setNoValueOnly((v) => !v)} active={noValueOnly} />
             <Card tone="blue" label="Expected Production This Week" value={money(t.expectedThisWeek)} sub={`${t.expectedThisWeekJobs} install${t.expectedThisWeekJobs === 1 ? "" : "s"} starting ${fmtDay(data.thisWeek.from)} – ${fmtDay(data.thisWeek.to)}`} />
             <Card tone="blue" label="Expected Production Next Week" value={money(t.expectedNextWeek)} sub={`${t.expectedNextWeekJobs} install${t.expectedNextWeekJobs === 1 ? "" : "s"} starting ${fmtDay(data.nextWeek.from)} – ${fmtDay(data.nextWeek.to)}`} />
-            <Card tone="blue" label="In Production" value={money(t.inProduction)} sub={`${t.inProductionJobs} jobs the crew has started`} onClick={() => setBucket("inProduction")} active={bucket === "inProduction"} />
-            <Card tone="amber" label="Completed, Awaiting Payment" value={money(t.awaitingPayment)} sub={`${t.awaitingPaymentJobs} jobs built, money open`} onClick={() => setBucket("awaitingPayment")} active={bucket === "awaitingPayment"} />
+            <Card tone="blue" label="In Production" value={money(t.inProduction)} sub={`${t.inProductionJobs} jobs the crew has started`} onClick={() => pick("inProduction")} active={bucket === "inProduction"} />
+            <Card tone="amber" label="Completed, Awaiting Payment" value={money(t.awaitingPayment)} sub={`${t.awaitingPaymentJobs} jobs built, money open`} onClick={() => pick("awaitingPayment")} active={bucket === "awaitingPayment"} />
           </div>
 
           {/* Detail */}
           <div className="bg-white rounded-xl border border-border shadow-sm">
             <div className="flex flex-wrap items-center gap-2 p-3 border-b border-border">
               <div className="flex flex-wrap gap-1.5">
-                <Chip on={bucket === "all"} onClick={() => setBucket("all")}>All · {t.jobs}</Chip>
+                <Chip on={bucket === "all"} onClick={() => pick("all")}>All · {t.jobs}</Chip>
                 {BUCKETS.map((b) => (
-                  <Chip key={b.key} on={bucket === b.key} onClick={() => setBucket(b.key)}>{b.label} · {t[`${b.key}Jobs`]}</Chip>
+                  <Chip key={b.key} on={bucket === b.key} onClick={() => pick(b.key)}>{b.label} · {t[`${b.key}Jobs`]}</Chip>
                 ))}
                 <Chip on={noValueOnly} onClick={() => setNoValueOnly((v) => !v)} tone="red">No contract value · {t.noContractValue}</Chip>
               </div>

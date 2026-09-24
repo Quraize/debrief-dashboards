@@ -32,6 +32,20 @@ export const AWAITING_PAYMENT_STAGES = ["COMPLETED NEED FINAL PAYMENT!!", "Colle
 const keys = (list) => new Set(list.map(stageKey));
 const SCHEDULED = keys(SCHEDULED_STAGES), IN_PRODUCTION = keys(IN_PRODUCTION_STAGES), AWAITING_PAYMENT = keys(AWAITING_PAYMENT_STAGES);
 
+/**
+ * Ready to schedule: sold, cleared, and waiting only on production to book it
+ * — the production manager's own JobProgress filter (2026-09-24). Everything
+ * else that is unscheduled is PARKED on credit, an insurance carrier or a
+ * deposit: sold on paper, not something production can put on a calendar.
+ * One list; tick or untick a stage here and the page and the sheet follow.
+ */
+export const READY_TO_SCHEDULE_STAGES = [
+  "Install Accepted-> SUBMIT SS", "Repair Accepted-> SUBMIT SS", "Sales Review",
+  "Production Review", "Approved New Installs", "Approved Service/Repairs",
+];
+const READY = new Set(READY_TO_SCHEDULE_STAGES.map(stageKey));
+export const isReadyStage = (stage) => READY.has(stageKey(stage));
+
 /** The blocker the stage implies, for the Blocker column until production overrides it. */
 export const STAGE_BLOCKERS = [
   { blocker: "Waiting on deposit / financing", stages: ["Accepted/No Deposit/Finance", "Accepted/Needs Financing"] },
@@ -126,6 +140,8 @@ export function soldPipeline(jobs, today) {
       noteUpdatedBy: note?.updatedBy ?? null,
       noteUpdatedAt: note?.updatedAt ?? null,
       noContractValue: contract === null || contract <= 0,
+      // Unscheduled splits in two: ready (production's to book) or parked (waiting on money or a carrier).
+      readiness: bucket === "unscheduled" ? (isReadyStage(j.stage) ? "ready" : "parked") : null,
     };
   });
   // Oldest sale first: nothing ages off, so the stale ones sit where they are seen.
@@ -150,6 +166,8 @@ export function pipelineTotals(rows, today) {
       jobs: rows.length,
       totalPipeline: sum(rows),
       unscheduled: sum(by.unscheduled), unscheduledJobs: by.unscheduled.length,
+      readyToSchedule: sum(by.unscheduled.filter((r) => r.readiness === "ready")), readyToScheduleJobs: by.unscheduled.filter((r) => r.readiness === "ready").length,
+      parked: sum(by.unscheduled.filter((r) => r.readiness === "parked")), parkedJobs: by.unscheduled.filter((r) => r.readiness === "parked").length,
       /** The production manager's question: sold THIS MONTH and still not on the calendar. */
       unscheduledSoldThisMonth: sum(by.unscheduled.filter((r) => String(r.contractSignedDate ?? "").slice(0, 7) === today.slice(0, 7))),
       unscheduledSoldThisMonthJobs: by.unscheduled.filter((r) => String(r.contractSignedDate ?? "").slice(0, 7) === today.slice(0, 7)).length,
@@ -157,7 +175,7 @@ export function pipelineTotals(rows, today) {
       inProduction: sum(by.inProduction), inProductionJobs: by.inProduction.length,
       awaitingPayment: sum(by.awaitingPayment), awaitingPaymentJobs: by.awaitingPayment.length,
       /** Sold jobs with no production date yet — the CEO's "awaiting production". */
-      awaitingProduction: by.unscheduled.length,
+      awaitingProduction: by.unscheduled.filter((r) => r.readiness === "ready").length,
       expectedThisWeek: sum(rows.filter((r) => inWeek(r, thisWeek))), expectedThisWeekJobs: rows.filter((r) => inWeek(r, thisWeek)).length,
       expectedNextWeek: sum(rows.filter((r) => inWeek(r, nextWeek))), expectedNextWeekJobs: rows.filter((r) => inWeek(r, nextWeek)).length,
       /** Pipeline jobs whose contract value is missing in JobProgress: every $ figure above is short by these. */

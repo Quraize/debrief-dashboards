@@ -413,6 +413,9 @@ describe("Sales Pre-Approved / Unscheduled", () => {
     expect(isPreApproved(unsched("1", { stage: "Repairs Scheduled" }), "2026-09-23")).toBe(false);                          // the stage says booked
     expect(isPreApproved(unsched("1", { stage: "Paid New Roof" }), "2026-09-23")).toBe(false);
     expect(isPreApproved(unsched("1", { saleDate: null }), "2026-09-23")).toBe(false);
+    // Parked on a carrier, a deposit or credit: stays on the pipeline page, not in the block.
+    for (const s of ["Accepted/INS Claim Pending", "Accepted/No Deposit/Finance", "On Hold/Credit DQ (MGR APPR)"]) expect(isPreApproved(unsched("1", { stage: s }), "2026-09-23"), s).toBe(false);
+    for (const s of ["Sales Review", "Production Review", "Approved New Installs", "Approved Service/Repairs", "Repair Accepted-> SUBMIT SS"]) expect(isPreApproved(unsched("1", { stage: s }), "2026-09-23"), s).toBe(true);
   });
 
   it("creates the block under the header on an empty week list, oldest sale first, with totals on its green label row", () => {
