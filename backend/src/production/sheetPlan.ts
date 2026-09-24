@@ -22,6 +22,7 @@
 import { MASTER_COLUMNS, MASTER_MANUAL, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
 import { weekBounds } from "@allied/shared/production";
 import { labelLink } from "@allied/shared/weeklyJobSheet";
+import { inPipeline, bucketFor } from "@allied/shared/soldPipeline";
 import { isInstallCode } from "@allied/shared/production";
 import { stageKey } from "@allied/shared/jobStages";
 import type { SheetRow } from "./weeklyJobSheet.js";
@@ -65,6 +66,8 @@ export interface PlanSummary {
   jobsElsewhere: number;
   /** Hand-pasted rows the feed could not match to any job — flagged for the team. */
   jobsUnmatched: number;
+  /** The Sales Pre-Approved / Unscheduled block: what it holds and what moved. */
+  preApproved: { created: boolean; jobs: number; added: string[]; left: string[]; kept: string[]; carried: string[] } | null;
   cellsWritten: number;
   /** Per week: what happened, for the dry-run report. */
   weeks: { label: string; existing: boolean; added: string[]; updated: string[]; notThisWeek: string[]; removed: string[]; adopted: string[]; elsewhere: string[]; unmatched: string[] }[];
@@ -116,6 +119,10 @@ export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
 /** A hand-pasted row (no JobProgress ID) the feed could not match to any job it placed. */
 export const SYNC_STATUS_UNMATCHED = "Not matched to a JobProgress job";
 export const SUMMARY_MARKER = "MONTH AT A GLANCE";
+/** The standing block of sold jobs with no production date, under the month summary. */
+export const PREAPPROVED_LABEL = "Sales Pre-Approved / Unscheduled";
+/** HY on a row that left the block but still carries the team's cells (its week is not in this push yet). */
+export const SYNC_STATUS_LEFT_PREAPPROVED = "Scheduled or closed in JobProgress — hand-filled cells kept here";
 // "(through this week)" because the row on the newest block adds the weeks
 // that have not happened yet — it is the month's schedule to that point, not
 // its production, and the old name was read as the latter.
@@ -395,6 +402,8 @@ export interface PlanOptions {
   lockWeeks?: boolean;
   /** Remove a stale copy that carries nothing hand-filled (SHEET_REMOVE_EMPTY_STALE). Off: every stale row is stamped and kept. */
   removeEmptyStale?: boolean;
+  /** Write the Sales Pre-Approved / Unscheduled block. Default: on whenever the month summary is. */
+  preApproved?: boolean;
 }
 
 export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanOptions): Plan {
@@ -403,7 +412,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, preApproved: null, cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -495,6 +504,80 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     firstBlockRow = markerIdx + 1 + lines.length + 1;
   }
 
+  // ── Sales Pre-Approved / Unscheduled ──
+  // Every sold job with no production date (the Sold Pipeline's Unscheduled
+  // bucket, same rules), in a standing block under the month summary. A job
+  // that gets scheduled leaves it and appears in its week; whatever the team
+  // typed on its row here travels with it (`carry`). A leaving row is only
+  // deleted once nothing hand-filled would be lost (phase B, after the weeks).
+  const preOn = opts.preApproved ?? opts.monthSummary !== false;
+  const today = opts.today ?? (opts.now ?? new Date()).toISOString().slice(0, 10);
+  const carry = new Map<string, CellWrite[]>();
+  const carriedTo = new Set<string>();
+  const preLeaving = new Set<string>();
+  const isBlankCell = (v: CellValue | undefined) => v === null || v === undefined || v === false || cellStr(v) === "" || cellStr(v).toUpperCase() === "FALSE";
+  const preBlockRows = (labelIdx: number) => {
+    const out: number[] = [];
+    for (let i = labelIdx + 1; i < grid.length; i++) {
+      const a = cellStr(grid[i]?.[0]);
+      if (!a || parseWeekLabel(grid[i]?.[0] ?? null) || a === SUMMARY_MARKER) break;
+      out.push(i);
+    }
+    return out;
+  };
+  if (preOn) {
+    const pre = (opts.allRows ?? weeks.flatMap((w) => w.rows)).filter((r) => isPreApproved(r, today))
+      .sort((a, b) => String(a.saleDate ?? "").localeCompare(String(b.saleDate ?? "")) || String(a.jobNumber ?? "").localeCompare(String(b.jobNumber ?? "")));
+    const preIds = new Set(pre.map((r) => r.jobId));
+    summary.preApproved = { created: false, jobs: pre.length, added: [], left: [], kept: [], carried: [] };
+    let labelIdx = grid.findIndex((r, i) => i > 0 && cellStr(r?.[0]) === PREAPPROVED_LABEL);
+    if (labelIdx < 0) {
+      labelIdx = firstBlockRow;
+      insert(labelIdx, 2); // label, spacer
+      write([{ row: labelIdx, col: 0, value: PREAPPROVED_LABEL }]);
+      summary.preApproved.created = true;
+    }
+    const have = new Map<string, number>();
+    for (const idx of preBlockRows(labelIdx)) {
+      const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
+      if (!id) continue;                      // a row the team pasted: theirs, left alone
+      if (preIds.has(id)) { have.set(id, idx); continue; }
+      // Leaving: remember what the team typed, so the week row can carry it.
+      preLeaving.add(id);
+      const hand = HAND_COLUMNS.map((c) => ({ row: -1, col: ACTIVE[c.col]!, value: grid[idx]?.[ACTIVE[c.col]!] as CellValue }))
+        .filter((x) => !isBlankCell(x.value));
+      if (hand.length) carry.set(id, hand);
+    }
+    const adds: SheetRow[] = [];
+    for (const r of pre) {
+      const idx = have.get(r.jobId);
+      if (idx !== undefined) { write(updateRowCells(idx, r, opts.syncedAt)); style(toneStyle(idx, r)); }
+      else adds.push(r);
+    }
+    if (adds.length) {
+      const at = labelIdx + 1 + preBlockRows(labelIdx).length;
+      insert(at, adds.length);
+      const cells: CellWrite[] = [];
+      adds.forEach((r, i) => cells.push(...newRowCells(at + i, r, opts.syncedAt)));
+      write(cells);
+      style(adds.flatMap((r, i) => toneStyle(at + i, r)));
+      summary.preApproved.added = adds.map((r) => r.label);
+    }
+    // A blank spacer after the block, then the weeks.
+    let end = labelIdx + 1 + preBlockRows(labelIdx).length;
+    if (end < grid.length && parseWeekLabel(grid[end]?.[0] ?? null)) insert(end, 1);
+    firstBlockRow = end + 1;
+  }
+  /** A row for `jobId` at `rowIdx` also gets the cells the team typed on its pre-approved row. */
+  const withCarry = (cells: CellWrite[], rowIdx: number, jobId: string, onlyEmpty: boolean): CellWrite[] => {
+    const c = carry.get(jobId);
+    if (!c) return cells;
+    const add = c.filter((x) => !onlyEmpty || isBlankCell(grid[rowIdx]?.[x.col])).map((x) => ({ ...x, row: rowIdx }));
+    carriedTo.add(jobId);
+    const cols = new Set(add.map((x) => x.col));
+    return [...cells.filter((x) => !(x.row === rowIdx && cols.has(x.col))), ...add];
+  };
+
   const ordered = [...weeks].sort((a, b) => b.from.localeCompare(a.from)); // newest first, like the tab
 
   // Rows the team pasted from the old sheet carry no JobProgress ID, so they
@@ -528,7 +611,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const count = 1 + rows.length + 1 + 1 + 1; // label, jobs, total, cumulative, spacer
       insert(at, count);
       const cells: CellWrite[] = [{ row: at, col: 0, value: label }];
-      rows.forEach((r, i) => cells.push(...newRowCells(at + 1 + i, r, opts.syncedAt)));
+      rows.forEach((r, i) => cells.push(...withCarry(newRowCells(at + 1 + i, r, opts.syncedAt), at + 1 + i, r.jobId, false)));
       const totalIdx = at + 1 + rows.length;
       cells.push(...totalRowCells(totalIdx, at + 1, at + rows.length));
       cells.push({ row: totalIdx + 1, col: 0, value: CUMULATIVE_LABEL }); // formulas come in the final pass
@@ -566,7 +649,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     for (const r of rows) {
       const idx = byJobId.get(r.jobId);
       if (idx !== undefined) {
-        write(updateRowCells(idx, r, opts.syncedAt));
+        write(withCarry(updateRowCells(idx, r, opts.syncedAt), idx, r.jobId, true));
         style(toneStyle(idx, r));
         summary.jobsUpdated++; report.updated.push(r.label); seen.add(r.jobId);
         continue;
@@ -575,7 +658,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const adopt = (r.jobNumber ? adoptable(`#${norm(r.jobNumber)}`) : undefined) ?? (r.label ? adoptable(`@${norm(r.label)}`) : undefined);
       if (adopt !== undefined) {
         claimed.add(adopt);
-        write(updateRowCells(adopt, r, opts.syncedAt));   // synced cells only — the team's cells on the row stay
+        write(withCarry(updateRowCells(adopt, r, opts.syncedAt), adopt, r.jobId, true));   // synced cells only — the team's cells on the row stay
         style(toneStyle(adopt, r));
         summary.jobsAdopted++; report.adopted.push(r.label); seen.add(r.jobId);
         continue;
@@ -587,7 +670,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const at = block.totalIdx ?? (block.jobIdx.length ? block.jobIdx[block.jobIdx.length - 1]! + 1 : block.labelIdx + 1);
       insert(at, additions.length);
       const cells: CellWrite[] = [];
-      additions.forEach((r, i) => cells.push(...newRowCells(at + i, r, opts.syncedAt)));
+      additions.forEach((r, i) => cells.push(...withCarry(newRowCells(at + i, r, opts.syncedAt), at + i, r.jobId, false)));
       write(cells);
       style(additions.flatMap((r, i) => toneStyle(at + i, r)));
       summary.jobsAdded += additions.length;
@@ -658,6 +741,40 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     summary.weeks.push(report);
   }
 
+  // Pre-approved, phase B: rows that left. Deleted when nothing hand-filled
+  // would be lost (none typed, or carried into the job's week row above);
+  // otherwise kept and stamped so the team can move what they wrote. Then the
+  // label row's totals, over whatever the block now holds.
+  if (preOn && summary.preApproved) {
+    const labelIdx = grid.findIndex((r, i) => i > 0 && cellStr(r?.[0]) === PREAPPROVED_LABEL);
+    if (labelIdx >= 0) {
+      const gone: number[] = [];
+      const stamps: CellWrite[] = [];
+      for (const idx of preBlockRows(labelIdx)) {
+        const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
+        if (!id || !preLeaving.has(id)) continue;
+        const label = cellStr(grid[idx]?.[0]) || id;
+        if (!hasHandFilled(grid[idx]) || carriedTo.has(id)) {
+          gone.push(idx); summary.preApproved.left.push(label);
+          if (carriedTo.has(id)) summary.preApproved.carried.push(label);
+        } else {
+          if (cellStr(grid[idx]?.[ACTIVE["HY"]!]) !== SYNC_STATUS_LEFT_PREAPPROVED) stamps.push({ row: idx, col: ACTIVE["HY"]!, value: SYNC_STATUS_LEFT_PREAPPROVED });
+          summary.preApproved.kept.push(label);
+        }
+      }
+      write(stamps);
+      for (const idx of gone.sort((a, b) => b - a)) remove(idx, 1);
+      const rowsNow = preBlockRows(labelIdx);
+      const totals: CellWrite[] = [{ row: labelIdx, col: 0, value: PREAPPROVED_LABEL }];
+      for (const L of TOTALLED) {
+        const col = IDX[L]!;
+        totals.push({ row: labelIdx, col, value: rowsNow.length ? { formula: `SUM(${L}${rowsNow[0]! + 1}:${L}${rowsNow[rowsNow.length - 1]! + 1})` } : 0 });
+      }
+      write(totals);
+      style([{ row: labelIdx, style: "cumulative" }]);   // the block's own label row, green like the old sheet
+    }
+  }
+
   // Cumulative Monthly Total rows last, once every block of the touched months
   // is in place: a new earlier week changes the later weeks' running totals too.
   const months = new Set(ordered.map((w) => monthOf(w.from)));
@@ -706,6 +823,16 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     write(cumulativeRowCells(cumulativeIdx, ownJobs, below));
   }
   }
+}
+
+/**
+ * A sold job with no production date — the Sold Pipeline's Unscheduled bucket,
+ * by the same shared rules, read off a sheet row: signed, not paid, not dead,
+ * no install visit, and a stage that is not already scheduled or started.
+ */
+export function isPreApproved(r: SheetRow, today: string): boolean {
+  const job = { contractSignedDate: r.saleDate, stage: r.stage, installDays: [...new Set((r.visits ?? []).filter((v) => isInstallCode(v.code)).map((v) => v.day))].sort() };
+  return inPipeline(job) && bucketFor(job, today) === "unscheduled";
 }
 
 export { weekBounds };

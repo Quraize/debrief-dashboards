@@ -296,6 +296,14 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{(pushResult.summary.jobsRemoved ?? 0) > 0 ? `, ${pushResult.summary.jobsRemoved} stale row(s) removed (nothing hand-filled on them)` : ""}{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {pushResult.summary.preApproved && (
+              <div className="text-muted-foreground">
+                ◆ Sales Pre-Approved / Unscheduled: {pushResult.summary.preApproved.jobs} job(s){pushResult.summary.preApproved.created ? " — block created" : ""}
+                {pushResult.summary.preApproved.added.length ? ` · ${pushResult.summary.preApproved.added.length} new` : ""}
+                {pushResult.summary.preApproved.left.length ? ` · ${pushResult.summary.preApproved.left.length} scheduled or closed, moved out${pushResult.summary.preApproved.carried.length ? ` (${pushResult.summary.preApproved.carried.length} carried their notes to their week)` : ""}` : ""}
+                {pushResult.summary.preApproved.kept.length ? ` · ${pushResult.summary.preApproved.kept.length} left but kept for their hand-filled cells: ${pushResult.summary.preApproved.kept.join(", ")}` : ""}.
+              </div>
+            )}
             {((pushResult.summary.jobsAdopted ?? 0) + (pushResult.summary.jobsElsewhere ?? 0) + (pushResult.summary.jobsUnmatched ?? 0)) > 0 && (
               <div className="text-muted-foreground">
                 ⇄ Pasted rows: {pushResult.summary.jobsAdopted ?? 0} taken over by the feed (ID written in, your cells kept)

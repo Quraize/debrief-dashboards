@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   planSheet, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
-  SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, type CellWrite,
+  SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, PREAPPROVED_LABEL, SYNC_STATUS_LEFT_PREAPPROVED, isPreApproved, type CellWrite,
 } from "../src/production/sheetPlan.js";
 import { toRequests, lockRequests } from "../src/production/sheetPush.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
@@ -31,6 +31,16 @@ const headerRow = () => { const h: (string | null)[] = []; for (const c of MASTE
 const cellsOf = (plan: ReturnType<typeof planSheet>) => plan.ops.flatMap((o) => (o.type === "write" ? o.cells : []));
 const at = (cells: CellWrite[], r: number, c: number) => cells.find((x) => x.row === r && x.col === c)?.value;
 const inserts = (plan: ReturnType<typeof planSheet>) => plan.ops.filter((o) => o.type === "insertRows");
+/** The tab after the plan has run: inserts, deletes and writes replayed on a copy. */
+const gridAfter = (g: (string | number | boolean | null)[][], plan: ReturnType<typeof planSheet>) => {
+  const out = g.map((r) => [...r]);
+  for (const o of plan.ops) {
+    if (o.type === "insertRows") out.splice(o.at, 0, ...Array.from({ length: o.count }, () => []));
+    else if (o.type === "deleteRows") out.splice(o.at, o.count);
+    else if (o.type === "write") for (const c of o.cells) { (out[c.row] ??= [])[c.col] = typeof c.value === "object" && c.value !== null ? `=${c.value.formula}` : c.value; }
+  }
+  return out as never;
+};
 
 describe("grid parsing", () => {
   it("reads the tab's week labels and blocks, with the cumulative row when present", () => {
@@ -208,8 +218,10 @@ describe("month at a glance", () => {
     expect(at(cells, 2, 0)).toContain("September 2026 — Projected");
     expect(at(cells, 2, T)).toBe(35000);
     expect(at(cells, 5, 0)).toContain("August 2026 — Started");
-    expect(at(cells, 7, 0)).toBe("9/7/2026-9/13/2026"); // marker + 4 lines + spacer → first week at row 7
-    expect(inserts(first)).toEqual([{ type: "insertRows", at: 1, count: 6 }, { type: "insertRows", at: 7, count: 5 }]);
+    // marker + 4 lines + spacer, then the Sales Pre-Approved block (label + spacer; no unscheduled jobs here), then the first week.
+    expect(at(cells, 7, 0)).toBe(PREAPPROVED_LABEL);
+    expect(at(cells, 9, 0)).toBe("9/7/2026-9/13/2026");
+    expect(inserts(first)).toEqual([{ type: "insertRows", at: 1, count: 6 }, { type: "insertRows", at: 7, count: 2 }, { type: "insertRows", at: 9, count: 5 }]);
     // Second pass: the block already exists; values are rewritten, nothing inserted for it.
     const g: (string | number | boolean | null)[][] = [];
     for (const op of first.ops) {
@@ -385,6 +397,86 @@ describe("rows pasted from the old sheet (no JobProgress ID)", () => {
     const lost = planSheet([headerRow(), ["9/7/2026-9/13/2026"], pasted("Nowhere/0 No St/Nobody"), ["Weekly Total"], [CUMULATIVE_LABEL]], week([]), NO_MONTH);
     expect(lost.summary).toMatchObject({ jobsUnmatched: 1, jobsElsewhere: 0 });
     expect(at(cellsOf(lost), 2, HY)).toBe(SYNC_STATUS_UNMATCHED);
+  });
+});
+
+describe("Sales Pre-Approved / Unscheduled", () => {
+  const AE = colIndex("AE"), BG = colIndex("BG");
+  const PRE = { syncedAt: SYNCED_AT, monthSummary: false, preApproved: true, today: "2026-09-23", lockWeeks: false } as const;
+  // Sold, no install visit, stage not scheduled: pre-approved.
+  const unsched = (id: string, over: Partial<SheetRow> = {}) => row(id, { stage: "Install Accepted-> SUBMIT SS", stageGroup: "project_won", visits: [], installDates: [], scheduledInstallDate: null, saleDate: "2026-09-16", ...over });
+
+  it("reads the Sold Pipeline's Unscheduled rule off a sheet row", () => {
+    expect(isPreApproved(unsched("1"), "2026-09-23")).toBe(true);
+    expect(isPreApproved(unsched("1", { visits: [{ day: "2026-10-06", code: "RR" }] }), "2026-09-23")).toBe(false);        // on the calendar
+    expect(isPreApproved(unsched("1", { visits: [{ day: "2026-09-10", code: "MSSA" }] }), "2026-09-23")).toBe(true);       // a site assessment is not a date
+    expect(isPreApproved(unsched("1", { stage: "Repairs Scheduled" }), "2026-09-23")).toBe(false);                          // the stage says booked
+    expect(isPreApproved(unsched("1", { stage: "Paid New Roof" }), "2026-09-23")).toBe(false);
+    expect(isPreApproved(unsched("1", { saleDate: null }), "2026-09-23")).toBe(false);
+  });
+
+  it("creates the block under the header on an empty week list, oldest sale first, with totals on its green label row", () => {
+    const grid = [headerRow(), ["9/7/2026-9/13/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [] }],
+      { ...PRE, allRows: [unsched("1", { saleDate: "2026-09-16", gross: 26749, totalRev: 26749 }), unsched("2", { saleDate: "2026-08-14", gross: 34779, totalRev: 34779 })] });
+    const cells = cellsOf(plan);
+    expect(at(cells, 1, 0)).toBe(PREAPPROVED_LABEL);
+    expect(at(cells, 2, HU)).toBe("2"); expect(at(cells, 3, HU)).toBe("1");          // August sale first
+    expect(at(cells, 1, R)).toEqual({ formula: "SUM(R3:R4)" });
+    expect(plan.summary.preApproved).toMatchObject({ created: true, jobs: 2, added: [expect.any(String), expect.any(String)], left: [] });
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 1 && r.style === "cumulative"))).toBe(true);
+    // The week block moved down past the block and its spacer, untouched.
+    expect(parseBlocks(gridAfter(grid, plan))[0]).toMatchObject({ from: "2026-09-07", labelIdx: 5 });
+  });
+
+  it("moves a job out when it is scheduled, carrying what the team typed into its week row", () => {
+    // The block holds job 1 with a manufacturer and a note typed in; job 1 now has an install in the week of 9/28.
+    const grid: (string | number | boolean | null)[][] = [headerRow(), [PREAPPROVED_LABEL]];
+    const r1: (string | number | boolean | null)[] = []; r1[0] = "Wayne/1 Main St/Customer 1"; r1[HU] = "1"; r1[AE] = "GAF"; r1[BG] = "customer wants Charcoal";
+    grid.push(r1, [], ["9/21/2026-9/27/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]);
+    const scheduled = row("1", { visits: [{ day: "2026-09-29", code: "RR" }], installDates: ["2026-09-29"] });
+    const plan = planSheet(grid, [{ from: "2026-09-28", to: "2026-10-04", rows: [scheduled] }, { from: "2026-09-21", to: "2026-09-27", rows: [] }],
+      { ...PRE, allRows: [scheduled] });
+    expect(plan.summary.preApproved).toMatchObject({ jobs: 0, left: ["Wayne/1 Main St/Customer 1"], carried: ["Wayne/1 Main St/Customer 1"], kept: [] });
+    const cells = cellsOf(plan);
+    // The sheet after the push: the new 9/28 week block's job row carries GAF and the note.
+    const after = gridAfter(grid, plan) as (string | number | boolean | null)[][];
+    const wk = parseBlocks(after).find((b) => b.from === "2026-09-28")!;
+    const jobRow = wk.jobIdx[0]!;
+    expect(after[jobRow]![HU]).toBe("1");
+    expect(after[jobRow]![AE]).toBe("GAF");
+    expect(after[jobRow]![BG]).toBe("customer wants Charcoal");
+    // And no pre-approved row for job 1 is left.
+    expect(after.filter((r) => r[HU] === "1")).toHaveLength(1);
+    // The pre-approved row was deleted and the empty block now totals 0.
+    expect(plan.ops.some((o) => o.type === "deleteRows")).toBe(true);
+    expect(cells.filter((c) => c.row === 1 && c.col === R).pop()?.value).toBe(0);
+  });
+
+  it("keeps a leaving row that carries the team's cells when its week is not in this push, and stamps it", () => {
+    const grid: (string | number | boolean | null)[][] = [headerRow(), [PREAPPROVED_LABEL]];
+    const r1: (string | number | boolean | null)[] = []; r1[0] = "Wayne/1 Main St/Customer 1"; r1[HU] = "1"; r1[BG] = "call first";
+    const r2: (string | number | boolean | null)[] = []; r2[0] = "Wayne/2 Main St/Customer 2"; r2[HU] = "2";     // nothing typed
+    grid.push(r1, r2, [], ["9/21/2026-9/27/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]);
+    // Both jobs are now scheduled for November — outside this push's weeks.
+    const s1 = row("1", { visits: [{ day: "2026-11-10", code: "RR" }] }), s2 = row("2", { visits: [{ day: "2026-11-11", code: "RR" }] });
+    const plan = planSheet(grid, [{ from: "2026-09-21", to: "2026-09-27", rows: [] }], { ...PRE, allRows: [s1, s2] });
+    expect(plan.summary.preApproved).toMatchObject({ left: ["Wayne/2 Main St/Customer 2"], kept: ["Wayne/1 Main St/Customer 1"] });
+    expect(at(cellsOf(plan), 2, HY)).toBe(SYNC_STATUS_LEFT_PREAPPROVED);
+    expect(plan.ops.filter((o) => o.type === "deleteRows")).toEqual([{ type: "deleteRows", at: 3, count: 1 }]);
+  });
+
+  it("updates a job already in the block in place, and leaves a row the team pasted there alone", () => {
+    const grid: (string | number | boolean | null)[][] = [headerRow(), [PREAPPROVED_LABEL]];
+    const r1: (string | number | boolean | null)[] = []; r1[0] = "Wayne/1 Main St/Customer 1"; r1[HU] = "1"; r1[R] = 1;
+    const mine: (string | number | boolean | null)[] = []; mine[0] = "Somebody's own note row";
+    grid.push(r1, mine, [], ["9/21/2026-9/27/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]);
+    const plan = planSheet(grid, [{ from: "2026-09-21", to: "2026-09-27", rows: [] }], { ...PRE, allRows: [unsched("1")] });
+    const cells = cellsOf(plan);
+    expect(at(cells, 2, R)).toBe(10000);
+    expect(cells.some((c) => c.row === 3 && c.col !== 0 && c.value !== null && c.col < HU)).toBe(false);
+    expect(plan.ops.some((o) => o.type === "deleteRows" || o.type === "insertRows")).toBe(false);
+    expect(at(cells, 1, R)).toEqual({ formula: "SUM(R3:R4)" });
   });
 });
 
