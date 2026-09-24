@@ -117,7 +117,8 @@ export function lockedBlocks(grid: CellValue[][], today: string): WeekLock[] {
     }));
 }
 
-export interface Plan { ops: PlanOp[]; summary: PlanSummary }
+/** `grid` is the tab as it will be once every op has run — what the dashboard's data tab is built from. */
+export interface Plan { ops: PlanOp[]; summary: PlanSummary; grid: CellValue[][] }
 
 export const SYNC_STATUS_OK = "Synced from JobProgress";
 export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
@@ -842,7 +843,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     }
     write(notes);
   }
-  return { ops, summary };
+  return { ops, summary, grid };
 
   /** Rewrites the Cumulative Monthly Total formulas of the block for `from` from the blocks now on the tab. */
   function writeCumulative(from: string): void {

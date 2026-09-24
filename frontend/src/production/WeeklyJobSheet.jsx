@@ -296,6 +296,12 @@ export default function WeeklyJobSheet() {
         {pushResult?.summary && (
           <div className="text-xs border-t border-border pt-3 space-y-1">
             <div className="font-semibold">{pushResult.dryRun ? "Preview" : "Pushed"}: {pushResult.summary.jobsAdded} row(s) added, {pushResult.summary.jobsUpdated} updated, {pushResult.summary.jobsNotThisWeek} stamped as no longer this week{(pushResult.summary.jobsRemoved ?? 0) > 0 ? `, ${pushResult.summary.jobsRemoved} stale row(s) removed (nothing hand-filled on them)` : ""}{pushResult.summary.headerCreated ? ", tab laid out for the first time" : ""}.</div>
+            {pushResult.dashboard && (
+              <div className={pushResult.dashboard.error ? "text-red-600" : "text-muted-foreground"}>
+                {pushResult.dashboard.error ? `📊 Dashboard refresh failed: ${pushResult.dashboard.error}` :
+                  `📊 Production KPIs dashboard ${pushResult.dashboard.created ? "created" : "refreshed"}: ${pushResult.dashboard.jobRows} job-week rows, ${pushResult.dashboard.payments} payments, ${pushResult.dashboard.weeks} weeks.`}
+              </div>
+            )}
             {(pushResult.summary.weeksSplit ?? []).length > 0 && (
               <div className="text-muted-foreground">✂ Week split at the month end: {pushResult.summary.weeksSplit.join(", ")} (the rest of the week is its own block in the next month).</div>
             )}

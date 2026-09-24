@@ -375,6 +375,10 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect(live.locksAdded).toBe(1);
     expect(live.summary!.locks.map((l) => l.label)).toEqual(["8/31/2026-9/6/2026"]);
     expect(all.some((r) => JSON.stringify(r).includes("Locked since Fri 9/4/2026"))).toBe(true);
+    // The Production KPIs dashboard and its data tab are added and filled in their own batch.
+    expect(all.some((r) => JSON.stringify(r).includes('"title":"[AUTOMATION] Production KPIs DASHBOARD"'))).toBe(true);
+    expect(all.some((r) => JSON.stringify(r).includes('"title":"[AUTOMATION] Dashboard Data"'))).toBe(true);
+    expect(live.dashboard).toMatchObject({ created: true, jobRows: 1 });
 
     const runs = (await db.owner.query(`SELECT mode, status, counts->>'jobsAdded' AS added FROM sync_run WHERE kind = 'sheet_push' ORDER BY started_at`)).rows;
     expect(runs).toEqual([{ mode: "dry_run", status: "completed", added: "1" }, { mode: "commit", status: "completed", added: "1" }]);

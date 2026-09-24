@@ -20,6 +20,8 @@ import { weeklyJobSheetAsService, filterSheetRows, type SheetRow } from "./weekl
 import { planSheet, weekBounds, colIndex, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
 import { BOARD_TIMEZONE } from "./board.js";
 import { splitAtMonthEnd, isInstallCode } from "@allied/shared/production";
+import { pushDashboard, DASHBOARD_TAB_DEFAULT, DATA_TAB_DEFAULT, type DashboardPushResult } from "./dashboardSheet.js";
+import { AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
 
 export const DEFAULT_TAB = "[AUTOMATION]WEEKLY JOB SHEET";
 const FORMAT_ROWS = 5000; // formats/validation cover this many rows; inserted rows fall inside
@@ -33,6 +35,8 @@ export interface SheetPushSettings {
   removeEmptyStale: boolean;
   /** Weeks starting on or after this Monday are cut at a month end (SHEET_SPLIT_WEEKS_FROM); earlier weeks stay whole. */
   splitFrom: string;
+  /** The Production KPIs dashboard tab and its data tab (SHEET_DASHBOARD_ENABLED=false turns them off). */
+  dashboard: boolean; dashboardTab: string; dashboardDataTab: string;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -47,6 +51,9 @@ export function sheetPushSettings(): SheetPushSettings {
     lockWeeks: process.env.SHEET_LOCK_ENABLED !== "false",
     removeEmptyStale: process.env.SHEET_REMOVE_EMPTY_STALE === "true",
     splitFrom: process.env.SHEET_SPLIT_WEEKS_FROM || "2026-09-28",
+    dashboard: process.env.SHEET_DASHBOARD_ENABLED !== "false",
+    dashboardTab: process.env.SHEET_DASHBOARD_TAB || DASHBOARD_TAB_DEFAULT,
+    dashboardDataTab: process.env.SHEET_DASHBOARD_DATA_TAB || DATA_TAB_DEFAULT,
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -77,6 +84,8 @@ export interface SheetPushResult {
   locksAdded?: number;
   /** Automation locks deleted because locking is turned off — the team can move rows again. */
   locksRemoved?: number;
+  /** The dashboard's data tab refresh (and whether the dashboard was laid out this time); an error here never fails the push. */
+  dashboard?: (DashboardPushResult & { error?: never }) | { error: string };
   errorMessage?: string;
 }
 
@@ -118,12 +127,28 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
     if (!options.dryRun && requests.length) await client.batchUpdate(requests);
 
+    // The Production KPIs dashboard: its data tab from the tab as it now stands.
+    // Its own batch, after the weekly tab's; a failure is reported, not fatal.
+    let dashboard: SheetPushResult["dashboard"];
+    if (!options.dryRun && settings.dashboard) {
+      try {
+        const n = Number(process.env.AR_OVERDUE_DAYS);
+        dashboard = await pushDashboard(client, {
+          grid: plan.grid, feedRows: feed.rows, today, dashTab: settings.dashboardTab, dataTab: settings.dashboardDataTab,
+          overdueDays: Number.isFinite(n) && n > 0 ? n : AR_OVERDUE_DAYS_DEFAULT,
+        });
+      } catch (err) {
+        dashboard = { error: err instanceof Error ? err.message : String(err) };
+        console.warn(`[sheet-push] dashboard refresh failed: ${dashboard.error}`);
+      }
+    }
+
     const weekLabels = plan.summary.weeks.map((w) => w.label);
     const counts = { dryRun: options.dryRun, requests: requests.length, ...plan.summary, locks: plan.summary.locks.length, locksAdded: locks.added, locksUpdated: locks.updated, locksRemoved: locks.removed };
     await closeRun(syncRunId, "completed", counts);
     console.info(`[sheet-push] ${options.dryRun ? "dry run" : "pushed"}: ${plan.summary.jobsAdded} added, ${plan.summary.jobsUpdated} updated, `
       + `${plan.summary.blocksCreated.length} week block(s) created, ${plan.summary.locks.length} locked (${locks.added} new, ${locks.removed} unlocked), ${requests.length} request(s)`);
-    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length, locksAdded: locks.added, locksRemoved: locks.removed };
+    return { syncRunId, status: "completed", dryRun: options.dryRun, tab: settings.tab, weeks: weekLabels, summary: plan.summary, requests: requests.length, locksAdded: locks.added, locksRemoved: locks.removed, dashboard };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await closeRun(syncRunId, "failed", { dryRun: options.dryRun }, message);
