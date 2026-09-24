@@ -86,7 +86,9 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 6, 0)).toBe("9/7/2026-9/13/2026");
     expect(at(cells, 7, HU)).toBe("1");
     expect(at(cells, 8, HU)).toBe("2");
-    expect(at(cells, 9, AB)).toEqual({ formula: 'SUMIF(HY8:HY9,"<>Not on the JobProgress calendar this week",AB8:AB9)' });
+    // A total's balance is its own Total Rev minus its own Total Paid, not a sum of balance cells.
+    expect(at(cells, 9, AB)).toEqual({ formula: "T10-AA10" });
+    expect(at(cells, 10, AB)).toEqual({ formula: "T11-AA11" });
     // Both weeks are September: the 9/14 block's cumulative covers its own job row (3) and everything below its
     // cumulative row (6..11), never its own total/cumulative cells (that would be circular), each job once across
     // both ranges; the 9/7 block's covers its own job rows (8..9) only.
@@ -112,7 +114,7 @@ describe("planSheet on a tab the team has been working in", () => {
   const grid = () => {
     const g: (string | number | boolean | null)[][] = [headerRow()];
     g.push(["9/7/2026-9/13/2026"]);
-    const j1: (string | number | boolean | null)[] = []; j1[0] = "Wayne/1 Main St/Customer 1"; j1[B] = true; j1[HU] = 1; j1[R] = 9999; j1[colIndex("BG")] = "call before 8";
+    const j1: (string | number | boolean | null)[] = []; j1[0] = "Wayne/1 Main St/Customer 1"; j1[B] = true; j1[HU] = 1; j1[R] = 9999; j1[T] = 9999; j1[AB] = " "; j1[colIndex("BG")] = "call before 8";
     g.push(j1);
     const gone: (string | number | boolean | null)[] = []; gone[0] = "Old Tappan/84 Willow/Denike"; gone[HU] = "77"; gone[colIndex("BG")] = "call before demo";
     g.push(gone);
@@ -128,7 +130,8 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(at(cells, 2, R)).toBe(10000);
     expect(at(cells, 2, B)).toBe("NO");
     expect(cells.some((c) => c.row === 2 && c.col === colIndex("BG"))).toBe(false);
-    expect(cells.some((c) => c.row === 2 && c.col === T)).toBe(false); // formulas are not rewritten on existing rows
+    expect(cells.some((c) => c.row === 2 && c.col === T)).toBe(false); // a formula cell holding a value is left alone
+    expect(at(cells, 2, AB)).toEqual({ formula: "T3-AA3" });            // a blanked one (" ") is put back
     // New job 2 inserted before the total (row 4) → total moves to row 5 and re-sums 2..4; a cumulative row is added at 6.
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 4, count: 1 }, { type: "insertRows", at: 6, count: 1 }]);
     expect(at(cells, 4, HU)).toBe("2");

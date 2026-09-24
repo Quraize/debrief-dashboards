@@ -246,10 +246,20 @@ function toneStyle(rowIdx: number, row: SheetRow): RowStyle[] {
   return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: [col, col + 1] }] : [];
 }
 
-/** Only the synced columns of an existing row — the team's cells stay as they are. */
-function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): CellWrite[] {
+/**
+ * Only the synced columns of an existing row — the team's cells stay as they
+ * are. A row formula (Total Rev = Gross + C.O.s, Balance = Total − Paid) that
+ * was cleared or overwritten with a blank is put back, so the row and the
+ * totals above it add up again; a value someone typed there is left alone.
+ */
+function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null, cells?: CellValue[]): CellWrite[] {
   const out: CellWrite[] = [];
   for (const c of COLS) {
+    const formula = columnFormula(c, rowIdx + 1);
+    if (formula) {
+      if (cells && cellStr(cells[ACTIVE[c.col]!]) === "") out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: { formula } });
+      continue;
+    }
     if (!c.key) continue;
     const v = syncedValue(c, row, syncedAt);
     if (v === "") out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: null });
@@ -268,11 +278,19 @@ function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellW
   const out: CellWrite[] = [{ row: rowIdx, col: IDX["A"]!, value: "Weekly Total" }];
   const f = firstJob + 1, l = lastJob + 1;
   for (const L of TOTALLED) {
-    const value = lastJob >= firstJob ? { formula: `SUMIF(HY${f}:HY${l},"<>${SYNC_STATUS_STALE}",${L}${f}:${L}${l})` } : 0;
+    const value = L === "AB" ? { formula: balanceOf(rowIdx) }
+      : lastJob >= firstJob ? { formula: `SUMIF(HY${f}:HY${l},"<>${SYNC_STATUS_STALE}",${L}${f}:${L}${l})` } : 0;
     out.push({ row: rowIdx, col: IDX[L]!, value });
   }
   return out;
 }
+
+/**
+ * A total row's Balance Owed is its own Total Rev minus its own Total Paid,
+ * never a sum of the rows' balance cells: one blank balance cell on a job row
+ * made the September running balance $22,000 short.
+ */
+const balanceOf = (rowIdx: number) => `T${rowIdx + 1}-AA${rowIdx + 1}`;
 
 /**
  * Cumulative Monthly Total (through this week): this block's job rows plus
@@ -301,6 +319,7 @@ function cumulativeRowCells(rowIdx: number, ownJobs: [number, number] | null, be
   const ac = (sp: [number, number]) => `AC${sp[0] + 1}:AC${sp[1] + 1}`;
   const hy = (sp: [number, number]) => `HY${sp[0] + 1}:HY${sp[1] + 1}`;
   for (const L of TOTALLED) {
+    if (L === "AB") { out.push({ row: rowIdx, col: IDX[L]!, value: { formula: balanceOf(rowIdx) } }); continue; }
     const terms = spans.map((sp) => {
       const s = sp[0] + 1, e = sp[1] + 1;
       const A = `A${s}:A${e}`, HY = `HY${s}:HY${e}`, AC = ac(sp);
@@ -557,7 +576,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const adds: SheetRow[] = [];
     for (const r of pre) {
       const idx = have.get(r.jobId);
-      if (idx !== undefined) { write(updateRowCells(idx, r, opts.syncedAt)); style(toneStyle(idx, r)); }
+      if (idx !== undefined) { write(updateRowCells(idx, r, opts.syncedAt, grid[idx])); style(toneStyle(idx, r)); }
       else adds.push(r);
     }
     if (adds.length) {
@@ -672,7 +691,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     for (const r of rows) {
       const idx = byJobId.get(r.jobId);
       if (idx !== undefined) {
-        write(withCarry(updateRowCells(idx, r, opts.syncedAt), idx, r.jobId, true));
+        write(withCarry(updateRowCells(idx, r, opts.syncedAt, grid[idx]), idx, r.jobId, true));
         style(toneStyle(idx, r));
         summary.jobsUpdated++; report.updated.push(r.label); seen.add(r.jobId);
         continue;
@@ -681,7 +700,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const adopt = (r.jobNumber ? adoptable(`#${norm(r.jobNumber)}`) : undefined) ?? (r.label ? adoptable(`@${norm(r.label)}`) : undefined);
       if (adopt !== undefined) {
         claimed.add(adopt);
-        write(withCarry(updateRowCells(adopt, r, opts.syncedAt), adopt, r.jobId, true));   // synced cells only — the team's cells on the row stay
+        write(withCarry(updateRowCells(adopt, r, opts.syncedAt, grid[adopt]), adopt, r.jobId, true));   // synced cells only — the team's cells on the row stay
         style(toneStyle(adopt, r));
         summary.jobsAdopted++; report.adopted.push(r.label); seen.add(r.jobId);
         continue;
