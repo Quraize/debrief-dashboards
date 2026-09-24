@@ -427,7 +427,7 @@ describe("Sales Pre-Approved / Unscheduled", () => {
     expect(at(cells, 2, HU)).toBe("2"); expect(at(cells, 3, HU)).toBe("1");          // August sale first
     expect(at(cells, 1, R)).toEqual({ formula: "SUM(R3:R4)" });
     expect(plan.summary.preApproved).toMatchObject({ created: true, jobs: 2, added: [expect.any(String), expect.any(String)], left: [] });
-    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 1 && r.style === "cumulative"))).toBe(true);
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => r.row === 1 && r.style === "label"))).toBe(true);   // yellow, black text
     // The week block moved down past the block and its spacer, untouched.
     expect(parseBlocks(gridAfter(grid, plan))[0]).toMatchObject({ from: "2026-09-07", labelIdx: 5 });
   });
@@ -480,6 +480,23 @@ describe("Sales Pre-Approved / Unscheduled", () => {
     expect(cells.some((c) => c.row === 3 && c.col !== 0 && c.value !== null && c.col < HU)).toBe(false);
     expect(plan.ops.some((o) => o.type === "deleteRows" || o.type === "insertRows")).toBe(false);
     expect(at(cells, 1, R)).toEqual({ formula: "SUM(R3:R4)" });
+  });
+});
+
+describe("text the automation writes is black", () => {
+  it("styles every own row and the PAID-IN-FULL cell with black text, the pre-approved label yellow", async () => {
+    const src = (await import("node:fs")).readFileSync(new URL("../src/production/sheetPush.ts", import.meta.url), "utf8");
+    const styles = src.slice(src.indexOf("const ROW_STYLES"), src.indexOf("export function toRequests"));
+    const colours = [...styles.matchAll(/foregroundColor: rgb\("([0-9A-F]{6})"\)/g)].map((m) => m[1]);
+    expect(colours.length).toBeGreaterThanOrEqual(7);
+    expect(new Set(colours)).toEqual(new Set(["000000"]));
+    expect(styles).toMatch(/label: \{ backgroundColor: rgb\("FFFF00"\)/);
+  });
+  it("re-asserts the label, total and cumulative rows of every week each push", () => {
+    const grid = [headerRow(), ["9/14/2026-9/20/2026"], ["Weekly Total"], [CUMULATIVE_LABEL], [], ["9/7/2026-9/13/2026"], ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const plan = planSheet(grid, [{ from: "2026-09-14", to: "2026-09-20", rows: [] }], NO_MONTH);
+    const styled = plan.ops.flatMap((o) => (o.type === "style" ? o.rows.map((r) => `${r.row}:${r.style}`) : []));
+    for (const s of ["1:label", "2:total", "3:cumulative", "5:label", "6:total", "7:cumulative"]) expect(styled).toContain(s);
   });
 });
 

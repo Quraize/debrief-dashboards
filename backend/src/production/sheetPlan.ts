@@ -793,8 +793,21 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
         totals.push({ row: labelIdx, col, value: rowsNow.length ? { formula: `SUM(${L}${rowsNow[0]! + 1}:${L}${rowsNow[rowsNow.length - 1]! + 1})` } : 0 });
       }
       write(totals);
-      style([{ row: labelIdx, style: "cumulative" }]);   // the block's own label row, green like the old sheet
+      style([{ row: labelIdx, style: "label" }]);   // the block's own label row: yellow fill, black text
     }
+  }
+
+  // The planner's own rows — every week's label, Weekly Total and Cumulative —
+  // are re-asserted each push, so rows written before text went black lose
+  // their old green text. Job rows are never formatted (beyond PAID-IN-FULL).
+  {
+    const own: RowStyle[] = [];
+    for (const b of parseBlocks(grid)) {
+      own.push({ row: b.labelIdx, style: "label" });
+      if (b.totalIdx !== null) own.push({ row: b.totalIdx, style: "total" });
+      if (b.cumulativeIdx !== null) own.push({ row: b.cumulativeIdx, style: "cumulative" });
+    }
+    style(own);
   }
 
   // Cumulative Monthly Total rows last, once every block of the touched months

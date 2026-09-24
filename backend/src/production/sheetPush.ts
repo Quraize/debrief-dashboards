@@ -265,20 +265,21 @@ export function setupRequests(sheetId: number, grid: GridSize = { rowCount: FORM
 }
 
 const ROW_STYLES: Record<string, Record<string, unknown>> = {
-  label: { backgroundColor: rgb("FFFF00"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("34A853") } },
+  // Every text the automation writes is black. Fills say what a row is.
+  label: { backgroundColor: rgb("FFFF00"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
   total: { backgroundColor: rgb("D1F1DA"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
   cumulative: { backgroundColor: rgb("92D050"), textFormat: { bold: true, fontSize: 8, foregroundColor: rgb("000000") } },
-  // The month block is the platform's own; navy on white so it never reads as a week.
-  summary: { backgroundColor: rgb("2E4877"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("FFFFFF") } },
+  // The month block is the platform's own; a light blue so black text reads and it never looks like a week.
+  summary: { backgroundColor: rgb("C9DAF8"), textFormat: { bold: true, fontSize: 9, foregroundColor: rgb("000000") } },
   // There is deliberately no style for a stale job row. A row-wide text
   // format replaced the team's font colours and bold with plain black; the
   // stamp in HY is the whole of what a stale row gets.
   // The PAID-IN-FULL cell (B) on a job row: YES green, NO red, and amber for
   // a paid stage whose ledger still shows a balance. Set on every push, so a
   // job that gets paid turns from red to green.
-  paid: { backgroundColor: rgb("B7E1CD"), textFormat: { bold: true, foregroundColor: rgb("0B6B2E") } },
-  unpaid: { backgroundColor: rgb("F4C7C3"), textFormat: { bold: true, foregroundColor: rgb("9C1C13") } },
-  mismatch: { backgroundColor: rgb("FCE8B2"), textFormat: { bold: true, foregroundColor: rgb("7A4B00") } },
+  paid: { backgroundColor: rgb("B7E1CD"), textFormat: { bold: true, foregroundColor: rgb("000000") } },
+  unpaid: { backgroundColor: rgb("F4C7C3"), textFormat: { bold: true, foregroundColor: rgb("000000") } },
+  mismatch: { backgroundColor: rgb("FCE8B2"), textFormat: { bold: true, foregroundColor: rgb("000000") } },
 };
 
 export function toRequests(plan: Plan, sheetId: number, grid: GridSize = { rowCount: FORMAT_ROWS, columnCount: NEEDED_COLUMNS }): unknown[] {
