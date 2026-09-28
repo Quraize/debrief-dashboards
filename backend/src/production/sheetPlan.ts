@@ -121,7 +121,14 @@ export function lockedBlocks(grid: CellValue[][], today: string): WeekLock[] {
 export interface Plan { ops: PlanOp[]; summary: PlanSummary; grid: CellValue[][] }
 
 export const SYNC_STATUS_OK = "Synced from JobProgress";
-export const SYNC_STATUS_STALE = "Not on the JobProgress calendar this week";
+/**
+ * HY on a row that is not this week's: the install moved, it starts in another
+ * week (this is a return visit), or it left the calendar. Out of every total.
+ */
+export const SYNC_STATUS_STALE = "Not counted here — install does not start this week";
+/** The earlier wording of the same stamp; rows still carrying it stay out of the totals too. */
+export const SYNC_STATUS_STALE_LEGACY = "Not on the JobProgress calendar this week";
+export const STALE_STATUSES = [SYNC_STATUS_STALE, SYNC_STATUS_STALE_LEGACY];
 /** A hand-pasted row (no JobProgress ID) the feed could not match to any job it placed. */
 export const SYNC_STATUS_UNMATCHED = "Not matched to a JobProgress job";
 export const SUMMARY_MARKER = "MONTH AT A GLANCE";
@@ -279,7 +286,7 @@ function totalRowCells(rowIdx: number, firstJob: number, lastJob: number): CellW
   const f = firstJob + 1, l = lastJob + 1;
   for (const L of TOTALLED) {
     const value = L === "AB" ? { formula: balanceOf(rowIdx) }
-      : lastJob >= firstJob ? { formula: `SUMIF(HY${f}:HY${l},"<>${SYNC_STATUS_STALE}",${L}${f}:${L}${l})` } : 0;
+      : lastJob >= firstJob ? { formula: `SUMIFS(${L}${f}:${L}${l}${STALE_STATUSES.map((t) => `,HY${f}:HY${l},"<>${t}"`).join("")})` } : 0;
     out.push({ row: rowIdx, col: IDX[L]!, value });
   }
   return out;
@@ -326,11 +333,13 @@ function cumulativeRowCells(rowIdx: number, ownJobs: [number, number] | null, be
       // How many LIVE rows carry this Job #, across both ranges. Stamped rows
       // must not count: a job that moved from last week to this one has a live
       // row here and a stamped twin there, and counting the twin halved it.
-      const counts = spans.map((other) => `COUNTIFS(${ac(other)},${AC}&"",${hy(other)},"<>${SYNC_STATUS_STALE}")`).join("+");
+      const counts = spans.map((other) => `COUNTIFS(${ac(other)},${AC}&""${STALE_STATUSES.map((t) => `,${hy(other)},"<>${t}"`).join("")})`).join("+");
+      const live = STALE_STATUSES.map((t) => `*(${HY}<>"${t}")`).join("");
+      const stamped = STALE_STATUSES.map((t) => `+(${HY}="${t}")`).join("");
       // Denominator is never 0: a blank Job # divides by 1, and a stamped row
       // (numerator already 0) gets +1 so a job with no live row is not 0/0.
-      return `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")*(${HY}<>"${SYNC_STATUS_STALE}")`
-        + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*(${counts})+(${AC}="")+(${HY}="${SYNC_STATUS_STALE}")))`;
+      return `SUMPRODUCT((${A}<>"Weekly Total")*(LEFT(${A},10)<>"Cumulative")${live}`
+        + `*IFERROR(1*${L}${s}:${L}${e},0)/((${AC}<>"")*(${counts})+(${AC}="")${stamped}))`;
     });
     out.push({ row: rowIdx, col: IDX[L]!, value: terms.length ? { formula: terms.join("+") } : 0 });
   }
@@ -373,11 +382,24 @@ const monthOf = (isoDay: string) => isoDay.slice(0, 7);
 const monthTitle = (ym: string) => `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
+/**
+ * The day a job's install starts: its first install visit on the calendar
+ * (RR, SR, GUTTERS…), completed or not. The sheet counts a job's money in this
+ * day's week and month only; a return visit later (a second siding day, the
+ * gutters, a punch list) is not new production, and counting it again put the
+ * same contract in two months.
+ */
+export function firstInstallDay(r: Pick<SheetRow, "visits">): string | null {
+  let first: string | null = null;
+  for (const v of r.visits) if (isInstallCode(v.code) && (first === null || v.day < first)) first = v.day;
+  return first;
+}
+
 export interface MonthLine { label: string; jobs: number; gross: number; totalRev: number; deposit: number; paid: number; owed: number }
 
 /**
  * Two lines per month, for the month `today` is in and the month before it:
- *   Projected — jobs with an install visit scheduled in the month;
+ *   Projected — jobs whose install starts in the month (firstInstallDay);
  *   Started   — of those, jobs whose install day has passed and whose stage
  *               says production started (or later).
  */
@@ -387,15 +409,14 @@ export function monthLines(rows: SheetRow[], today: string): MonthLine[] {
   const prevMonth = `${m === 1 ? y! - 1 : y}-${String(m === 1 ? 12 : m! - 1).padStart(2, "0")}`;
   const out: MonthLine[] = [];
   for (const ym of [thisMonth, prevMonth]) {
-    const installsIn = (r: SheetRow) => r.visits.filter((v) => isInstallCode(v.code) && monthOf(v.day) === ym);
-    const projected = rows.filter((r) => installsIn(r).length > 0);
-    const started = projected.filter((r) => installsIn(r).some((v) => v.day <= today) && STARTED_STAGES.has(stageKey(r.stage)));
+    const projected = rows.filter((r) => { const d = firstInstallDay(r); return d !== null && monthOf(d) === ym; });
+    const started = projected.filter((r) => firstInstallDay(r)! <= today && STARTED_STAGES.has(stageKey(r.stage)));
     const sum = (set: SheetRow[], key: keyof SheetRow) => Math.round(set.reduce((n, r) => n + (Number(r[key]) || 0), 0) * 100) / 100;
     const line = (kind: string, set: SheetRow[], what: string): MonthLine => ({
       label: `${monthTitle(ym)} — ${kind}: ${set.length} job${set.length === 1 ? "" : "s"} ${what}, ${money(sum(set, "totalRev"))}`,
       jobs: set.length, gross: sum(set, "gross"), totalRev: sum(set, "totalRev"), deposit: sum(set, "deposit"), paid: sum(set, "totalPayments"), owed: sum(set, "balanceOwed"),
     });
-    out.push(line("Projected", projected, "with an install scheduled this month"));
+    out.push(line("Projected", projected, "with the install starting this month"));
     out.push(line("Started", started, "with the install started (in production)"));
   }
   return out;

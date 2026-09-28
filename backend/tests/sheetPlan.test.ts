@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  planSheet, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
+  planSheet, firstInstallDay, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
   SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, PREAPPROVED_LABEL, SYNC_STATUS_LEFT_PREAPPROVED, isPreApproved, type CellWrite,
 } from "../src/production/sheetPlan.js";
 import { toRequests, lockRequests, pushWeeks } from "../src/production/sheetPush.js";
@@ -81,7 +81,7 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 2, B)).toBe("NO"); // PAID-IN-FULL: not yet
     expect(at(cells, 2, T)).toEqual({ formula: "R3+S3" });
     expect(at(cells, 3, 0)).toBe("Weekly Total");
-    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIF(HY3:HY3,"<>Not on the JobProgress calendar this week",R3:R3)' });
+    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIFS(R3:R3,HY3:HY3,"<>Not counted here — install does not start this week",HY3:HY3,"<>Not on the JobProgress calendar this week")' });
     expect(at(cells, 4, 0)).toBe(CUMULATIVE_LABEL);
     expect(at(cells, 6, 0)).toBe("9/7/2026-9/13/2026");
     expect(at(cells, 7, HU)).toBe("1");
@@ -98,8 +98,8 @@ describe("planSheet on an empty tab", () => {
     expect(cum).toContain("IFERROR(1*R6:R11,0)");
     expect(cum).toContain(`(HY6:HY11<>"Not on the JobProgress calendar this week")`);
     // Only LIVE rows count toward a job's occurrences: a stamped twin must not halve the live row.
-    expect(cum).toContain('COUNTIFS(AC3:AC3,AC3:AC3&"",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC3:AC3&"",HY6:HY11,"<>Not on the JobProgress calendar this week")');
-    expect(cum).toContain('COUNTIFS(AC3:AC3,AC6:AC11&"",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC6:AC11&"",HY6:HY11,"<>Not on the JobProgress calendar this week")');
+    expect(cum).toContain('COUNTIFS(AC3:AC3,AC3:AC3&"",HY3:HY3,"<>Not counted here — install does not start this week",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC3:AC3&"",HY6:HY11,"<>Not counted here — install does not start this week",HY6:HY11,"<>Not on the JobProgress calendar this week")');
+    expect(cum).toContain('COUNTIFS(AC3:AC3,AC6:AC11&"",HY3:HY3,"<>Not counted here — install does not start this week",HY3:HY3,"<>Not on the JobProgress calendar this week")+COUNTIFS(AC6:AC11,AC6:AC11&"",HY6:HY11,"<>Not counted here — install does not start this week",HY6:HY11,"<>Not on the JobProgress calendar this week")');
     expect(cum).toContain('+(HY6:HY11="Not on the JobProgress calendar this week")))'); // a stamped row never divides by zero
     expect(cum).not.toMatch(/R4\b|R5\b/); // its own total and cumulative rows are not referenced
     const older = (at(cells, 10, R) as { formula: string }).formula;
@@ -136,7 +136,7 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 4, count: 1 }, { type: "insertRows", at: 6, count: 1 }]);
     expect(at(cells, 4, HU)).toBe("2");
     expect(at(cells, 4, B)).toBe("NO");
-    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
+    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIFS(R3:R5,HY3:HY5,"<>Not counted here — install does not start this week",HY3:HY5,"<>Not on the JobProgress calendar this week")' });
     expect(at(cells, 6, 0)).toBe(CUMULATIVE_LABEL);
     expect((at(cells, 6, R) as { formula: string }).formula).toContain("IFERROR(1*R3:R5,0)");
     expect((at(cells, 6, R) as { formula: string }).formula).not.toContain("R6"); // not its own row
@@ -169,7 +169,7 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(at(cells, 4, HY)).toBe(SYNC_STATUS_STALE);
     expect(at(cells, 5, HY)).toBe(SYNC_STATUS_STALE);
     expect(plan.ops.findIndex((o) => o.type === "deleteRows")).toBeGreaterThan(plan.ops.findIndex((o) => o.type === "write" && o.cells.some((c) => c.value === SYNC_STATUS_STALE)));
-    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIF(HY3:HY5,"<>Not on the JobProgress calendar this week",R3:R5)' });
+    expect(at(cells, 5, R)).toEqual({ formula: 'SUMIFS(R3:R5,HY3:HY5,"<>Not counted here — install does not start this week",HY3:HY5,"<>Not on the JobProgress calendar this week")' });
     // And the sheet request is a row deletion at that index.
     const reqs = toRequests(plan, 5) as Record<string, Record<string, unknown>>[];
     expect(reqs.find((r) => r["deleteDimension"])!["deleteDimension"]).toEqual({ range: { sheetId: 5, dimension: "ROWS", startIndex: 3, endIndex: 4 } });
@@ -202,14 +202,16 @@ describe("month at a glance", () => {
     row("3", { visits: [{ day: "2026-09-25", code: "SR" }], stage: "Roof/Siding Scheduled", totalRev: 5000, gross: 5000 }),   // Sept, upcoming
     row("4", { visits: [{ day: "2026-09-11", code: "MS REPAIR" }], stage: "Production Started", totalRev: 900, gross: 900 }), // service call: not an install
     row("5", { visits: [{ day: "2026-08-20", code: "RR" }], stage: "COMPLETED NEED FINAL PAYMENT!!", totalRev: 7000, gross: 7000 }), // August, started
+    // Started in August, back in September for the gutters: August's job, not September's too.
+    row("6", { visits: [{ day: "2026-08-12", code: "SR" }, { day: "2026-09-01", code: "GUTTERS" }], stage: "Production Started", totalRev: 31400, gross: 31400 }),
   ];
   it("counts installs scheduled in the month, and those already started, for this month and last", () => {
     const lines = monthLines(rows, "2026-09-10");
     expect(lines.map((l) => [l.label, l.jobs, l.totalRev])).toEqual([
-      ["September 2026 — Projected: 3 jobs with an install scheduled this month, $35,000", 3, 35000],
+      ["September 2026 — Projected: 3 jobs with the install starting this month, $35,000", 3, 35000],
       ["September 2026 — Started: 1 job with the install started (in production), $10,000", 1, 10000],
-      ["August 2026 — Projected: 1 job with an install scheduled this month, $7,000", 1, 7000],
-      ["August 2026 — Started: 1 job with the install started (in production), $7,000", 1, 7000],
+      ["August 2026 — Projected: 2 jobs with the install starting this month, $38,400", 2, 38400],
+      ["August 2026 — Started: 2 jobs with the install started (in production), $38,400", 2, 38400],
     ]);
   });
   it("sits under the header, above the first week, and is rewritten in place on later pushes", () => {
@@ -363,7 +365,7 @@ describe("rows pasted from the old sheet (no JobProgress ID)", () => {
     expect(at(cells, 2, HU)).toBe("1");                                   // the ID, so next time it matches like any row
     expect(at(cells, 2, R)).toBe(10000);                                  // JobProgress's gross replaces the hand-typed 11111
     expect(cells.some((c) => c.row === 2 && c.col === BG)).toBe(false);  // the hand note is untouched
-    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIF(HY3:HY3,"<>Not on the JobProgress calendar this week",R3:R3)' });
+    expect(at(cells, 3, R)).toEqual({ formula: 'SUMIFS(R3:R3,HY3:HY3,"<>Not counted here — install does not start this week",HY3:HY3,"<>Not on the JobProgress calendar this week")' });
   });
 
   it("matches by Job # when the text differs, and refuses an ambiguous match", () => {
@@ -543,6 +545,19 @@ describe("weeks split at a month end", () => {
     expect(weeks[3]!.rows.map((r) => r.jobId)).toEqual(["next"]);
     // Before the cut-over date weeks stay whole.
     expect(pushWeeks(rows, "2026-09-24", 0, 2, "2026-10-05").map((w) => `${w.from}..${w.to}`)).toContain("2026-09-28..2026-10-04");
+  });
+
+  it("puts a job in the week its install starts only — a return visit later is not a second week", () => {
+    // Golab: siding 8/12, back 8/28 and 8/31, gutters 9/1. Dixon: shed 8/21, back 9/6. Lorent: starts 9/3.
+    const golab = row("golab", { visits: [{ day: "2026-08-12", code: "SR" }, { day: "2026-08-13", code: "JM-PP+SC" }, { day: "2026-08-28", code: "SR" }, { day: "2026-08-31", code: "SR" }, { day: "2026-09-01", code: "GUTTERS" }, { day: "2026-09-09", code: null }] });
+    const dixon = row("dixon", { visits: [{ day: "2026-08-21", code: "SHED" }, { day: "2026-09-06", code: "SHED" }] });
+    const lorent = row("lorent", { visits: [{ day: "2026-09-03", code: "RR" }] });
+    const weeks = pushWeeks([golab, dixon, lorent], "2026-09-10", 5, 0, "2026-08-31");
+    const where = Object.fromEntries(weeks.flatMap((w) => w.rows.map((r) => [r.jobId, `${w.from}..${w.to}`])));
+    expect(weeks.flatMap((w) => w.rows).length).toBe(3);                       // each job exactly once
+    expect(where).toEqual({ golab: "2026-08-10..2026-08-16", dixon: "2026-08-17..2026-08-23", lorent: "2026-09-01..2026-09-06" });
+    expect(firstInstallDay(golab)).toBe("2026-08-12");
+    expect(firstInstallDay(row("none", { visits: [{ day: "2026-09-09", code: null }] }))).toBeNull();
   });
 
   it("locks both halves together on the Friday of the week", () => {

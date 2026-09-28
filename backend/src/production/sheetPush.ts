@@ -16,10 +16,10 @@
 import { withServiceRole } from "../db/client.js";
 import { GoogleSheetsClient, a1, type CellValue, type ProtectedRange } from "../integrations/google/sheets.js";
 import { MASTER_COLUMNS, FILLS, NUM_FMT } from "@allied/shared/weeklyJobSheetMaster";
-import { weeklyJobSheetAsService, filterSheetRows, type SheetRow } from "./weeklyJobSheet.js";
-import { planSheet, weekBounds, colIndex, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
+import { weeklyJobSheetAsService, type SheetRow } from "./weeklyJobSheet.js";
+import { planSheet, weekBounds, colIndex, firstInstallDay, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
 import { BOARD_TIMEZONE } from "./board.js";
-import { splitAtMonthEnd, isInstallCode } from "@allied/shared/production";
+import { splitAtMonthEnd } from "@allied/shared/production";
 import { pushDashboard, DASHBOARD_TAB_DEFAULT, DATA_TAB_DEFAULT, type DashboardPushResult } from "./dashboardSheet.js";
 import { AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
 
@@ -169,20 +169,19 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
 
 /**
- * The weeks one push covers, each with its jobs. A week from `splitFrom` on
- * that crosses a month end becomes two, cut at the month end; a job lands in
- * the half where its first install visit of that week falls, never both, so
- * its revenue is counted once and in the right month.
+ * The weeks one push covers, each with its jobs. A job goes in ONE week only:
+ * the week its install starts (its first install visit, firstInstallDay), so
+ * its contract counts once — a return visit later (more siding days, the
+ * gutters) is not new production and does not put it in a second week or a
+ * second month. A week from `splitFrom` on that crosses a month end becomes
+ * two, cut at the month end, and a job lands in the half its install starts in.
  */
 export function pushWeeks(rows: SheetRow[], today: string, back: number, ahead: number, splitFrom: string): WeekInput[] {
   const out: WeekInput[] = [];
   for (let k = -back; k <= ahead; k++) {
     const b = weekBounds(today, k);
-    const inWeek = filterSheetRows(rows, { from: b.from, to: b.to, basis: "install" });
     const segs = b.from >= splitFrom ? splitAtMonthEnd(b) : [b];
-    if (segs.length === 1) { out.push({ ...b, rows: inWeek }); continue; }
-    const firstDay = (r: SheetRow) => r.visits.filter((v) => isInstallCode(v.code) && v.day >= b.from && v.day <= b.to).map((v) => v.day).sort()[0]!;
-    for (const s of segs) out.push({ ...s, rows: inWeek.filter((r) => { const d = firstDay(r); return d >= s.from && d <= s.to; }) });
+    for (const s of segs) out.push({ ...s, rows: rows.filter((r) => { const d = firstInstallDay(r); return d !== null && d >= s.from && d <= s.to; }) });
   }
   return out;
 }

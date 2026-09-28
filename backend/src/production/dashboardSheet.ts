@@ -24,7 +24,7 @@
 import { withServiceRole } from "../db/client.js";
 import { a1, type GoogleSheetsClient, type CellValue } from "../integrations/google/sheets.js";
 import type { SheetRow } from "./weeklyJobSheet.js";
-import { parseBlocks } from "./sheetPlan.js";
+import { parseBlocks, STALE_STATUSES } from "./sheetPlan.js";
 import { weekLabel } from "@allied/shared/weeklyJobSheetMaster";
 import { isInstallCode } from "@allied/shared/production";
 import { revenueRow, AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
@@ -41,7 +41,6 @@ export const OVERDUE_LABEL = "Overdue: finished jobs still unpaid 30+ days (toda
 export const LABEL_RENAMES: { cell: string; row: number; col: number; from: string; to: string }[] = [
   { cell: "E9", row: 8, col: 4, from: "Overdue Balance (today, 30+ days)", to: OVERDUE_LABEL },
 ];
-const STALE = "Not on the JobProgress calendar this week";
 
 export interface PaymentRow { date: string; amount: number; method: string | null; jobId: string; jobNumber: string | null; customer: string | null }
 
@@ -77,7 +76,7 @@ export function dashboardData(grid: CellValue[][], feedRows: SheetRow[], payment
     const seen = seenInMonth.get(month) ?? seenInMonth.set(month, new Set()).get(month)!;
     for (const idx of b.jobIdx) {
       const id = cellStr(grid[idx]?.[HU]);
-      if (!id || cellStr(grid[idx]?.[HY]) === STALE) continue;       // stale rows are out of every total, here as on the tab
+      if (!id || STALE_STATUSES.includes(cellStr(grid[idx]?.[HY]))) continue;       // stale rows are out of every total, here as on the tab
       const r = byId.get(id);
       if (!r) continue;
       const first = !seen.has(id); seen.add(id);
