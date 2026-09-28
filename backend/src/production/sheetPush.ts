@@ -110,11 +110,12 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
     const feed = await (options.feed ?? weeklyJobSheetAsService)();
     const today = officeDay(now);
-    const weeks = pushWeeks(feed.rows, today, weeksBack, weeksAhead, settings.splitFrom);
+    const sheetRows = feed.rows.filter(bringsMoney);
+    const weeks = pushWeeks(sheetRows, today, weeksBack, weeksAhead, settings.splitFrom);
 
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
-      now, today, allRows: feed.rows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
+      now, today, allRows: sheetRows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
       removeEmptyStale: settings.removeEmptyStale,
     });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
@@ -167,6 +168,17 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 // grew, so a lock always covers the whole block.
 
 export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
+
+/**
+ * No money, no row (the production manager's rule): a job whose contract is
+ * $0 — a warranty callback, a no-charge service visit, a placeholder — gets
+ * no row in any week, the month summary or the pre-approved block. A job whose
+ * amount is MISSING (not entered in JobProgress yet) is not $0 and stays.
+ */
+export function bringsMoney(r: Pick<SheetRow, "totalRev" | "gross">): boolean {
+  const v = r.totalRev ?? r.gross;
+  return v === null || v === undefined || Number(v) !== 0;
+}
 
 /**
  * The weeks one push covers, each with its jobs. A job goes in ONE week only:

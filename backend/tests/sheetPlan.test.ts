@@ -7,7 +7,7 @@ import {
   planSheet, firstInstallDay, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
   SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, PREAPPROVED_LABEL, SYNC_STATUS_LEFT_PREAPPROVED, isPreApproved, type CellWrite,
 } from "../src/production/sheetPlan.js";
-import { toRequests, lockRequests, pushWeeks } from "../src/production/sheetPush.js";
+import { toRequests, lockRequests, pushWeeks, bringsMoney } from "../src/production/sheetPush.js";
 import type { SheetRow } from "../src/production/weeklyJobSheet.js";
 import { MASTER_COLUMNS } from "@allied/shared/weeklyJobSheetMaster";
 
@@ -545,6 +545,13 @@ describe("weeks split at a month end", () => {
     expect(weeks[3]!.rows.map((r) => r.jobId)).toEqual(["next"]);
     // Before the cut-over date weeks stay whole.
     expect(pushWeeks(rows, "2026-09-24", 0, 2, "2026-10-05").map((w) => `${w.from}..${w.to}`)).toContain("2026-09-28..2026-10-04");
+  });
+
+  it("gives a $0 job no row — no money, no row — but keeps one whose amount is not entered yet", () => {
+    expect(bringsMoney(row("callback", { totalRev: 0, gross: 0 }))).toBe(false);          // warranty callback
+    expect(bringsMoney(row("co-only", { gross: 0, totalRev: 800 }))).toBe(true);          // change orders are money
+    expect(bringsMoney(row("sale", { totalRev: 21699, gross: 21699 }))).toBe(true);
+    expect(bringsMoney(row("unknown", { totalRev: null, gross: null }))).toBe(true);      // missing, not zero
   });
 
   it("puts a job in the week its install starts only — a return visit later is not a second week", () => {
