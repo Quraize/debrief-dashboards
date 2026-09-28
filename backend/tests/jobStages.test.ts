@@ -258,6 +258,30 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
 
+  it("keeps a finished job that was installed on the sheet after the office moves it past Production, never a dead one", async () => {
+    // The stage sync no longer follows these (stage_seen_at NULL): 3 is done and was installed, 4 is dead,
+    // 5 is done but never had an install (a site assessment only).
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, job_number, current_stage, total_job_price, stage_seen_at)
+       VALUES ('3', '2608-3-01', 'Client Satisfaction/Referrals', 25000, NULL),
+              ('4', '2608-4-01', 'Lost', 9000, NULL),
+              ('5', '2608-5-01', 'Warranty', 7000, NULL)`);
+    await db.owner.query(
+      `INSERT INTO jp_schedule (jp_schedule_id, jp_job_id, title, job_type_code, start_at, end_at)
+       VALUES ('S7', '3', 'RR: Raphael', 'RR', '2026-09-04 12:00+00', '2026-09-04 20:00+00'),
+              ('S8', '4', 'RR: Lost job', 'RR', '2026-09-05 12:00+00', '2026-09-05 20:00+00'),
+              ('S9', '5', 'MSSA: Warranty look', 'MSSA', '2026-09-06 12:00+00', '2026-09-06 14:00+00')`);
+    try {
+      const sheet = (await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("prod@allied.test") })).json();
+      const ids = (sheet.rows as { jobId: string }[]).map((r) => r.jobId).sort();
+      expect(ids).toEqual(["1", "2", "3"]);
+      expect((sheet.rows as Record<string, unknown>[]).find((r) => r["jobId"] === "3")).toMatchObject({ stage: "Client Satisfaction/Referrals", stageGroup: null, gross: 25000, scheduledInstallDate: "2026-09-04" });
+    } finally {
+      await db.owner.query(`DELETE FROM jp_schedule WHERE jp_schedule_id IN ('S7','S8','S9')`);
+      await db.owner.query(`DELETE FROM jp_job WHERE jp_job_id IN ('3','4','5')`);
+    }
+  });
+
   it("exports the week as an Excel workbook in the tab's layout", async () => {
     const ExcelJS = (await import("exceljs")).default;
     // Job 1's installs are 8/28–8/29 (its 9/4 visit is a service call); job 2's install is 9/3:

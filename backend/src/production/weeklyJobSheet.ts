@@ -25,7 +25,7 @@
  *   AB balance owed          jp_job.total_amount_owed, else T − AA
  */
 import { dbApp, withUser, withServiceRole, type SessionContext } from "../db/client.js";
-import { stageGroup } from "@allied/shared/jobStages";
+import { stageGroup, isCompletedStage } from "@allied/shared/jobStages";
 import { isInstallCode } from "@allied/shared/production";
 import { totalRevenue, balanceOwed, rowLabel, paymentBreakdown, billBreakdown, jobStatus } from "@allied/shared/weeklyJobSheet";
 import { BOARD_TIMEZONE, jobProgressUrl } from "./board.js";
@@ -67,6 +67,7 @@ export interface WeeklyJobSheet {
 }
 
 interface Row {
+  tracked: boolean;
   jp_job_id: string; jp_customer_id: string | null; job_number: string | null; job_name: string | null;
   customer_name: string | null; address: string | null; city: string | null;
   division: string | null; trades: string | null; is_insurance: boolean;
@@ -141,7 +142,7 @@ type RowQuery = (sql: string, params: unknown[]) => Promise<Row[]>;
 
 async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
   const rows = await query(
-    `SELECT j.jp_job_id, j.jp_customer_id, j.job_number, j.job_name, cu.customer_name, l.address, l.city,
+    `SELECT j.stage_seen_at IS NOT NULL AS tracked, j.jp_job_id, j.jp_customer_id, j.job_number, j.job_name, cu.customer_name, l.address, l.city,
             j.division, j.trades, j.is_insurance, j.current_stage, j.stage_last_modified,
             j.rep_names, NULL::text AS appointment_rep, j.sub_contractor_names,
             j.contract_signed_date::text, j.completion_date::text,
@@ -177,7 +178,7 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
                 ORDER BY p.payment_date, p.jp_payment_id), '[]'::json) AS payments
            FROM jp_job_payment p
           WHERE p.jp_job_id = j.jp_job_id AND p.deleted_at IS NULL) pay ON true
-      WHERE j.stage_seen_at IS NOT NULL
+      WHERE j.stage_seen_at IS NOT NULL OR sch.visits IS NOT NULL
       ORDER BY j.contract_signed_date DESC NULLS LAST, j.job_number`,
     [BOARD_TIMEZONE]);
 
@@ -194,7 +195,16 @@ async function buildSheet(query: RowQuery): Promise<WeeklyJobSheet> {
   }, "production:sheet-reps", { quiet: true });
   for (const r of rows) r.appointment_rep = appointmentRep.get(r.jp_job_id) ?? null;
 
-  const items: SheetRow[] = rows.map((r) => {
+  // A job the stage sync follows, plus a FINISHED job that was installed:
+  // once the office moves it past Production (Client Satisfaction, Warranty,
+  // Paid…) the sync stops following it, and without this it vanished from the
+  // week it was installed in — the month's total shrank as jobs were closed.
+  // Its money is as of the day it left the tracked stages; a finished job's
+  // contract does not change. A dead job (Lost, Cancelled) is never included.
+  const kept = rows.filter((r) => r.tracked
+    || (isCompletedStage(r.current_stage) && (r.visits ?? []).some((v) => isInstallCode(v.code))));
+
+  const items: SheetRow[] = kept.map((r) => {
     const gross = money(r.total_job_price);
     const changeOrders = money(r.total_change_order_amount);
     const totalRev = money(r.total_job_revenue) ?? totalRevenue(gross, changeOrders);
