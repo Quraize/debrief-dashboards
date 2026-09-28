@@ -253,6 +253,9 @@ function toneStyle(rowIdx: number, row: SheetRow): RowStyle[] {
   return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: [col, col + 1] }] : [];
 }
 
+/** Blank, or a formula error (#REF! from a pasted row, #VALUE!…): the row formula belongs back there. */
+const brokenOrBlank = (v: CellValue | undefined) => { const s = cellStr(v); return s === "" || /^#(REF!|N\/A|VALUE!|DIV\/0!|ERROR!|NAME\?|NUM!|NULL!)$/.test(s); };
+
 /**
  * Only the synced columns of an existing row — the team's cells stay as they
  * are. A row formula (Total Rev = Gross + C.O.s, Balance = Total − Paid) that
@@ -264,7 +267,7 @@ function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null, 
   for (const c of COLS) {
     const formula = columnFormula(c, rowIdx + 1);
     if (formula) {
-      if (cells && cellStr(cells[ACTIVE[c.col]!]) === "") out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: { formula } });
+      if (cells && brokenOrBlank(cells[ACTIVE[c.col]!])) out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: { formula } });
       continue;
     }
     if (!c.key) continue;
@@ -660,6 +663,30 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     summary.weeksSplit = relabels.map((c) => String(c.value));
   }
 
+  // A job whose week changed (its install moved, or a whole week was cut at
+  // the month end): what the team typed on its old row travels to its row in
+  // the new week, the same way it does for a job leaving the pre-approved
+  // block, and the old row can then go instead of staying as a stamped twin.
+  const weekMovers = new Set<string>();
+  {
+    const key = (from: string, to: string) => `${from}..${to}`;
+    const placed = new Map<string, string>();
+    for (const w of weeks) for (const r of w.rows) placed.set(r.jobId, key(w.from, w.to));
+    const pushed = new Set(weeks.map((w) => key(w.from, w.to)));
+    for (const b of parseBlocks(grid)) {
+      if (!pushed.has(key(b.from, b.to))) continue;
+      for (const idx of b.jobIdx) {
+        const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
+        const dest = id ? placed.get(id) : undefined;
+        if (!dest || dest === key(b.from, b.to)) continue;
+        weekMovers.add(id);
+        const hand = HAND_COLUMNS.map((c) => ({ row: -1, col: ACTIVE[c.col]!, value: grid[idx]?.[ACTIVE[c.col]!] as CellValue }))
+          .filter((x) => !isBlankCell(x.value));
+        if (hand.length && !carry.has(id)) carry.set(id, hand);
+      }
+    }
+  }
+
   for (const week of ordered) {
     const label = weekLabel(week.from, week.to);
     const rows = [...week.rows].sort((a, b) => (b.saleDate ?? "").localeCompare(a.saleDate ?? "") || (a.jobNumber ?? "").localeCompare(b.jobNumber ?? ""));
@@ -802,6 +829,19 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       style([{ row: block.totalIdx + 1, style: "cumulative" }]);
     }
     summary.weeks.push(report);
+  }
+
+  // Week moves, phase B: an old row whose typed cells were carried to the
+  // job's row in its new week holds nothing that is not also there now.
+  if (opts.removeEmptyStale && weekMovers.size) {
+    const gone: number[] = [];
+    for (const b of parseBlocks(grid)) for (const idx of b.jobIdx) {
+      const id = cellStr(grid[idx]?.[JOB_ID_COL()]);
+      if (id && weekMovers.has(id) && carriedTo.has(id) && STALE_STATUSES.includes(cellStr(grid[idx]?.[ACTIVE["HY"]!]))) gone.push(idx);
+    }
+    for (const idx of gone.sort((a, b) => b - a)) remove(idx, 1);
+    summary.jobsRemoved += gone.length;
+    summary.jobsNotThisWeek -= gone.length;
   }
 
   // Pre-approved, phase B: rows that left. Deleted when nothing hand-filled

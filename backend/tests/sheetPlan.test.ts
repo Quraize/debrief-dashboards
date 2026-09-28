@@ -114,7 +114,7 @@ describe("planSheet on a tab the team has been working in", () => {
   const grid = () => {
     const g: (string | number | boolean | null)[][] = [headerRow()];
     g.push(["9/7/2026-9/13/2026"]);
-    const j1: (string | number | boolean | null)[] = []; j1[0] = "Wayne/1 Main St/Customer 1"; j1[B] = true; j1[HU] = 1; j1[R] = 9999; j1[T] = 9999; j1[AB] = " "; j1[colIndex("BG")] = "call before 8";
+    const j1: (string | number | boolean | null)[] = []; j1[0] = "Wayne/1 Main St/Customer 1"; j1[B] = true; j1[HU] = 1; j1[R] = 9999; j1[T] = 9999; j1[AB] = " "; j1[colIndex("AA")] = "#REF!"; j1[colIndex("BG")] = "call before 8";
     g.push(j1);
     const gone: (string | number | boolean | null)[] = []; gone[0] = "Old Tappan/84 Willow/Denike"; gone[HU] = "77"; gone[colIndex("BG")] = "call before demo";
     g.push(gone);
@@ -132,6 +132,7 @@ describe("planSheet on a tab the team has been working in", () => {
     expect(cells.some((c) => c.row === 2 && c.col === colIndex("BG"))).toBe(false);
     expect(cells.some((c) => c.row === 2 && c.col === T)).toBe(false); // a formula cell holding a value is left alone
     expect(at(cells, 2, AB)).toEqual({ formula: "T3-AA3" });            // a blanked one (" ") is put back
+    expect(at(cells, 2, colIndex("AA"))).toEqual({ formula: "SUM(Y3:Z3)" });  // and so is a broken one (#REF!)
     // New job 2 inserted before the total (row 4) → total moves to row 5 and re-sums 2..4; a cumulative row is added at 6.
     expect(inserts(plan)).toEqual([{ type: "insertRows", at: 4, count: 1 }, { type: "insertRows", at: 6, count: 1 }]);
     expect(at(cells, 4, HU)).toBe("2");
@@ -174,6 +175,29 @@ describe("planSheet on a tab the team has been working in", () => {
     const reqs = toRequests(plan, 5) as Record<string, Record<string, unknown>>[];
     expect(reqs.find((r) => r["deleteDimension"])!["deleteDimension"]).toEqual({ range: { sheetId: 5, dimension: "ROWS", startIndex: 3, endIndex: 4 } });
   });
+  it("moves what the team typed with a job whose week changed, then drops the old row — either direction", () => {
+    const AE = colIndex("AE");
+    const build = (typedIn: "new" | "old") => {
+      const g: (string | number | boolean | null)[][] = [headerRow()];
+      const one: (string | number | boolean | null)[] = []; one[0] = "Wayne/1 Main St/Customer 1"; one[HU] = "1";
+      const five: (string | number | boolean | null)[] = []; five[0] = "Wayne/5 Main St/Customer 5"; five[HU] = "5"; five[AE] = "GAF";
+      if (typedIn === "new") g.push(["9/14/2026-9/20/2026"], five, ["Weekly Total"], [CUMULATIVE_LABEL], [], ["9/7/2026-9/13/2026"], one, ["Weekly Total"], [CUMULATIVE_LABEL]);
+      else g.push(["9/14/2026-9/20/2026"], one, ["Weekly Total"], [CUMULATIVE_LABEL], [], ["9/7/2026-9/13/2026"], five, ["Weekly Total"], [CUMULATIVE_LABEL]);
+      return g;
+    };
+    for (const [typedIn, dest] of [["new", "2026-09-07"], ["old", "2026-09-14"]] as const) {
+      // "new": job 5 was typed on in 9/14 and now starts in 9/7 (an older week). "old": the reverse.
+      const weeks = typedIn === "new"
+        ? [{ from: "2026-09-14", to: "2026-09-20", rows: [] }, { from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("5")] }]
+        : [{ from: "2026-09-14", to: "2026-09-20", rows: [row("1"), row("5")] }, { from: "2026-09-07", to: "2026-09-13", rows: [] }];
+      const g = build(typedIn);
+      const plan = planSheet(g, weeks, { ...NO_MONTH, removeEmptyStale: true });
+      const after = gridAfter(g, plan) as (string | number | boolean | null)[][];
+      const live = parseBlocks(after).flatMap((b) => b.jobIdx.filter((i) => after[i]![HU] === "5").map((i) => ({ from: b.from, ae: after[i]![AE], hy: after[i]![HY] })));
+      expect(live).toEqual([{ from: dest, ae: "GAF", hy: "Synced from JobProgress" }]);   // one row, in its week, with the note
+    }
+  });
+
   it("puts a missing older week after the existing block and a newer one before it", () => {
     const older = planSheet(grid(), [{ from: "2026-08-31", to: "2026-09-06", rows: [row("5")] }], NO_MONTH);
     expect(inserts(older)).toEqual([{ type: "insertRows", at: 6, count: 5 }]);
