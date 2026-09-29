@@ -57,6 +57,19 @@ export function sheetWeekOf(day, splitFrom) {
   return segs.find((s) => d >= s.from && d <= s.to) ?? w;
 }
 
+/**
+ * The sheet block `offset` blocks from the one `today` is in: 0 = this week,
+ * -1 = last week, 1 = next week — in the sheet's blocks, so on 9/29 this week
+ * is 9/28–9/30 and next week is 10/1–10/4, and on 10/1 last week is 9/28–9/30.
+ */
+export function sheetWeekFrom(today, offset, splitFrom) {
+  const shift = (day, n) => { const [y, m, d] = String(day).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+  let b = sheetWeekOf(today, splitFrom);
+  for (let i = 0; i < offset; i++) b = sheetWeekOf(shift(b.to, 1), splitFrom);
+  for (let i = 0; i > offset; i--) b = sheetWeekOf(shift(b.from, -1), splitFrom);
+  return b;
+}
+
 /** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
 export function weekBounds(day, offset = 0) {
   const [y, m, d] = String(day).slice(0, 10).split("-").map(Number);

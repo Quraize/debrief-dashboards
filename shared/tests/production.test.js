@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR, splitAtMonthEnd, sheetWeekOf } from "../src/production.js";
+import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR, splitAtMonthEnd, sheetWeekOf, sheetWeekFrom } from "../src/production.js";
+
+describe("sheetWeekFrom", () => {
+  const S = "2026-08-31";
+  it("steps through the sheet's blocks, halves included", () => {
+    expect(sheetWeekFrom("2026-09-29", 0, S)).toEqual({ from: "2026-09-28", to: "2026-09-30" });
+    expect(sheetWeekFrom("2026-09-29", 1, S)).toEqual({ from: "2026-10-01", to: "2026-10-04" });
+    expect(sheetWeekFrom("2026-09-29", -1, S)).toEqual({ from: "2026-09-21", to: "2026-09-27" });
+    expect(sheetWeekFrom("2026-10-01", 0, S)).toEqual({ from: "2026-10-01", to: "2026-10-04" });
+    expect(sheetWeekFrom("2026-10-01", -1, S)).toEqual({ from: "2026-09-28", to: "2026-09-30" });
+    expect(sheetWeekFrom("2026-10-01", 1, S)).toEqual({ from: "2026-10-05", to: "2026-10-11" });
+  });
+});
 
 describe("sheetWeekOf", () => {
   it("names the sheet block a day is in: its Monday week, cut at the month end once splitting applies", () => {

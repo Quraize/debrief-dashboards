@@ -9,6 +9,7 @@ import { ArrowRight } from "lucide-react";
 import { productionApi } from "./api";
 import { startedRevenue } from "@allied/shared/revenueAr";
 import { inDateRange } from "@allied/shared/constants";
+import { sheetWeekFrom } from "@allied/shared/production";
 
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
 
@@ -17,10 +18,15 @@ export default function RevenueHeadline() {
   const t = data?.totals;
   if (!t) return null;
   // The Weekly Job Sheet's numbers: each job once, in its first install week.
-  const period = (f) => startedRevenue((data.started?.rows ?? []).filter((r) => inDateRange(r.firstInstall, f)), data.today, data.started?.splitFrom).gross;
+  const rowsOf = data.started?.rows ?? [];
+  const period = (list) => startedRevenue(list, data.today, data.started?.splitFrom).gross;
+  // This week = the sheet block today is in (9/28–9/30 on 9/29, not the whole Mon–Sun).
+  const wk = sheetWeekFrom(data.today, 0, data.started?.splitFrom);
+  const thisWeek = period(rowsOf.filter((r) => r.firstInstall >= wk.from && r.firstInstall <= wk.to));
+  const thisMonth = period(rowsOf.filter((r) => inDateRange(r.firstInstall, "This Month")));
   const cells = [
-    { label: "Started this week", value: money(period("This Week")), cls: "text-primary" },
-    { label: "Started this month", value: money(period("This Month")), cls: "text-primary" },
+    { label: "Started this week", value: money(thisWeek), cls: "text-primary" },
+    { label: "Started this month", value: money(thisMonth), cls: "text-primary" },
     { label: "Expected this week", value: money(t.expectedThisWeek), cls: "text-blue-700" },
     { label: "Total AR", value: money(t.totalAR), cls: t.totalAR > 0 ? "text-amber-700" : "text-green-700" },
     { label: `Overdue (${t.overdueDays}d+)`, value: money(t.overdueAR), cls: t.overdueAR > 0 ? "text-red-700" : "text-green-700" },

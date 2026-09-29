@@ -17,11 +17,15 @@ import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
 import { Loader2, ExternalLink, Search, ChevronDown, ChevronRight } from "lucide-react";
+import { sheetWeekFrom } from "@allied/shared/production";
 import { productionApi } from "./api";
 
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
 const fmtDay = (s) => (s ? new Date(`${s}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "—");
 const fmtWeek = (s) => (s ? "Wk of " + new Date(`${s}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric" }) : "—");
+
+/** The week filters, as steps through the sheet's blocks from today's. */
+const BLOCK_OFFSET = { "This Week": 0, "Last Week": -1, "Next Week": 1 };
 
 const TONE = {
   red: "bg-red-50 text-red-900 border-red-200",
@@ -53,10 +57,16 @@ export default function ProductionRevenue() {
   }, [book, range, cs, ce, basis]);
   // Revenue started: the Weekly Job Sheet's jobs, each once, in the week its
   // first install falls in; the date range picks which weeks.
+  // This / Last / Next Week are the sheet's blocks: a week that crosses a
+  // month end is two weeks here too (on 9/29, This Week is 9/28–9/30).
   const started = useMemo(() => {
     if (!data?.started) return null;
-    const list = range === ALL_TIME_FILTER ? data.started.rows : data.started.rows.filter((r) => inDateRange(r.firstInstall, range, cs, ce));
-    return { rows: list, ...startedRevenue(list, data.today, data.started.splitFrom) };
+    const { rows: all, splitFrom } = data.started;
+    const block = BLOCK_OFFSET[range] === undefined ? null : sheetWeekFrom(data.today, BLOCK_OFFSET[range], splitFrom);
+    const list = range === ALL_TIME_FILTER ? all
+      : block ? all.filter((r) => r.firstInstall >= block.from && r.firstInstall <= block.to)
+      : all.filter((r) => inDateRange(r.firstInstall, range, cs, ce));
+    return { rows: list, block, ...startedRevenue(list, data.today, splitFrom) };
   }, [data, range, cs, ce]);
   // Started / paid / owed follow the range; expected cash and AR are the whole book.
   const t = useMemo(() => (data ? revenueTotals(inRange, data.today, { overdueDays: data.totals.overdueDays }, book) : null), [inRange, book, data]);
@@ -226,6 +236,7 @@ function StartedPanel({ s, range, today }) {
       <div className="p-4 flex flex-col lg:flex-row lg:items-start gap-4">
         <div className="lg:w-80 shrink-0 rounded-xl bg-primary text-primary-foreground p-4">
           <h2 id="started-h" className="text-[11px] uppercase tracking-wide font-semibold text-primary-foreground/80">Revenue Started · {range}</h2>
+          {s.block && <div className="text-xs text-primary-foreground/80">{fmtDay(s.block.from)} – {fmtDay(s.block.to)}</div>}
           <div className="text-3xl font-heading font-bold tabular-nums mt-1">{money(s.gross)}</div>
           <div className="text-xs text-primary-foreground/80 mt-1">
             Gross, {plural(s.jobs)}
