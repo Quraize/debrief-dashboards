@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("expectedSchedule — today, next 7 and next 14 days, cumulative, by job", () => {
+  const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", gross: 10000, changeOrders: 0, deposit: 2000, progressPayments: null, salesRep: "Jason", lastInstall: "2026-09-29", ...over });
+  it("buckets the sheet balance by expected date, cumulatively, says who owns it and counts what is late", () => {
+    const e = expectedSchedule([
+      job({ jobId: "today", customer: "Today Job" }),                                     // 9/29: $8,000
+      job({ jobId: "wk", customer: "Week Job", lastInstall: "2026-10-05", gross: 5000 }),   // 10/5, day 7: $3,000
+      job({ jobId: "fort", customer: "Fortnight", lastInstall: "2026-10-12", salesRep: null }), // 10/12, day 14: $8,000, no owner at all
+      job({ jobId: "late", lastInstall: "2026-10-13" }),                                  // day 15: out
+      job({ jobId: "past", customer: "Past", stage: "COMPLETED NEED FINAL PAYMENT!!", completionDate: "2026-09-20" }), // expected 9/20: late
+      job({ jobId: "paid", pifStatus: "YES" }),
+    ], "2026-09-29", (id) => (id === "wk" ? "Matt Steussing" : null));
+    expect([e.today.amount, e.next7.amount, e.next14.amount, e.pastDue.amount]).toEqual([8000, 11000, 19000, 8000]);
+    expect([e.today.jobs, e.next7.jobs, e.next14.jobs, e.pastDue.jobs]).toEqual([1, 2, 3, 1]);
+    expect([e.next7.to, e.next14.to]).toEqual(["2026-10-05", "2026-10-12"]);
+    expect(e.next14.rows.map((r) => [r.customer, r.owner, r.ownerSource])).toEqual([
+      ["Today Job", "Jason", "rep"], ["Week Job", "Matt Steussing", "pipeline"], ["Fortnight", null, "none"],
+    ]);
+    expect(e.pastDue.rows[0]).toMatchObject({ customer: "Past", expectedDay: "2026-09-20", basis: "completion" });
+    expect(e.today.rows[0].basis).toBe("lastInstall");
+  });
+});
 
 describe("progressDue — the rest of the contract after the deposit, still uncollected", () => {
   const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: 4000, progressPayments: null, ...over });

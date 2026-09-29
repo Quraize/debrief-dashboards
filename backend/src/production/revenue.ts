@@ -19,16 +19,23 @@ export function arSettings(env = process.env) {
 }
 
 export async function revenueReport(ctx: SessionContext, today = todayInBoardZone(), env = process.env) {
-  const [jobs, sheet, invoices] = await Promise.all([loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx), loadInvoices(ctx)]);
+  const [jobs, sheet, invoices, owners] = await Promise.all([loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx), loadInvoices(ctx), loadOwners(ctx)]);
   return {
     ...revenueSummary(jobs, today, arSettings(env)),
-    started: { rows: startedRows(sheet.rows, invoices), splitFrom: sheetSplitFrom(env) },
+    started: { rows: startedRows(sheet.rows, invoices).map((r) => ({ ...r, owner: owners.get(r.jobId) ?? null })), splitFrom: sheetSplitFrom(env) },
     ar: sheetAr(sheet.rows, today, arSettings(env).overdueDays),
   };
 }
 
 type SheetFeedRow = Awaited<ReturnType<typeof weeklyJobSheet>>["rows"][number];
 export interface InvoiceLite { number: string | null; date: string | null; dueDate: string | null; total: number; open: number | null; status: string | null }
+
+/** The Owner managers set on the Sold-Job Pipeline, by job (job_pipeline_note, 0030). */
+async function loadOwners(ctx: SessionContext): Promise<Map<string, string>> {
+  const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<{ jp_job_id: string; owner: string }>(
+    `SELECT jp_job_id, owner FROM job_pipeline_note WHERE coalesce(trim(owner), '') <> ''`)).rows);
+  return new Map(rows.map((r) => [r.jp_job_id, r.owner.trim()]));
+}
 
 /** Every live invoice JobProgress has for our jobs, by job (jp_job_invoice, 0033). */
 async function loadInvoices(ctx: SessionContext): Promise<{ byJob: Map<string, InvoiceLite[]>; checked: Set<string> }> {

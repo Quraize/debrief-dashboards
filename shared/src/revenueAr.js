@@ -357,6 +357,46 @@ export function progressDue(rows, today) {
   };
 }
 
+/** One line, for a hover: how a job's expected payment date is worked out. */
+export const EXPECTED_DATE_RULE =
+  "JobProgress has no payment due dates, so we expect a job's balance when the job finishes: its completion date once the stage says it is finished, otherwise its last scheduled install day.";
+
+/**
+ * Expected collections from today (the PM's rule 6): Today, the next 7 days
+ * and the next 14 days, CUMULATIVE (7 includes today; 14 includes the 7), by
+ * job, amount, owner and expected payment date — plus what was expected
+ * before today and has not come in, so nothing late hides.
+ *   date    expectedDayOf (and `basis`: "completion" or "lastInstall")
+ *   amount  the sheet balance; only jobs not paid in full
+ *   owner   the Sold-Job Pipeline's Owner (`ownerOf(jobId)`); when the team
+ *           has not set one, the job's sales rep stands in (`ownerSource`
+ *           "rep"), and with neither it is "none"
+ */
+export function expectedSchedule(rows, today, ownerOf = () => null) {
+  const addDays = (day, n) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+  const to7 = addDays(today, 6), to14 = addDays(today, 13);
+  const all = (rows ?? [])
+    .filter((r) => !DEAD_STAGE.test(String(r.stage ?? "")) && r.pifStatus !== PIF_STATUS.yes && r.pifStatus !== PIF_STATUS.mismatch)
+    .map((r) => {
+      const set = ownerOf(r.jobId);
+      const day = expectedDayOf(r);
+      return {
+        jobId: r.jobId, customer: r.customer || r.label || r.jobId, expectedDay: day, amount: sheetBalance(r),
+        basis: day && isCompletedStage(r.stage) && r.completionDate ? "completion" : "lastInstall",
+        owner: set || r.salesRep || null, ownerSource: set ? "pipeline" : r.salesRep ? "rep" : "none",
+      };
+    })
+    .filter((r) => r.amount > 0 && r.expectedDay)
+    .sort((a, b) => a.expectedDay.localeCompare(b.expectedDay) || b.amount - a.amount);
+  const pack = (list, extra = {}) => ({ amount: round(list.reduce((n, r) => n + r.amount, 0)), jobs: list.length, rows: list, ...extra });
+  return {
+    today: pack(all.filter((r) => r.expectedDay === today), { from: today, to: today }),
+    next7: pack(all.filter((r) => r.expectedDay >= today && r.expectedDay <= to7), { from: today, to: to7 }),
+    next14: pack(all.filter((r) => r.expectedDay >= today && r.expectedDay <= to14), { from: today, to: to14 }),
+    pastDue: pack(all.filter((r) => r.expectedDay < today)),
+  };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

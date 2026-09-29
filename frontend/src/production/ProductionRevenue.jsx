@@ -2,24 +2,25 @@
  * Production Revenue & AR — management's cash view, on the Weekly Job Sheet's
  * jobs and rules (shared/src/revenueAr.js via GET /api/production/revenue).
  *
- * Two groups of cards: the selected period (Revenue Started, Paid in Full,
- * Remaining Owed, Expected Collections, Invoiced AR) and what customers owe
- * today (Operational AR, Total AR, Overdue AR, Progress Payments Due,
- * Deposits Missing). Clicking a card shows the jobs behind it in the one
- * table under the cards; the table's total is the card's number.
+ * Three groups of cards: the selected period (Revenue Started, Paid in Full,
+ * Remaining Owed, Invoiced AR), what customers owe today (Operational AR,
+ * Total AR, Overdue AR, Progress Payments Due, Deposits Missing), and
+ * Expected Collections from today (Today, Next 7 days, Next 14 days, Past
+ * expected date). Clicking a card shows the jobs behind it in the one table
+ * under the cards; the table's total is the card's number.
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES, REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import {
-  startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, sheetBalance, isCompletedStage,
+  startedRevenue, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, sheetBalance, isCompletedStage, EXPECTED_DATE_RULE,
 } from "@allied/shared/revenueAr";
 import { PIF_STATUS } from "@allied/shared/weeklyJobSheet";
 import { sheetWeekFrom } from "@allied/shared/production";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
-import { Loader2, ExternalLink, Search } from "lucide-react";
+import { Loader2, ExternalLink, Search, Info } from "lucide-react";
 import { productionApi } from "./api";
 
 const money = (v) => (v == null ? "—" : (Number(v) < 0 ? "−$" : "$") + Math.abs(Math.round(Number(v))).toLocaleString());
@@ -69,7 +70,13 @@ export default function ProductionRevenue() {
     };
 
     const paid = list.filter((r) => r.pifStatus === PIF_STATUS.yes);
-    const expected = expectedCollections(all, inPeriod);
+    // Expected Collections from today: owner is the Sold-Job Pipeline's Owner (each sheet job carries it).
+    const ex = expectedSchedule(all, today, (id) => byId.get(id)?.owner ?? null);
+    const exRows = (list2) => list2.map((r) => ({ ...row(r.jobId, r.amount), expectedDay: r.expectedDay, basis: r.basis, owner: r.owner, ownerSource: r.ownerSource }));
+    const exCard = (key, title, when) => ({
+      title, amountLabel: "Expected", total: ex[key].amount, value: money(ex[key].amount), tone: key === "pastDue" ? (ex[key].jobs ? "amber" : "green") : "blue",
+      sub: <>{plural(ex[key].jobs)} · {when}</>, layout: "expected", rows: exRows(ex[key].rows),
+    });
     const invoiced = invoicedAr(all, inPeriod, today);
     const invoiceRows = [];
     for (const r of all) for (const inv of r.invoices ?? []) {
@@ -102,11 +109,6 @@ export default function ProductionRevenue() {
         title: `Remaining Owed · ${range}`, amountLabel: "Still owed", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
         sub: <>{s.remainingOwed.jobs} of {plural(s.jobs)} started in this period still owing</>,
         rows: list.map((r) => row(r.jobId, sheetBalance(r), sheetBalance(r) < 0 ? "Overpaid" : "")).filter((r) => r.amount !== 0).sort((a, b) => b.amount - a.amount),
-      },
-      expected: {
-        title: `Expected Collections · ${range}`, amountLabel: "Expected", total: expected.amount, value: money(expected.amount), tone: "blue",
-        sub: <>{plural(expected.jobs)} finishing in this period, not yet paid in full</>,
-        rows: expected.rows.map((r) => row(r.jobId, r.balance, `Expected ${fmtDay(r.expectedDay)}`)),
       },
       invoiced: {
         title: `Invoiced AR · ${range}`, amountLabel: "Open on invoice", total: invoiced.amount, value: money(invoiced.amount), tone: "slate",
@@ -141,6 +143,11 @@ export default function ProductionRevenue() {
         </>,
         rows: prog.rows.map((r) => row(r.jobId, r.due, r.progress <= 0 ? "No progress payment yet" : `${money(r.progress)} of ${money(r.afterDeposit)} collected`)),
       },
+      exToday: exCard("today", "Expected today", fmtDay(today)),
+      ex7: exCard("next7", "Expected in the next 7 days", `today through ${fmtDay(ex.next7.to)}`),
+      ex14: exCard("next14", "Expected in the next 14 days", `today through ${fmtDay(ex.next14.to)}`),
+      exPast: { ...exCard("pastDue", "Past expected date", "expected before today, not yet in"),
+        sub: <>{plural(ex.pastDue.jobs)} expected before today and not yet in · also under Progress Payments Due and AR</> },
       deposits: {
         title: "Deposits Missing · today", amountLabel: "Contract", total: dep.contract, value: plural(dep.jobs), tone: dep.jobs > 0 ? "red" : "green",
         sub: <>Started with $0 deposit ({money(dep.contract)} of contracts)</>,
@@ -180,13 +187,23 @@ export default function ProductionRevenue() {
           <StartedPanel s={m.s} block={m.block} range={range} today={m.today} active={sel === "started"} onSelect={() => pick("started")} />
 
           <GroupHeading>For the selected period · {range}{m.block ? ` (${fmtDay(m.block.from)} – ${fmtDay(m.block.to)})` : ""}</GroupHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {["paid", "remaining", "expected", "invoiced"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {["paid", "remaining", "invoiced"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
           <GroupHeading>Owed today · not affected by the date filter</GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {["operational", "totalAr", "overdue", "progress", "deposits"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
+          </div>
+
+          <GroupHeading>
+            Expected Collections · from today, not affected by the date filter
+            <span className="inline-flex align-middle ml-1.5 text-muted-foreground cursor-help normal-case" title={EXPECTED_DATE_RULE} aria-label={EXPECTED_DATE_RULE}>
+              <Info className="w-3.5 h-3.5" /><span className="ml-1 text-[11px] font-normal">How is the date worked out?</span>
+            </span>
+          </GroupHeading>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {["exToday", "ex7", "ex14", "exPast"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} hint={EXPECTED_DATE_RULE} />)}
           </div>
 
           <section className="bg-white rounded-xl border border-border shadow-sm" aria-labelledby="jobs-h">
@@ -204,6 +221,7 @@ export default function ProductionRevenue() {
               <p className="text-sm text-muted-foreground p-6 text-center">{current.rows.length ? "No job matches the search." : "No jobs behind this card."}</p>
             ) : (
               <ScrollTable>
+                {current.layout === "expected" ? <ExpectedTable rows={shown} total={current.total} showTotal={!q} today={m.today} /> : (
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-secondary">
                     <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide whitespace-nowrap">
@@ -244,6 +262,7 @@ export default function ProductionRevenue() {
                     </tfoot>
                   )}
                 </table>
+                )}
               </ScrollTable>
             )}
           </section>
@@ -323,11 +342,69 @@ function GroupHeading({ children }) {
   return <h2 className="text-xs uppercase tracking-wide font-semibold text-muted-foreground pt-1">{children}</h2>;
 }
 
-/** A card that selects its jobs for the table below. */
-function CardFor({ k, c, sel, pick }) {
+/**
+ * The Expected Collections jobs: expected date, customer, amount, owner,
+ * stage, job #. The date and the owner say, on hover, where they come from;
+ * an owner the team has not set on the Sold-Job Pipeline is marked as such.
+ */
+function ExpectedTable({ rows, total, showTotal, today }) {
+  const basisText = { completion: "The job's completion date in JobProgress (the stage says it is finished).", lastInstall: "The job's last scheduled install day on the JobProgress calendar." };
+  const ownerText = {
+    rep: "The team has not set an Owner for this job on the Sold-Job Pipeline, so its sales rep is shown. Set the Owner there to change it.",
+    none: "The team has not set an Owner for this job on the Sold-Job Pipeline, and the job has no sales rep in JobProgress.",
+  };
+  return (
+    <table className="w-full text-sm">
+      <thead className="sticky top-0 z-10 bg-secondary">
+        <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide whitespace-nowrap">
+          <th className="px-3 py-2 cursor-help" title={EXPECTED_DATE_RULE}>Expected date <Info className="inline w-3 h-3 align-[-1px]" /></th>
+          <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">Customer</th>
+          <th className="px-3 py-2 text-right">Amount</th>
+          <th className="px-3 py-2 cursor-help" title="The Owner set on the Sold-Job Pipeline. Where the team has not set one, the sales rep is shown and marked.">Owner <Info className="inline w-3 h-3 align-[-1px]" /></th>
+          <th className="px-3 py-2">Stage</th>
+          <th className="px-3 py-2">Job #</th>
+          <th className="px-3 py-2" />
+        </tr>
+      </thead>
+      <tbody className="tabular-nums">
+        {rows.map((r) => (
+          <tr key={r.key} className="border-b border-border/50 hover:bg-secondary bg-white">
+            <td className="px-3 py-2 whitespace-nowrap cursor-help" title={basisText[r.basis]}>
+              {fmtDay(r.expectedDay)}{r.expectedDay === today ? <span className="ml-1.5 text-[11px] font-semibold text-accent">today</span> : null}
+              <span className="block text-[11px] text-muted-foreground">{r.basis === "completion" ? "completion date" : "last install day"}</span>
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))] font-semibold text-primary">{r.customer}</td>
+            <td className="px-3 py-2 text-right font-semibold">{money(r.amount)}</td>
+            <td className="px-3 py-2 whitespace-nowrap">
+              {r.ownerSource === "pipeline" ? r.owner
+                : r.ownerSource === "rep" ? <span className="cursor-help" title={ownerText.rep}>{r.owner} <span className="text-[11px] text-amber-800 font-semibold">(rep · no owner set by team)</span></span>
+                : <span className="cursor-help text-red-700 font-semibold" title={ownerText.none}>Not set by team</span>}
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{r.stage || "—"}</td>
+            <td className="px-3 py-2 whitespace-nowrap">{r.jobNumber || "—"}</td>
+            <td className="px-3 py-2">{r.jpUrl && <a href={r.jpUrl} target="_blank" rel="noreferrer" className="text-accent" title="Open in JobProgress"><ExternalLink className="w-4 h-4" /></a>}</td>
+          </tr>
+        ))}
+      </tbody>
+      {showTotal && (
+        <tfoot className="sticky bottom-0 z-10">
+          <tr className="bg-secondary font-semibold shadow-[0_-1px_0_0_hsl(var(--border))]">
+            <td className="px-3 py-2 bg-secondary" />
+            <td className="px-3 py-2 sticky left-0 z-20 bg-secondary">Total · the card&apos;s figure</td>
+            <td className="px-3 py-2 text-right tabular-nums bg-secondary">{money(total)}</td>
+            <td className="bg-secondary" colSpan={4} />
+          </tr>
+        </tfoot>
+      )}
+    </table>
+  );
+}
+
+/** A card that selects its jobs for the table below. `hint` is its hover explanation. */
+function CardFor({ k, c, sel, pick, hint }) {
   const active = sel === k;
   return (
-    <button onClick={() => pick(k)} aria-pressed={active}
+    <button onClick={() => pick(k)} aria-pressed={active} title={hint}
       className={`text-left rounded-xl border p-3 shadow-sm hover:shadow-md ${TONE[c.tone ?? "slate"]} ${active ? "ring-2 ring-accent ring-offset-1" : ""}`}>
       <span className="block text-[11px] uppercase tracking-wide font-semibold text-muted-foreground">{c.title}</span>
       <span className="block text-2xl font-heading font-bold mt-0.5 tabular-nums">{c.value}</span>
