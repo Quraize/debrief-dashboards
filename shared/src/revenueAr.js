@@ -245,6 +245,35 @@ export function expectedCollections(rows, inPeriod) {
   return { amount: round(due.reduce((n, r) => n + r.balance, 0)), jobs: due.length, rows: due };
 }
 
+/**
+ * Operational AR (the PM's rule 1): all unpaid contract value we expect to
+ * receive from active / started jobs, as of today — the broad cash picture.
+ *   started   the first install day has passed, or the stage says the job is
+ *             in production or finished (jobs installed before our copy of
+ *             the calendar begins have no install day, the stage carries them);
+ *   unpaid    not PAID-IN-FULL YES; a Paid stage whose ledger still shows a
+ *             balance is left out here and counted apart (the office called it
+ *             paid, so it is a ledger question, not expected cash);
+ *   amount    the sheet's balance, Gross + C.O. − (Deposit + Progress).
+ * Dead jobs and $0 jobs are not in the sheet's rows to begin with.
+ */
+export function operationalAr(rows, today) {
+  const live = (rows ?? []).filter((r) => !DEAD_STAGE.test(String(r.stage ?? "")) && !isDisqualifiedStage(String(r.stage ?? "")));
+  const started = (r) => (r.firstInstall && r.firstInstall <= today) || isStartedStage(r.stage);
+  const owing = live.filter((r) => started(r) && r.pifStatus !== PIF_STATUS.yes && r.pifStatus !== PIF_STATUS.mismatch)
+    .map((r) => ({ ...r, balance: sheetBalance(r), finished: isCompletedStage(r.stage) }))
+    .filter((r) => r.balance > 0)
+    .sort((a, b) => b.balance - a.balance);
+  const sum = (list) => round(list.reduce((n, r) => n + r.balance, 0));
+  const finished = owing.filter((r) => r.finished);
+  return {
+    amount: sum(owing), jobs: owing.length, rows: owing,
+    // Of which: finished (awaiting final payment) vs still being built.
+    finished: { amount: sum(finished), jobs: finished.length },
+    inProgress: { amount: sum(owing.filter((r) => !r.finished)), jobs: owing.length - finished.length },
+  };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

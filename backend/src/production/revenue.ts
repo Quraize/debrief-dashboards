@@ -52,12 +52,15 @@ export function sheetAr(rows: SheetFeedRow[], today: string, overdueDays: number
  * Revenue started, read off the Weekly Job Sheet's own feed and rules, so the
  * page and the sheet can never disagree: every job that brings in money, once,
  * at its first install day (a multi-week job's money is its first week's).
+ * A job with no install on our copy of the calendar (installed before it
+ * begins) comes with firstInstall null: the period cards skip it, and
+ * Operational AR counts it as started by its stage.
  */
 export function startedRows(rows: SheetFeedRow[]) {
   return rows.filter(bringsMoney).flatMap((r) => {
     const firstInstall = firstInstallDay(r);
     const lastInstall = r.visits.filter((v) => isInstallCode(v.code)).map((v) => v.day).sort().at(-1) ?? null;
-    return firstInstall ? [{
+    return [{
       jobId: r.jobId, label: r.label, customer: r.customer, jobNumber: r.jobNumber, city: r.city, address: r.address,
       stage: r.stage, salesRep: r.salesRep, firstInstall, gross: r.gross, changeOrders: r.changeOrders, totalRev: r.totalRev, jpUrl: r.jpUrl,
       // The sheet's PAID-IN-FULL answer (YES / NO / YES with a ledger balance), and the money behind it.
@@ -66,6 +69,6 @@ export function startedRows(rows: SheetFeedRow[]) {
       deposit: r.deposit, progressPayments: r.progressPayments,
       // When its balance is expected: see expectedDayOf (shared/revenueAr.js).
       completionDate: r.completionDate, lastInstall,
-    }] : [];
+    }];
   });
 }

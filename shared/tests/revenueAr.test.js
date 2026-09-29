@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("operationalAr — all unpaid value on started jobs, today", () => {
+  const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: 5000, progressPayments: null, ...over });
+  it("counts started jobs not paid in full at the sheet balance, by calendar or by stage, and nothing else", () => {
+    const ar = operationalAr([
+      job({ jobId: "building" }),                                                                   // $15,000, in production
+      job({ jobId: "old", stage: "COMPLETED NEED FINAL PAYMENT!!", firstInstall: null, gross: 1000, deposit: null }), // installed before our calendar: the stage says started — $1,000
+      job({ jobId: "scheduled", stage: "Roof/Siding Scheduled", firstInstall: "2026-10-05" }),       // not started yet
+      job({ jobId: "scheduledStarted", stage: "Roof/Siding Scheduled", firstInstall: "2026-09-28", gross: 8000, deposit: 1000 }), // the crew was there: $7,000
+      job({ jobId: "paid", pifStatus: "YES", deposit: 20000 }),
+      job({ jobId: "paidStage", stage: "Paid New Roof", pifStatus: "YES (ledger still shows a balance)" }),
+      job({ jobId: "dead", stage: "Cancelled" }),
+    ], "2026-09-29");
+    expect(ar.rows.map((r) => r.jobId)).toEqual(["building", "scheduledStarted", "old"]);
+    expect(ar).toMatchObject({ amount: 23000, jobs: 3, finished: { amount: 1000, jobs: 1 }, inProgress: { amount: 22000, jobs: 2 } });
+    expect(operationalAr(undefined, "2026-09-29")).toMatchObject({ amount: 0, jobs: 0 });
+  });
+});
 
 describe("expectedCollections — the balance due in a period", () => {
   const job = (over) => ({ jobId: "j", stage: "Production Started", pifStatus: "NO", gross: 20000, changeOrders: 1000, deposit: 5000, progressPayments: 6000, completionDate: null, lastInstall: "2026-09-30", ...over });

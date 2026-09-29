@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, startedRevenue, expectedCollections, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, expectedCollections, operationalAr, STATUSES } from "@allied/shared/revenueAr";
 import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
@@ -88,10 +88,9 @@ export default function ProductionRevenue() {
       <div>
         <h1 className="text-2xl font-heading font-bold text-primary">Production Revenue &amp; AR</h1>
         <p className="text-sm text-muted-foreground max-w-4xl">
-          Of the work we <strong>started</strong> — first install visit done, job in a production or later stage — what it is worth, what
-          has been paid in full, what is still owed, what is expected in this week and next, and what is overdue. Started figures follow the
-          date range; expected cash and AR are always the whole book. <strong>Expected</strong> means the balance owed, in the week the
-          job completes. <strong>Overdue</strong> is owed money more than {data?.totals.overdueDays ?? 30} days after completion.
+          The Weekly Job Sheet&apos;s jobs and numbers. The top half follows the date filter: what <strong>started</strong> in that period,
+          what of it is paid in full or still owed, and what should come in. The bottom half is <strong>what customers owe today</strong>,
+          whatever period is picked.
         </p>
       </div>
 
@@ -105,8 +104,8 @@ export default function ProductionRevenue() {
         <>
           {started && <StartedPanel s={started} range={range} today={data.today} />}
 
-          {/* His numbers, his order. */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <GroupHeading>For the selected period · {range}{started?.block ? ` (${fmtDay(started.block.from)} – ${fmtDay(started.block.to)})` : ""}</GroupHeading>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {started && (
               <Card tone="green" label="Paid in Full" value={money(started.paidInFull.totalRev)}
                 sub={<>
@@ -136,15 +135,34 @@ export default function ProductionRevenue() {
                   )}
                 </>} />
             )}
+          </div>
+
+          <GroupHeading>Owed today · not affected by the date filter</GroupHeading>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {started && data.ar && (() => {
+              // Operational AR = what is owed on jobs still being built + Total AR (the
+              // finished jobs, the card beside it), so the two cards always reconcile.
+              const op = operationalAr(data.started.rows, data.today);
+              const amount = Math.round((op.inProgress.amount + data.ar.totalAR) * 100) / 100;
+              const jobs = op.inProgress.jobs + data.ar.totalARJobs;
+              const building = op.rows.filter((r) => !r.finished);
+              return (
+                <Card tone="amber" label="Operational AR" value={money(amount)}
+                  sub={<span title={building.map((r) => `${r.customer || r.label}: ${money(r.balance)}`).join("\n")}>
+                    Everything still owed on {jobs} started job{jobs === 1 ? "" : "s"}:
+                    <span className="block">{money(op.inProgress.amount)} on {op.inProgress.jobs} still being built + {money(data.ar.totalAR)} Total AR</span>
+                  </span>} />
+              );
+            })()}
             {data.ar && (() => {
               const ar = data.ar;
               const names = (list) => list.map((r) => `${r.customer || r.label}: ${money(r.owed)} (${r.daysOutstanding ?? "?"} days)`).join("\n");
               return (<>
-                <Card tone={ar.totalAR > 0 ? "amber" : "green"} label="Total AR · today" value={money(ar.totalAR)}
-                  sub={<span title={names(ar.rows)}>{ar.totalARJobs} finished job{ar.totalARJobs === 1 ? "" : "s"} still owing · not affected by the date filter</span>} />
-                <Card tone={ar.overdueAR > 0 ? "red" : "green"} label={`Overdue AR · ${ar.overdueDays}+ days · today`} value={money(ar.overdueAR)}
+                <Card tone={ar.totalAR > 0 ? "amber" : "green"} label="Total AR · finished jobs" value={money(ar.totalAR)}
+                  sub={<span title={names(ar.rows)}>{ar.totalARJobs} job{ar.totalARJobs === 1 ? "" : "s"} in Completed Need Final Payment or Collections, still owing · part of Operational AR</span>} />
+                <Card tone={ar.overdueAR > 0 ? "red" : "green"} label={`Overdue AR · ${ar.overdueDays}+ days`} value={money(ar.overdueAR)}
                   sub={<span title={names(ar.rows.filter((r) => r.overdue))}>
-                    {ar.overdueARJobs} job{ar.overdueARJobs === 1 ? "" : "s"} · 31–60: {money(ar.aging.d31_60)} · 61–90: {money(ar.aging.d61_90)} · 90+: {money(ar.aging.d90plus)}
+                    {ar.overdueARJobs} finished job{ar.overdueARJobs === 1 ? "" : "s"} unpaid more than {ar.overdueDays} days after completion · 31–60: {money(ar.aging.d31_60)} · 61–90: {money(ar.aging.d61_90)} · 90+: {money(ar.aging.d90plus)}
                   </span>} />
               </>);
             })()}
@@ -337,6 +355,10 @@ function StartedPanel({ s, range, today }) {
       )}
     </section>
   );
+}
+
+function GroupHeading({ children }) {
+  return <h2 className="text-xs uppercase tracking-wide font-semibold text-muted-foreground pt-1">{children}</h2>;
 }
 
 function Card({ tone, label, value, sub, onClick, active }) {
