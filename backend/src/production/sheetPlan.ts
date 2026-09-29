@@ -398,6 +398,20 @@ export function firstInstallDay(r: Pick<SheetRow, "visits">): string | null {
   return first;
 }
 
+/**
+ * No money, no row (the production manager's rule): a job whose contract is
+ * $0 — a warranty callback, a no-charge service visit, a placeholder — gets
+ * no row in any week, the month summary or the pre-approved block. A job whose
+ * amount is MISSING (not entered in JobProgress yet) is not $0 and stays.
+ */
+export function bringsMoney(r: Pick<SheetRow, "totalRev" | "gross">): boolean {
+  const v = r.totalRev ?? r.gross;
+  return v === null || v === undefined || Number(v) !== 0;
+}
+
+/** Weeks starting on or after this Monday are cut at a month end (SHEET_SPLIT_WEEKS_FROM). */
+export const sheetSplitFrom = (env: NodeJS.ProcessEnv = process.env): string => env.SHEET_SPLIT_WEEKS_FROM || "2026-09-28";
+
 export interface MonthLine { label: string; jobs: number; gross: number; totalRev: number; deposit: number; paid: number; owed: number }
 
 /**

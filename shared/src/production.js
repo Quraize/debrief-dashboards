@@ -45,6 +45,18 @@ export function splitAtMonthEnd({ from, to }) {
   return [{ from, to: last }, { from: first, to }];
 }
 
+/**
+ * The Weekly Job Sheet block a day belongs to: its Monday–Sunday week, cut at
+ * the month end when the week starts on or after `splitFrom` (the sheet's
+ * SHEET_SPLIT_WEEKS_FROM), so 9/30 is in 9/28–9/30 and 10/2 in 10/1–10/4.
+ */
+export function sheetWeekOf(day, splitFrom) {
+  const w = weekBounds(day);
+  const segs = splitFrom && w.from >= splitFrom ? splitAtMonthEnd(w) : [w];
+  const d = String(day).slice(0, 10);
+  return segs.find((s) => d >= s.from && d <= s.to) ?? w;
+}
+
 /** Monday..Sunday (office calendar) of the week containing `day`, plus `offset` weeks. */
 export function weekBounds(day, offset = 0) {
   const [y, m, d] = String(day).slice(0, 10).split("-").map(Number);

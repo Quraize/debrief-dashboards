@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR, splitAtMonthEnd } from "../src/production.js";
+import { parseScheduleTitle, scheduleStatus, jobTypeColor, DEFAULT_TYPE_COLOR, splitAtMonthEnd, sheetWeekOf } from "../src/production.js";
+
+describe("sheetWeekOf", () => {
+  it("names the sheet block a day is in: its Monday week, cut at the month end once splitting applies", () => {
+    expect(sheetWeekOf("2026-09-30", "2026-08-31")).toEqual({ from: "2026-09-28", to: "2026-09-30" });
+    expect(sheetWeekOf("2026-10-02", "2026-08-31")).toEqual({ from: "2026-10-01", to: "2026-10-04" });
+    expect(sheetWeekOf("2026-09-03", "2026-08-31")).toEqual({ from: "2026-09-01", to: "2026-09-06" });
+    expect(sheetWeekOf("2026-09-16", "2026-08-31")).toEqual({ from: "2026-09-14", to: "2026-09-20" });
+    // Before the cut-over a month-crossing week stays whole.
+    expect(sheetWeekOf("2026-09-03", "2026-09-28")).toEqual({ from: "2026-08-31", to: "2026-09-06" });
+  });
+});
 
 describe("parseScheduleTitle — the office's title convention", () => {
   // Every title below was observed verbatim on the September 2026 production calendar.

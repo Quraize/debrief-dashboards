@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("startedRevenue — the Weekly Job Sheet's numbers", () => {
+  // Three of September's reconciled jobs and one October one.
+  const rows = [
+    { jobId: "guinto", firstInstall: "2026-09-01", gross: 20599, changeOrders: 3600, totalRev: 24199 },
+    { jobId: "willis", firstInstall: "2026-09-29", gross: 21699, changeOrders: 0, totalRev: 21699 },
+    { jobId: "diss", firstInstall: "2026-09-30", gross: 26749, changeOrders: 0, totalRev: 26749 },
+    { jobId: "htun", firstInstall: "2026-10-02", gross: 8000, changeOrders: null, totalRev: 8000 },
+  ];
+  it("adds each job once, splits started from still-to-start, and lists the sheet blocks newest first", () => {
+    const s = startedRevenue(rows, "2026-09-29", "2026-08-31");
+    expect(s).toMatchObject({ jobs: 4, gross: 77047, changeOrders: 3600, totalRev: 80647 });
+    expect(s.started).toEqual({ jobs: 2, gross: 42298, changeOrders: 3600, totalRev: 45898 });
+    expect(s.upcoming).toEqual({ jobs: 2, gross: 34749, changeOrders: 0, totalRev: 34749 });
+    // The week of 9/28 is two sheet blocks: September's 9/28–9/30 and October's 10/1–10/4.
+    expect(s.weeks.map((w) => [w.from, w.to, w.jobs, w.gross])).toEqual([
+      ["2026-10-01", "2026-10-04", 1, 8000],
+      ["2026-09-28", "2026-09-30", 2, 48448],
+      ["2026-09-01", "2026-09-06", 1, 20599],
+    ]);
+  });
+  it("is all zeros with no rows", () => {
+    expect(startedRevenue([], "2026-09-29", "2026-08-31")).toEqual({
+      jobs: 0, gross: 0, changeOrders: 0, totalRev: 0, weeks: [],
+      started: { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 }, upcoming: { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 },
+    });
+    expect(startedRevenue(undefined, "2026-09-29").jobs).toBe(0);
+  });
+});
 
 const TODAY = "2026-09-23"; // Wednesday; this week 9/21–9/27, next 9/28–10/4, month 2026-09
 const pay = (date, amount, over = {}) => ({ date, amount, method: "Check", status: "paid", canceled: false, ...over });

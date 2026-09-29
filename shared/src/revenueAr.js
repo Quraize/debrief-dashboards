@@ -25,7 +25,7 @@
 
 import { stageKey, isPaidStage } from "./jobStages.js";
 import { isDisqualifiedStage } from "./leadFlow.js";
-import { weekBounds } from "./production.js";
+import { weekBounds, sheetWeekOf } from "./production.js";
 import { DEAD_STAGE, IN_PRODUCTION_STAGES, AWAITING_PAYMENT_STAGES } from "./soldPipeline.js";
 
 export const AR_OVERDUE_DAYS_DEFAULT = 30;
@@ -162,6 +162,34 @@ export function revenueTotals(rows, today, opts = {}, book = rows) {
       noContractValue: book.filter((r) => r.noContractValue).length,
       noLedger: book.filter((r) => r.noLedger).length,
     },
+  };
+}
+
+/**
+ * Revenue started — the Weekly Job Sheet's own numbers. `rows` are the sheet's
+ * jobs ({ firstInstall, gross, changeOrders, totalRev, … }): each counted ONCE,
+ * in the week its first install visit falls in (a multi-week job's money is
+ * its first week's), $0 jobs already left out. Pass the rows of the period
+ * being looked at; the result is its totals, split into what has already
+ * started (first install day on or before `today`) and what is still to start,
+ * and the sheet blocks it spans, newest first, each with its own subtotal.
+ */
+export function startedRevenue(rows, today, splitFrom) {
+  const sum = (list, k) => round(list.reduce((n, r) => n + (num(r[k]) ?? 0), 0));
+  const totals = (list) => ({ jobs: list.length, gross: sum(list, "gross"), changeOrders: sum(list, "changeOrders"), totalRev: sum(list, "totalRev") });
+  rows = rows ?? [];
+  const blocks = new Map();
+  for (const r of rows) {
+    const b = sheetWeekOf(r.firstInstall, splitFrom);
+    const key = `${b.from}..${b.to}`;
+    (blocks.get(key) ?? blocks.set(key, { ...b, rows: [] }).get(key)).rows.push(r);
+  }
+  const weeks = [...blocks.values()].sort((a, b) => b.from.localeCompare(a.from)).map((b) => ({ from: b.from, to: b.to, ...totals(b.rows) }));
+  return {
+    ...totals(rows),
+    started: totals(rows.filter((r) => r.firstInstall <= today)),
+    upcoming: totals(rows.filter((r) => r.firstInstall > today)),
+    weeks,
   };
 }
 

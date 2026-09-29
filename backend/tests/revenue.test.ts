@@ -29,8 +29,8 @@ async function login(email: string, role: string): Promise<Auth> {
 async function job(id: string, stage: string, signed: string, contract: number | null, received: number | null, owed: number | null, completion: string | null = null) {
   await db.owner.query(
     `INSERT INTO jp_job (jp_job_id, jp_customer_id, job_number, current_stage, is_insurance, jp_created_at, contract_signed_date,
-                         total_job_revenue, total_payment_received, total_amount_owed, completion_date, rep_names)
-     VALUES ($1, '9001', $2, $3, false, now() - interval '60 days', $4::date, $5, $6, $7, $8::date, 'Matt Steussing')`,
+                         total_job_revenue, total_payment_received, total_amount_owed, completion_date, rep_names, stage_seen_at)
+     VALUES ($1, '9001', $2, $3, false, now() - interval '60 days', $4::date, $5, $6, $7, $8::date, 'Matt Steussing', now())`,
     [id, `2609-${id}-01`, stage, signed, contract, received, owed, completion]);
 }
 async function visit(id: string, jobId: string, dayEt: string) {
@@ -105,6 +105,15 @@ describe.skipIf(!reachable)("Revenue & AR", () => {
     // Started this week includes job a (yesterday) unless yesterday fell in last week.
     expect(p.totals.startedThisWeek + p.totals.startedMonthToDate).toBeGreaterThan(0);
     expect(p.rows[0].jpUrl).toContain("/job/");
+  });
+
+  it("carries revenue started the Weekly Job Sheet's way: each job with money once, at its first install day", async () => {
+    const p = (await app.inject({ method: "GET", url: "/api/production/revenue", ...pm })).json();
+    const started = Object.fromEntries(p.started.rows.map((r: { jobId: string; firstInstall: string }) => [r.jobId, r.firstInstall]));
+    // c has no install on the calendar; f is booked ahead and still counts in the week it starts.
+    expect(started).toEqual({ a: daysAgo(1), b: daysAgo(15), d: daysAgo(60), e: daysAgo(5), f: iso(new Date(today.getTime() + 10 * 86_400_000)) });
+    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a")).toMatchObject({ totalRev: 20000, customer: "Maureen Bondy" });
+    expect(p.started.splitFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("is management's: production and anonymous callers are refused", async () => {

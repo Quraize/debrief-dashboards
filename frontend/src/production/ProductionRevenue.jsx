@@ -12,11 +12,11 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, STATUSES } from "@allied/shared/revenueAr";
 import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
-import { Loader2, ExternalLink, Search } from "lucide-react";
+import { Loader2, ExternalLink, Search, ChevronDown, ChevronRight } from "lucide-react";
 import { productionApi } from "./api";
 
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
@@ -41,7 +41,7 @@ export default function ProductionRevenue() {
   const [q, setQ] = useState("");
   // The range applies to the START date by default (this is a started-revenue
   // view); switch it to the completion date to look at what finished.
-  const [range, setRange] = useState("This Month");
+  const [range, setRange] = useState("This Week");
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
   const [basis, setBasis] = useState("started");
@@ -51,6 +51,13 @@ export default function ProductionRevenue() {
     if (range === ALL_TIME_FILTER) return book;
     return book.filter((r) => inDateRange(basis === "started" ? r.startedDay : r.completedDay, range, cs, ce));
   }, [book, range, cs, ce, basis]);
+  // Revenue started: the Weekly Job Sheet's jobs, each once, in the week its
+  // first install falls in; the date range picks which weeks.
+  const started = useMemo(() => {
+    if (!data?.started) return null;
+    const list = range === ALL_TIME_FILTER ? data.started.rows : data.started.rows.filter((r) => inDateRange(r.firstInstall, range, cs, ce));
+    return { rows: list, ...startedRevenue(list, data.today, data.started.splitFrom) };
+  }, [data, range, cs, ce]);
   // Started / paid / owed follow the range; expected cash and AR are the whole book.
   const t = useMemo(() => (data ? revenueTotals(inRange, data.today, { overdueDays: data.totals.overdueDays }, book) : null), [inRange, book, data]);
 
@@ -101,10 +108,10 @@ export default function ProductionRevenue() {
           : <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : (
         <>
+          {started && <StartedPanel s={started} range={range} today={data.today} />}
+
           {/* His numbers, his order. */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8 gap-3">
-            <Card tone="navy" label="Revenue Started This Week" value={money(t.startedThisWeek)} sub={`${t.startedThisWeekJobs} job${t.startedThisWeekJobs === 1 ? "" : "s"} · ${fmtDay(t.thisWeek.from)} – ${fmtDay(t.thisWeek.to)}`} />
-            <Card tone="navy" label="Revenue Started Month to Date" value={money(t.startedMonthToDate)} sub={`${t.startedMonthToDateJobs} jobs started this month`} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <Card tone="green" label="Paid in Full" value={money(t.paidInFull)} sub={`${t.paidInFullJobs} of ${t.jobs} started jobs in range`} onClick={() => { setStatus("paid"); setFlag(""); }} active={status === "paid" && !flag} />
             <Card tone="amber" label="Remaining Owed" value={money(t.remainingOwed)} sub={`${t.remainingOwedJobs} started jobs in range still owing`} onClick={() => { setStatus("all"); setFlag(""); }} active={status === "all" && !flag} />
             <Card tone="blue" label="Expected Collections This Week" value={money(t.expectedThisWeek)} sub={`${t.expectedThisWeekJobs} job${t.expectedThisWeekJobs === 1 ? "" : "s"} completing this week`} />
@@ -200,6 +207,105 @@ export default function ProductionRevenue() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Revenue Started for the range picked above: the Weekly Job Sheet's numbers.
+ * Every job once, in the week its first install falls in (a multi-week job's
+ * money is its first week's), weeks cut at the month end like the sheet, $0
+ * jobs left out. Gross matches the sheet's Weekly Total and Cumulative rows.
+ */
+function StartedPanel({ s, range, today }) {
+  const [open, setOpen] = useState(false);
+  const plural = (n) => `${n} job${n === 1 ? "" : "s"}`;
+  const byBlock = (w) => s.rows.filter((r) => r.firstInstall >= w.from && r.firstInstall <= w.to)
+    .sort((a, b) => a.firstInstall.localeCompare(b.firstInstall) || String(a.customer ?? "").localeCompare(String(b.customer ?? "")));
+  return (
+    <section className="bg-white rounded-xl border border-border shadow-sm" aria-labelledby="started-h">
+      <div className="p-4 flex flex-col lg:flex-row lg:items-start gap-4">
+        <div className="lg:w-80 shrink-0 rounded-xl bg-primary text-primary-foreground p-4">
+          <h2 id="started-h" className="text-[11px] uppercase tracking-wide font-semibold text-primary-foreground/80">Revenue Started · {range}</h2>
+          <div className="text-3xl font-heading font-bold tabular-nums mt-1">{money(s.gross)}</div>
+          <div className="text-xs text-primary-foreground/80 mt-1">
+            Gross, {plural(s.jobs)}
+            {s.changeOrders ? <> · {money(s.totalRev)} with {money(s.changeOrders)} change orders</> : null}
+          </div>
+          {s.upcoming.jobs > 0 && (
+            <div className="mt-3 pt-3 border-t border-primary-foreground/20 text-xs grid grid-cols-2 gap-2">
+              <div><div className="text-primary-foreground/70">Already started</div><div className="font-semibold tabular-nums">{money(s.started.gross)} · {s.started.jobs}</div></div>
+              <div><div className="text-primary-foreground/70">Still to start</div><div className="font-semibold tabular-nums">{money(s.upcoming.gross)} · {s.upcoming.jobs}</div></div>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-muted-foreground mb-2">
+            The Weekly Job Sheet&apos;s numbers: each job counted once, in the week its install starts, with weeks cut at the month end.
+            Jobs with a $0 contract are left out.
+          </p>
+          {s.weeks.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">No installs start in this range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-border">
+                    <th className="py-1.5 pr-3 font-semibold">Sheet week</th>
+                    <th className="py-1.5 pr-3 font-semibold text-right">Jobs</th>
+                    <th className="py-1.5 pr-3 font-semibold text-right">Gross</th>
+                    <th className="py-1.5 pr-3 font-semibold text-right">Change orders</th>
+                    <th className="py-1.5 font-semibold text-right">Total Rev</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  {s.weeks.map((w) => (
+                    <tr key={w.from} className="border-b border-border/50">
+                      <td className="py-1.5 pr-3 whitespace-nowrap">{fmtDay(w.from)} – {fmtDay(w.to)}{w.from <= today && today <= w.to ? <span className="ml-1.5 text-[11px] font-semibold text-accent">this week</span> : null}</td>
+                      <td className="py-1.5 pr-3 text-right">{w.jobs}</td>
+                      <td className="py-1.5 pr-3 text-right font-semibold">{money(w.gross)}</td>
+                      <td className="py-1.5 pr-3 text-right">{money(w.changeOrders)}</td>
+                      <td className="py-1.5 text-right">{money(w.totalRev)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {s.jobs > 0 && (
+            <button onClick={() => setOpen(!open)} aria-expanded={open} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-accent">
+              {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}{open ? "Hide" : "Show"} the {plural(s.jobs)}
+            </button>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div className="border-t border-border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary">
+              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                <th className="px-3 py-2">Install starts</th><th className="px-3 py-2">Job</th><th className="px-3 py-2">Job #</th>
+                <th className="px-3 py-2">Stage</th><th className="px-3 py-2 text-right">Gross</th><th className="px-3 py-2 text-right">C.O.</th>
+                <th className="px-3 py-2 text-right">Total Rev</th><th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="tabular-nums">
+              {s.weeks.flatMap((w) => byBlock(w).map((r) => (
+                <tr key={r.jobId} className="border-b border-border/50">
+                  <td className="px-3 py-1.5 whitespace-nowrap">{fmtDay(r.firstInstall)}{r.firstInstall > today ? <span className="ml-1.5 text-[11px] text-muted-foreground">upcoming</span> : null}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap font-semibold text-primary">{r.label || r.customer || "—"}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap">{r.jobNumber || "—"}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-xs text-muted-foreground">{r.stage || "—"}</td>
+                  <td className="px-3 py-1.5 text-right">{r.gross == null ? <span className="text-red-700 font-semibold">not entered</span> : money(r.gross)}</td>
+                  <td className="px-3 py-1.5 text-right">{money(r.changeOrders)}</td>
+                  <td className="px-3 py-1.5 text-right">{money(r.totalRev)}</td>
+                  <td className="px-3 py-1.5">{r.jpUrl && <a href={r.jpUrl} target="_blank" rel="noreferrer" className="text-accent" title="Open in JobProgress"><ExternalLink className="w-4 h-4" /></a>}</td>
+                </tr>
+              )))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -7,6 +7,8 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { productionApi } from "./api";
+import { startedRevenue } from "@allied/shared/revenueAr";
+import { inDateRange } from "@allied/shared/constants";
 
 const money = (v) => (v == null ? "—" : "$" + Math.round(Number(v)).toLocaleString());
 
@@ -14,9 +16,11 @@ export default function RevenueHeadline() {
   const { data } = useQuery({ queryKey: ["production-revenue"], queryFn: productionApi.revenue, staleTime: 60_000 });
   const t = data?.totals;
   if (!t) return null;
+  // The Weekly Job Sheet's numbers: each job once, in its first install week.
+  const period = (f) => startedRevenue((data.started?.rows ?? []).filter((r) => inDateRange(r.firstInstall, f)), data.today, data.started?.splitFrom).gross;
   const cells = [
-    { label: "Started this week", value: money(t.startedThisWeek), cls: "text-primary" },
-    { label: "Started month to date", value: money(t.startedMonthToDate), cls: "text-primary" },
+    { label: "Started this week", value: money(period("This Week")), cls: "text-primary" },
+    { label: "Started this month", value: money(period("This Month")), cls: "text-primary" },
     { label: "Expected this week", value: money(t.expectedThisWeek), cls: "text-blue-700" },
     { label: "Total AR", value: money(t.totalAR), cls: t.totalAR > 0 ? "text-amber-700" : "text-green-700" },
     { label: `Overdue (${t.overdueDays}d+)`, value: money(t.overdueAR), cls: t.overdueAR > 0 ? "text-red-700" : "text-green-700" },

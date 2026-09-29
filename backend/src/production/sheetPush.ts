@@ -17,7 +17,7 @@ import { withServiceRole } from "../db/client.js";
 import { GoogleSheetsClient, a1, type CellValue, type ProtectedRange } from "../integrations/google/sheets.js";
 import { MASTER_COLUMNS, FILLS, NUM_FMT } from "@allied/shared/weeklyJobSheetMaster";
 import { weeklyJobSheetAsService, type SheetRow } from "./weeklyJobSheet.js";
-import { planSheet, weekBounds, colIndex, firstInstallDay, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
+import { planSheet, weekBounds, colIndex, firstInstallDay, bringsMoney, sheetSplitFrom, type Plan, type PlanOp, type WeekInput, type WeekLock } from "./sheetPlan.js";
 import { BOARD_TIMEZONE } from "./board.js";
 import { splitAtMonthEnd } from "@allied/shared/production";
 import { pushDashboard, DASHBOARD_TAB_DEFAULT, DATA_TAB_DEFAULT, type DashboardPushResult } from "./dashboardSheet.js";
@@ -50,7 +50,7 @@ export function sheetPushSettings(): SheetPushSettings {
     cron: process.env.SHEET_PUSH_CRON ?? "20 * * * *",
     lockWeeks: process.env.SHEET_LOCK_ENABLED !== "false",
     removeEmptyStale: process.env.SHEET_REMOVE_EMPTY_STALE === "true",
-    splitFrom: process.env.SHEET_SPLIT_WEEKS_FROM || "2026-09-28",
+    splitFrom: sheetSplitFrom(),
     dashboard: process.env.SHEET_DASHBOARD_ENABLED !== "false",
     dashboardTab: process.env.SHEET_DASHBOARD_TAB || DASHBOARD_TAB_DEFAULT,
     dashboardDataTab: process.env.SHEET_DASHBOARD_DATA_TAB || DATA_TAB_DEFAULT,
@@ -169,16 +169,7 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
 
 export const LOCK_DESCRIPTION = (label: string): string => `Automation lock — week ${label}`;
 
-/**
- * No money, no row (the production manager's rule): a job whose contract is
- * $0 — a warranty callback, a no-charge service visit, a placeholder — gets
- * no row in any week, the month summary or the pre-approved block. A job whose
- * amount is MISSING (not entered in JobProgress yet) is not $0 and stays.
- */
-export function bringsMoney(r: Pick<SheetRow, "totalRev" | "gross">): boolean {
-  const v = r.totalRev ?? r.gross;
-  return v === null || v === undefined || Number(v) !== 0;
-}
+export { bringsMoney };
 
 /**
  * The weeks one push covers, each with its jobs. A job goes in ONE week only:
