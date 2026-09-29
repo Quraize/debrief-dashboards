@@ -28,8 +28,8 @@ export default function RevenueHeadline() {
     { label: "Started this week", value: money(thisWeek), cls: "text-primary" },
     { label: "Started this month", value: money(thisMonth), cls: "text-primary" },
     { label: "Expected this week", value: money(t.expectedThisWeek), cls: "text-blue-700" },
-    { label: "Total AR", value: money(data.ar?.totalAR ?? t.totalAR), cls: (data.ar?.totalAR ?? t.totalAR) > 0 ? "text-amber-700" : "text-green-700" },
-    { label: `Overdue (${t.overdueDays}d+)`, value: money(data.ar?.overdueAR ?? t.overdueAR), cls: (data.ar?.overdueAR ?? t.overdueAR) > 0 ? "text-red-700" : "text-green-700" },
+    { label: "Billed AR", value: money(data.ar?.totalAR ?? t.totalAR), cls: (data.ar?.totalAR ?? t.totalAR) > 0 ? "text-amber-700" : "text-green-700" },
+    { label: `Overdue Billed AR (${t.overdueDays}d+)`, value: money(data.ar?.overdueAR ?? t.overdueAR), cls: (data.ar?.overdueAR ?? t.overdueAR) > 0 ? "text-red-700" : "text-green-700" },
   ];
   return (
     <Link to="/production/revenue" className="block bg-white rounded-xl border border-border p-3 shadow-sm hover:shadow-md transition-shadow" title="Open Revenue & AR">

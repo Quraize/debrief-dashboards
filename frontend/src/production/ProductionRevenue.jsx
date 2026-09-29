@@ -4,7 +4,7 @@
  *
  * Three groups of cards: the selected period (Revenue Started, Paid in Full,
  * Remaining Owed, Invoiced AR), what customers owe today (Operational AR,
- * Total AR, Overdue AR, Progress Payments Due, Deposits Missing), and
+ * Billed AR, Overdue Billed AR, Progress Payments Due, Deposits Missing), and
  * Expected Collections from today (Today, Next 7 days, Next 14 days, Past
  * expected date). Clicking a card shows the jobs behind it in the one table
  * under the cards; the table's total is the card's number.
@@ -27,6 +27,30 @@ const money = (v) => (v == null ? "—" : (Number(v) < 0 ? "−$" : "$") + Math.
 const fmtDay = (s) => (s ? new Date(`${s}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "—");
 const num = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? 0 : Number(v));
 const plural = (n, w = "job") => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+/**
+ * What every card counts, where its numbers come from, and whether the date
+ * filter applies — shown when a card is hovered (the PM: no number without its
+ * definition). One place, so the words cannot drift from card to card.
+ */
+const PERIOD = "Follows the date filter.";
+const TODAY_ONLY = "As of today; the date filter does not change it.";
+const DEF = {
+  started: `Gross contract of every job whose first install falls in the period, counted once, in the week its install starts (weeks cut at the month end), as on the Weekly Job Sheet. $0 jobs are left out. ${PERIOD}`,
+  paid: `Jobs started in the period whose PAID-IN-FULL is YES on the Weekly Job Sheet (nothing owed in JobProgress with money received, or a Paid stage), added up at Total Rev w/ C.O.s. ${PERIOD}`,
+  remaining: `Jobs started in the period: Total Rev w/ C.O.s minus Deposit and Progress Payments, the Weekly Job Sheet's Balance Owed. ${PERIOD}`,
+  invoiced: `Open balance of the JobProgress invoices dated in the period (closed or void invoices owe nothing), and the jobs that started in it with no invoice. ${PERIOD}`,
+  operational: `Outstanding contract balance — NOT accounting receivables. Everything still owed on started jobs, including work not billed yet: jobs not yet billed at the sheet balance, plus Billed AR. ${TODAY_ONLY}`,
+  billed: `Jobs in Completed Need Final Payment or Collections that still owe, at JobProgress's amount owed, as the sheet's KPIs dashboard counts them. ${TODAY_ONLY}`,
+  overdue: (d) => `Billed AR still unpaid more than ${d} days after the job's completion date, by age. Matches the sheet's KPIs dashboard. ${TODAY_ONLY}`,
+  progress: `Started jobs that have a deposit: Total Rev w/ C.O.s minus the Deposit minus Progress Payments (every payment after the first, as on the sheet). ${TODAY_ONLY}`,
+  deposits: `Started jobs (first install day passed, or a production or finished stage) with a blank or $0 Deposit on the sheet. The amount is their contract. ${TODAY_ONLY}`,
+  cuAll: `Physically complete jobs with money still owed — chase these first: the three tiers beside it plus Billed AR. Amounts are the sheet balance. ${TODAY_ONLY}`,
+  cuWalk: `Jobs at Need Final Walk-Through or City & Manufacturer Inspection (the work is done) still owing, at the sheet balance. ${TODAY_ONLY}`,
+  cuPunch: `Jobs at Gutters/Solar/Punchlist (the main job is done, small items left) still owing, at the sheet balance. ${TODAY_ONLY}`,
+  cuCrew: `Jobs whose every install visit is done on the JobProgress calendar but whose stage was never moved on, still owing. ${TODAY_ONLY}`,
+  expected: (rule) => `${rule} Amount: the sheet balance of jobs not paid in full. Owner: the Owner set on the Sold-Job Pipeline, else the sales rep. Counted from today; the date filter does not change it.`,
+};
 
 /** The week filters, as steps through the sheet's blocks from today's. */
 const BLOCK_OFFSET = { "This Week": 0, "Last Week": -1, "Next Week": 1 };
@@ -74,7 +98,7 @@ export default function ProductionRevenue() {
     const ex = expectedSchedule(all, today, (id) => byId.get(id)?.owner ?? null);
     const exRows = (list2) => list2.map((r) => ({ ...row(r.jobId, r.amount), expectedDay: r.expectedDay, basis: r.basis, owner: r.owner, ownerSource: r.ownerSource }));
     const exCard = (key, title, when) => ({
-      title, amountLabel: "Expected", total: ex[key].amount, value: money(ex[key].amount), tone: key === "pastDue" ? (ex[key].jobs ? "amber" : "green") : "blue",
+      title, hint: DEF.expected(EXPECTED_DATE_RULE), amountLabel: "Expected", total: ex[key].amount, value: money(ex[key].amount), tone: key === "pastDue" ? (ex[key].jobs ? "amber" : "green") : "blue",
       sub: <>{plural(ex[key].jobs)} · {when}</>, layout: "expected", rows: exRows(ex[key].rows),
     });
     const invoiced = invoicedAr(all, inPeriod, today);
@@ -90,7 +114,7 @@ export default function ProductionRevenue() {
     const prog = progressDue(all, today);
     const dep = depositsMissing(all, today);
     const building = op.rows.filter((r) => !r.finished);
-    // Completed but Unpaid: its three tiers here, plus the billed jobs (Total AR).
+    // Completed but Unpaid: its three tiers here, plus the billed jobs (Billed AR).
     const cu = completedUnpaid(all);
     const TIER_NOTE = { walkthrough: "Work done · walk-through or inspection left", punchlist: "Main work done · punch list or gutters left", crew: "Crew finished · stage not updated" };
     const cuRows = (list2) => list2.map((r) => row(r.jobId, r.balance, TIER_NOTE[r.tier]));
@@ -98,12 +122,12 @@ export default function ProductionRevenue() {
 
     const cards = {
       started: {
-        title: `Revenue Started · ${range}`, amountLabel: "Gross", total: s.gross,
+        title: `Revenue Started · ${range}`, hint: DEF.started, amountLabel: "Gross", total: s.gross,
         rows: [...list].sort((a, b) => String(a.firstInstall).localeCompare(String(b.firstInstall)))
           .map((r) => row(r.jobId, num(r.gross), r.firstInstall > today ? "Still to start" : "")),
       },
       paid: {
-        title: `Paid in Full · ${range}`, amountLabel: "Total Rev", total: s.paidInFull.totalRev, value: money(s.paidInFull.totalRev), tone: "green",
+        title: `Paid in Full · ${range}`, hint: DEF.paid, amountLabel: "Total Rev", total: s.paidInFull.totalRev, value: money(s.paidInFull.totalRev), tone: "green",
         sub: <>
           {s.paidInFull.jobs} of {plural(s.jobs)} started in this period
           {s.paidNotClosed.length > 0 && <span className="block mt-1 font-semibold text-amber-800">{s.paidNotClosed.length} paid but not closed out</span>}
@@ -111,12 +135,12 @@ export default function ProductionRevenue() {
         rows: paid.map((r) => row(r.jobId, num(r.totalRev), isCompletedStage(r.stage) ? "" : "Paid, not closed out")),
       },
       remaining: {
-        title: `Remaining Owed · ${range}`, amountLabel: "Still owed", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
+        title: `Remaining Owed · ${range}`, hint: DEF.remaining, amountLabel: "Still owed", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
         sub: <>{s.remainingOwed.jobs} of {plural(s.jobs)} started in this period still owing</>,
         rows: list.map((r) => row(r.jobId, sheetBalance(r), sheetBalance(r) < 0 ? "Overpaid" : "")).filter((r) => r.amount !== 0).sort((a, b) => b.amount - a.amount),
       },
       invoiced: {
-        title: `Invoiced AR · ${range}`, amountLabel: "Open on invoice", total: invoiced.amount, value: money(invoiced.amount), tone: "slate",
+        title: `Invoiced AR · ${range}`, hint: DEF.invoiced, amountLabel: "Open on invoice", total: invoiced.amount, value: money(invoiced.amount), tone: "slate",
         sub: <>
           Unpaid on {invoiced.openInvoices} of {plural(invoiced.invoices, "invoice")} dated in this period
           {invoiced.noInvoice.length > 0 && <span className="block mt-1 font-semibold text-red-700">{invoiced.noInvoice.length} started with no invoice</span>}
@@ -124,24 +148,27 @@ export default function ProductionRevenue() {
         rows: [...invoiceRows.sort((a, b) => b.amount - a.amount), ...noInvoiceIds.map((id) => row(id, 0, "Started, no invoice in JobProgress"))],
       },
       operational: {
-        title: "Operational AR · today", amountLabel: "Still owed", total: Math.round((op.inProgress.amount + ar.totalAR) * 100) / 100,
+        title: "Operational AR · outstanding contract balance", hint: DEF.operational, amountLabel: "Still owed", total: Math.round((op.inProgress.amount + ar.totalAR) * 100) / 100,
         value: money(op.inProgress.amount + ar.totalAR), tone: "amber",
-        sub: <>{money(op.inProgress.amount)} on {op.inProgress.jobs} jobs not yet billed + {money(ar.totalAR)} Total AR</>,
-        rows: [...building.map((r) => row(r.jobId, r.balance, "Not yet billed")), ...ar.rows.map((r) => row(r.jobId, r.owed, "Finished · Total AR"))]
+        sub: <>
+          <span className="block font-semibold text-amber-900">Not accounting receivables: includes work not yet billed</span>
+          {money(op.inProgress.amount)} on {op.inProgress.jobs} jobs not yet billed + {money(ar.totalAR)} Billed AR
+        </>,
+        rows: [...building.map((r) => row(r.jobId, r.balance, "Not yet billed")), ...ar.rows.map((r) => row(r.jobId, r.owed, "Billed AR"))]
           .sort((a, b) => b.amount - a.amount),
       },
       totalAr: {
-        title: "Total AR · finished jobs", amountLabel: "Owed", total: ar.totalAR, value: money(ar.totalAR), tone: ar.totalAR > 0 ? "amber" : "green",
+        title: "Billed AR · Completed Need Final Payment / Collections", hint: DEF.billed, amountLabel: "Owed", total: ar.totalAR, value: money(ar.totalAR), tone: ar.totalAR > 0 ? "amber" : "green",
         sub: <>{plural(ar.totalARJobs)} in Completed Need Final Payment or Collections</>,
         rows: ar.rows.map((r) => row(r.jobId, r.owed, `${r.daysOutstanding ?? "?"} days since completion`)),
       },
       overdue: {
-        title: `Overdue AR · ${ar.overdueDays}+ days`, amountLabel: "Owed", total: ar.overdueAR, value: money(ar.overdueAR), tone: ar.overdueAR > 0 ? "red" : "green",
+        title: `Overdue Billed AR · ${ar.overdueDays}+ days after completion`, hint: DEF.overdue(ar.overdueDays), amountLabel: "Owed", total: ar.overdueAR, value: money(ar.overdueAR), tone: ar.overdueAR > 0 ? "red" : "green",
         sub: <>31–60: {money(ar.aging.d31_60)} · 61–90: {money(ar.aging.d61_90)} · 90+: {money(ar.aging.d90plus)}</>,
         rows: ar.rows.filter((r) => r.overdue).map((r) => row(r.jobId, r.owed, `${r.daysOutstanding ?? "?"} days since completion`)),
       },
       progress: {
-        title: "Progress Payments Due · today", amountLabel: "Still to collect", total: prog.amount, value: money(prog.amount), tone: prog.amount > 0 ? "amber" : "green",
+        title: "Progress Payments Due · today", hint: DEF.progress, amountLabel: "Still to collect", total: prog.amount, value: money(prog.amount), tone: prog.amount > 0 ? "amber" : "green",
         sub: <>
           After the deposit on {plural(prog.jobs)}
           {prog.noneYet.jobs > 0 && <span className="block mt-1 font-semibold text-red-700">{prog.noneYet.jobs} with no progress payment yet</span>}
@@ -150,24 +177,24 @@ export default function ProductionRevenue() {
       },
       cuAll: {
         title: "All completed but unpaid", amountLabel: "Owed", total: cuAll, value: money(cuAll), tone: cuAll > 0 ? "red" : "green",
-        hint: "Physically complete (the main work is done) with money still outstanding. Chase these first.",
-        sub: <>{plural(cu.jobs + ar.totalARJobs)} · includes {money(ar.totalAR)} Total AR (billed)</>,
+        hint: DEF.cuAll,
+        sub: <>{plural(cu.jobs + ar.totalARJobs)} · includes {money(ar.totalAR)} Billed AR</>,
         rows: [...ar.rows.map((r) => row(r.jobId, r.owed, `Billed · ${r.daysOutstanding ?? "?"} days since completion`)), ...cuRows(cu.rows)]
           .sort((a, b) => b.amount - a.amount),
       },
       cuWalk: {
         title: "Walk-through or inspection left", amountLabel: "Owed", total: cu.walkthrough.amount, value: money(cu.walkthrough.amount), tone: "amber",
-        hint: "Need Final Walk-Through or City & Manufacturer Inspection: the work is done.",
+        hint: DEF.cuWalk,
         sub: <>{plural(cu.walkthrough.jobs)} · Need Final Walk-Through, City &amp; Manufacturer Inspection</>, rows: cuRows(cu.walkthrough.rows),
       },
       cuPunch: {
         title: "Punch list or gutters left", amountLabel: "Owed", total: cu.punchlist.amount, value: money(cu.punchlist.amount), tone: "amber",
-        hint: "Gutters/Solar/Punchlist: the main job is done, small items are left.",
+        hint: DEF.cuPunch,
         sub: <>{plural(cu.punchlist.jobs)} · Gutters/Solar/Punchlist</>, rows: cuRows(cu.punchlist.rows),
       },
       cuCrew: {
         title: "Crew finished, stage not updated", amountLabel: "Owed", total: cu.crew.amount, value: money(cu.crew.amount), tone: cu.crew.jobs ? "red" : "green",
-        hint: "Every install visit is done on the calendar, but the job's stage was never moved on in JobProgress.",
+        hint: DEF.cuCrew,
         sub: <>{cu.crew.jobs ? `${plural(cu.crew.jobs)} · move the stage on in JobProgress` : "None: every finished job has its stage moved on"}</>, rows: cuRows(cu.crew.rows),
       },
       exToday: exCard("today", "Expected today", fmtDay(today)),
@@ -176,7 +203,7 @@ export default function ProductionRevenue() {
       exPast: { ...exCard("pastDue", "Past expected date", "expected before today, not yet in"),
         sub: <>{plural(ex.pastDue.jobs)} expected before today and not yet in · also under Progress Payments Due and AR</> },
       deposits: {
-        title: "Deposits Missing · today", amountLabel: "Contract", total: dep.contract, value: plural(dep.jobs), tone: dep.jobs > 0 ? "red" : "green",
+        title: "Deposits Missing · today", hint: DEF.deposits, amountLabel: "Contract", total: dep.contract, value: plural(dep.jobs), tone: dep.jobs > 0 ? "red" : "green",
         sub: <>Started with $0 deposit ({money(dep.contract)} of contracts)</>,
         rows: dep.rows.map((r) => row(r.jobId, r.totalRev, "No deposit recorded")),
       },
@@ -211,7 +238,7 @@ export default function ProductionRevenue() {
           : <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : (
         <>
-          <StartedPanel s={m.s} block={m.block} range={range} today={m.today} active={sel === "started"} onSelect={() => pick("started")} />
+          <StartedPanel s={m.s} block={m.block} range={range} today={m.today} active={sel === "started"} onSelect={() => pick("started")} hint={DEF.started} />
 
           <GroupHeading tone="period">For the selected period · {range}{m.block ? ` (${fmtDay(m.block.from)} – ${fmtDay(m.block.to)})` : ""}</GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -225,7 +252,7 @@ export default function ProductionRevenue() {
 
           <GroupHeading tone="priority">Completed but unpaid · top priority · not affected by the date filter</GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {["cuAll", "cuWalk", "cuPunch", "cuCrew"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} hint={m.cards[k].hint} />)}
+            {["cuAll", "cuWalk", "cuPunch", "cuCrew"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
           <GroupHeading tone="expected">
@@ -235,7 +262,7 @@ export default function ProductionRevenue() {
             </span>
           </GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {["exToday", "ex7", "ex14", "exPast"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} hint={EXPECTED_DATE_RULE} />)}
+            {["exToday", "ex7", "ex14", "exPast"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
           <section className="bg-white rounded-xl border border-border shadow-sm" aria-labelledby="jobs-h">
@@ -311,13 +338,15 @@ export default function ProductionRevenue() {
  * jobs left out. Gross matches the sheet's Weekly Total and Cumulative rows.
  * The navy card selects its jobs for the table below.
  */
-function StartedPanel({ s, block, range, today, active, onSelect }) {
+function StartedPanel({ s, block, range, today, active, onSelect, hint }) {
   return (
     <section className="bg-white rounded-xl border border-border shadow-sm" aria-label="Revenue Started">
       <div className="p-4 flex flex-col lg:flex-row lg:items-start gap-4">
-        <button onClick={onSelect} aria-pressed={active}
+        <button onClick={onSelect} aria-pressed={active} title={hint}
           className={`lg:w-80 shrink-0 text-left rounded-xl bg-primary text-primary-foreground p-4 hover:shadow-md ${active ? "ring-4 ring-accent/60" : ""}`}>
-          <span className="block text-[11px] uppercase tracking-wide font-semibold text-primary-foreground/80">Revenue Started · {range}</span>
+          <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide font-semibold text-primary-foreground/80">
+            Revenue Started · {range}<Info className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          </span>
           {block && <span className="block text-xs text-primary-foreground/80">{fmtDay(block.from)} – {fmtDay(block.to)}</span>}
           <span className="block text-3xl font-heading font-bold tabular-nums mt-1">{money(s.gross)}</span>
           <span className="block text-xs text-primary-foreground/80 mt-1">
@@ -443,13 +472,15 @@ function ExpectedTable({ rows, total, showTotal, today }) {
   );
 }
 
-/** A card that selects its jobs for the table below. `hint` is its hover explanation. */
-function CardFor({ k, c, sel, pick, hint }) {
+/** A card that selects its jobs for the table below; hovering it gives its definition (c.hint). */
+function CardFor({ k, c, sel, pick }) {
   const active = sel === k;
   return (
-    <button onClick={() => pick(k)} aria-pressed={active} title={hint}
+    <button onClick={() => pick(k)} aria-pressed={active} title={c.hint} aria-description={c.hint}
       className={`text-left rounded-xl border p-3 shadow-sm hover:shadow-md ${TONE[c.tone ?? "slate"]} ${active ? "ring-2 ring-accent ring-offset-1" : ""}`}>
-      <span className="block text-[11px] uppercase tracking-wide font-semibold text-muted-foreground">{c.title}</span>
+      <span className="flex items-start gap-1 text-[11px] uppercase tracking-wide font-semibold text-muted-foreground">
+        <span>{c.title}</span>{c.hint && <Info className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden="true" />}
+      </span>
       <span className="block text-2xl font-heading font-bold mt-0.5 tabular-nums">{c.value}</span>
       <span className="block text-[11px] mt-0.5 text-muted-foreground">{c.sub}</span>
       <span className="block text-[11px] mt-1.5 font-semibold text-accent">{active ? "Showing its jobs below" : "Show the jobs"}</span>
