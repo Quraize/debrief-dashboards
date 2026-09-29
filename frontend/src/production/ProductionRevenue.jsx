@@ -107,7 +107,20 @@ export default function ProductionRevenue() {
 
           {/* His numbers, his order. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Card tone="green" label="Paid in Full" value={money(t.paidInFull)} sub={`${t.paidInFullJobs} of ${t.jobs} started jobs in range`} onClick={() => { setStatus("paid"); setFlag(""); }} active={status === "paid" && !flag} />
+            {started && (
+              <Card tone="green" label="Paid in Full" value={money(started.paidInFull.totalRev)}
+                sub={<>
+                  {started.paidInFull.jobs} of {started.jobs} jobs started in range · Total Rev
+                  {started.paidNotClosed.length > 0 && (
+                    <span className="block mt-1 font-semibold text-amber-800" title={started.paidNotClosed.join(", ")}>
+                      {started.paidNotClosed.length} paid but not closed out: {started.paidNotClosed.join(", ")}
+                    </span>
+                  )}
+                  {started.paidStageOwed.jobs > 0 && (
+                    <span className="block mt-1 font-semibold text-amber-800">{started.paidStageOwed.jobs} in a Paid stage with a balance still showing</span>
+                  )}
+                </>} />
+            )}
             <Card tone="amber" label="Remaining Owed" value={money(t.remainingOwed)} sub={`${t.remainingOwedJobs} started jobs in range still owing`} onClick={() => { setStatus("all"); setFlag(""); }} active={status === "all" && !flag} />
             <Card tone="blue" label="Expected Collections This Week" value={money(t.expectedThisWeek)} sub={`${t.expectedThisWeekJobs} job${t.expectedThisWeekJobs === 1 ? "" : "s"} completing this week`} />
             <Card tone="blue" label="Expected Collections Next Week" value={money(t.expectedNextWeek)} sub={`${t.expectedNextWeekJobs} job${t.expectedNextWeekJobs === 1 ? "" : "s"} · ${fmtDay(t.nextWeek.from)} – ${fmtDay(t.nextWeek.to)}`} />

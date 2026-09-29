@@ -26,6 +26,7 @@
 import { stageKey, isPaidStage } from "./jobStages.js";
 import { isDisqualifiedStage } from "./leadFlow.js";
 import { weekBounds, sheetWeekOf } from "./production.js";
+import { PIF_STATUS } from "./weeklyJobSheet.js";
 import { DEAD_STAGE, IN_PRODUCTION_STAGES, AWAITING_PAYMENT_STAGES } from "./soldPipeline.js";
 
 export const AR_OVERDUE_DAYS_DEFAULT = 30;
@@ -185,11 +186,22 @@ export function startedRevenue(rows, today, splitFrom) {
     (blocks.get(key) ?? blocks.set(key, { ...b, rows: [] }).get(key)).rows.push(r);
   }
   const weeks = [...blocks.values()].sort((a, b) => b.from.localeCompare(a.from)).map((b) => ({ from: b.from, to: b.to, ...totals(b.rows) }));
+  // Paid in full: the sheet's PAID-IN-FULL column, exactly as the KPIs
+  // dashboard counts it — YES means JobProgress shows nothing owed with money
+  // received, or a Paid stage. A Paid stage whose ledger still shows a
+  // balance is neither YES nor NO there, and here it is its own count.
+  const paid = rows.filter((r) => r.pifStatus === PIF_STATUS.yes);
   return {
     ...totals(rows),
     started: totals(rows.filter((r) => r.firstInstall <= today)),
     upcoming: totals(rows.filter((r) => r.firstInstall > today)),
     weeks,
+    paidInFull: totals(paid),
+    notPaidInFull: totals(rows.filter((r) => r.pifStatus === PIF_STATUS.no)),
+    paidStageOwed: totals(rows.filter((r) => r.pifStatus === PIF_STATUS.mismatch)),
+    // Paid, but the stage still says the work is open (walk-through, punch list):
+    // ready for the office to close out.
+    paidNotClosed: paid.filter((r) => !isCompletedStage(r.stage)).map((r) => r.customer || r.label || r.jobId),
   };
 }
 

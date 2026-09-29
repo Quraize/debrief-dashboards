@@ -33,6 +33,8 @@ export function startedRows(rows: Awaited<ReturnType<typeof weeklyJobSheet>>["ro
     return firstInstall ? [{
       jobId: r.jobId, label: r.label, customer: r.customer, jobNumber: r.jobNumber, city: r.city, address: r.address,
       stage: r.stage, salesRep: r.salesRep, firstInstall, gross: r.gross, changeOrders: r.changeOrders, totalRev: r.totalRev, jpUrl: r.jpUrl,
+      // The sheet's PAID-IN-FULL answer (YES / NO / YES with a ledger balance), and the money behind it.
+      pifStatus: r.pifStatus, received: r.totalPayments, owed: r.balanceOwed,
     }] : [];
   });
 }

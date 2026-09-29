@@ -112,7 +112,9 @@ describe.skipIf(!reachable)("Revenue & AR", () => {
     const started = Object.fromEntries(p.started.rows.map((r: { jobId: string; firstInstall: string }) => [r.jobId, r.firstInstall]));
     // c has no install on the calendar; f is booked ahead and still counts in the week it starts.
     expect(started).toEqual({ a: daysAgo(1), b: daysAgo(15), d: daysAgo(60), e: daysAgo(5), f: iso(new Date(today.getTime() + 10 * 86_400_000)) });
-    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a")).toMatchObject({ totalRev: 20000, customer: "Maureen Bondy" });
+    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a")).toMatchObject({ totalRev: 20000, customer: "Maureen Bondy", pifStatus: "NO", received: 5000, owed: 15000 });
+    // d: a Paid stage with $3,000 still on the ledger — the sheet's "YES (ledger still shows a balance)".
+    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "d")).toMatchObject({ pifStatus: "YES (ledger still shows a balance)" });
     expect(p.started.splitFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

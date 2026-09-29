@@ -4,10 +4,10 @@ import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue,
 describe("startedRevenue — the Weekly Job Sheet's numbers", () => {
   // Three of September's reconciled jobs and one October one.
   const rows = [
-    { jobId: "guinto", firstInstall: "2026-09-01", gross: 20599, changeOrders: 3600, totalRev: 24199 },
-    { jobId: "willis", firstInstall: "2026-09-29", gross: 21699, changeOrders: 0, totalRev: 21699 },
-    { jobId: "diss", firstInstall: "2026-09-30", gross: 26749, changeOrders: 0, totalRev: 26749 },
-    { jobId: "htun", firstInstall: "2026-10-02", gross: 8000, changeOrders: null, totalRev: 8000 },
+    { jobId: "guinto", customer: "Rolito Guinto", stage: "Need Final Walk-Through", pifStatus: "YES", firstInstall: "2026-09-01", gross: 20599, changeOrders: 3600, totalRev: 24199 },
+    { jobId: "willis", stage: "Roof/Siding Scheduled", pifStatus: "NO", firstInstall: "2026-09-29", gross: 21699, changeOrders: 0, totalRev: 21699 },
+    { jobId: "diss", stage: "Paid New Roof", pifStatus: "YES (ledger still shows a balance)", firstInstall: "2026-09-30", gross: 26749, changeOrders: 0, totalRev: 26749 },
+    { jobId: "htun", customer: "Zaw Htun", stage: "Paid New Roof", pifStatus: "YES", firstInstall: "2026-10-02", gross: 8000, changeOrders: null, totalRev: 8000 },
   ];
   it("adds each job once, splits started from still-to-start, and lists the sheet blocks newest first", () => {
     const s = startedRevenue(rows, "2026-09-29", "2026-08-31");
@@ -21,10 +21,19 @@ describe("startedRevenue — the Weekly Job Sheet's numbers", () => {
       ["2026-09-01", "2026-09-06", 1, 20599],
     ]);
   });
+  it("counts paid in full the sheet's way: YES only, over Total Rev; a paid stage still owing is its own count", () => {
+    const s = startedRevenue(rows, "2026-09-29", "2026-08-31");
+    expect(s.paidInFull).toEqual({ jobs: 2, gross: 28599, changeOrders: 3600, totalRev: 32199 });
+    expect(s.notPaidInFull.jobs).toBe(1);
+    expect(s.paidStageOwed).toMatchObject({ jobs: 1, totalRev: 26749 });
+    // Guinto is paid but still at the final walk-through; Htun is paid and closed.
+    expect(s.paidNotClosed).toEqual(["Rolito Guinto"]);
+  });
+
   it("is all zeros with no rows", () => {
+    const zero = { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 };
     expect(startedRevenue([], "2026-09-29", "2026-08-31")).toEqual({
-      jobs: 0, gross: 0, changeOrders: 0, totalRev: 0, weeks: [],
-      started: { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 }, upcoming: { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 },
+      ...zero, weeks: [], started: zero, upcoming: zero, paidInFull: zero, notPaidInFull: zero, paidStageOwed: zero, paidNotClosed: [],
     });
     expect(startedRevenue(undefined, "2026-09-29").jobs).toBe(0);
   });
