@@ -31,14 +31,21 @@ type SheetFeedRow = Awaited<ReturnType<typeof weeklyJobSheet>>["rows"][number];
 export interface InvoiceLite { number: string | null; date: string | null; dueDate: string | null; total: number; open: number | null; status: string | null }
 
 /** Every live invoice JobProgress has for our jobs, by job (jp_job_invoice, 0033). */
-async function loadInvoices(ctx: SessionContext): Promise<Map<string, InvoiceLite[]>> {
-  const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<{ jp_job_id: string; invoices: InvoiceLite[] }>(
-    `SELECT jp_job_id, json_agg(json_build_object(
-              'number', invoice_number, 'date', invoice_date::text, 'dueDate', due_date::text,
-              'total', total_amount, 'open', open_balance, 'status', status)
-            ORDER BY invoice_date, invoice_number) AS invoices
-       FROM jp_job_invoice WHERE deleted_at IS NULL GROUP BY jp_job_id`)).rows);
-  return new Map(rows.map((r) => [r.jp_job_id, r.invoices.map((i) => ({ ...i, total: Number(i.total), open: i.open === null ? null : Number(i.open) }))]));
+async function loadInvoices(ctx: SessionContext): Promise<{ byJob: Map<string, InvoiceLite[]>; checked: Set<string> }> {
+  return withUser(dbApp(), ctx, async (c) => {
+    const rows = (await c.query<{ jp_job_id: string; invoices: InvoiceLite[] }>(
+      `SELECT jp_job_id, json_agg(json_build_object(
+                'number', invoice_number, 'date', invoice_date::text, 'dueDate', due_date::text,
+                'total', total_amount, 'open', open_balance, 'status', status)
+              ORDER BY invoice_date, invoice_number) AS invoices
+         FROM jp_job_invoice WHERE deleted_at IS NULL GROUP BY jp_job_id`)).rows;
+    // Jobs whose invoice list has been read at least once: only these can be "started with no invoice".
+    const checked = (await c.query<{ jp_job_id: string }>(`SELECT jp_job_id FROM jp_job WHERE invoices_fetched_at IS NOT NULL`)).rows;
+    return {
+      byJob: new Map(rows.map((r) => [r.jp_job_id, r.invoices.map((i) => ({ ...i, total: Number(i.total), open: i.open === null ? null : Number(i.open) }))])),
+      checked: new Set(checked.map((r) => r.jp_job_id)),
+    };
+  });
 }
 
 /**
@@ -68,7 +75,7 @@ export function sheetAr(rows: SheetFeedRow[], today: string, overdueDays: number
  * begins) comes with firstInstall null: the period cards skip it, and
  * Operational AR counts it as started by its stage.
  */
-export function startedRows(rows: SheetFeedRow[], invoices: Map<string, InvoiceLite[]> = new Map()) {
+export function startedRows(rows: SheetFeedRow[], invoices: { byJob: Map<string, InvoiceLite[]>; checked: Set<string> } = { byJob: new Map(), checked: new Set() }) {
   return rows.filter(bringsMoney).flatMap((r) => {
     const firstInstall = firstInstallDay(r);
     const lastInstall = r.visits.filter((v) => isInstallCode(v.code)).map((v) => v.day).sort().at(-1) ?? null;
@@ -81,7 +88,7 @@ export function startedRows(rows: SheetFeedRow[], invoices: Map<string, InvoiceL
       deposit: r.deposit, progressPayments: r.progressPayments,
       // When its balance is expected: see expectedDayOf (shared/revenueAr.js).
       completionDate: r.completionDate, lastInstall,
-      invoices: invoices.get(r.jobId) ?? [],
+      invoices: invoices.byJob.get(r.jobId) ?? [], invoicesChecked: invoices.checked.has(r.jobId),
     }];
   });
 }

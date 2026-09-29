@@ -11,6 +11,7 @@ describe("invoicedAr — unpaid amounts already invoiced, by invoice date", () =
     { jobId: "old", customer: "Maryann Schnell", firstInstall: null, invoices: [{ number: "667-1100", date: "2026-01-27", total: 1000, open: 1000, status: "open" }] },
     { jobId: "willis", customer: "Robert Willis", firstInstall: "2026-09-29", invoices: [] },   // started, never invoiced
     { jobId: "future", customer: "Later", firstInstall: "2026-09-30", invoices: [] },          // not started yet on 9/29
+    { jobId: "unread", customer: "Not read yet", firstInstall: "2026-09-15", invoices: [], invoicesChecked: false }, // the sync has not read it: not flagged
     { jobId: "void", customer: "Voided", firstInstall: "2026-09-10", invoices: [{ number: "x", date: "2026-09-10", total: 500, open: 500, status: "void" }] },
   ];
   it("sums the open balance of invoices dated in the period, and names started jobs with no invoice", () => {

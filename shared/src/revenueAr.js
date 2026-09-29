@@ -291,7 +291,8 @@ export function invoicedAr(rows, inPeriod, today) {
   }
   const openOf = (i) => (/closed|void|cancel/i.test(String(i.status ?? "")) ? 0 : Math.max(0, num(i.open) ?? 0));
   const open = invoices.filter((i) => openOf(i) > 0).sort((a, b) => openOf(b) - openOf(a));
-  const noInvoice = (rows ?? []).filter((r) => r.firstInstall && r.firstInstall <= today && inPeriod(r.firstInstall) && !(r.invoices ?? []).length)
+  // Only a job whose invoice list has been read can be said to have none.
+  const noInvoice = (rows ?? []).filter((r) => r.invoicesChecked !== false && r.firstInstall && r.firstInstall <= today && inPeriod(r.firstInstall) && !(r.invoices ?? []).length)
     .map((r) => r.customer || r.label || r.jobId);
   return {
     amount: round(invoices.reduce((n, i) => n + openOf(i), 0)),
