@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, startedRevenue, expectedCollections, operationalAr, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, expectedCollections, operationalAr, invoicedAr, STATUSES } from "@allied/shared/revenueAr";
 import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
@@ -64,7 +64,7 @@ export default function ProductionRevenue() {
     // One test for "is this day in the period picked", used by every card.
     const inPeriod = (day) => !!day && (range === ALL_TIME_FILTER ? true : block ? day >= block.from && day <= block.to : inDateRange(day, range, cs, ce));
     const list = all.filter((r) => inPeriod(r.firstInstall));
-    return { rows: list, block, expected: expectedCollections(all, inPeriod), ...startedRevenue(list, data.today, splitFrom) };
+    return { rows: list, block, expected: expectedCollections(all, inPeriod), invoiced: invoicedAr(all, inPeriod, data.today), ...startedRevenue(list, data.today, splitFrom) };
   }, [data, range, cs, ce]);
   // Started / paid / owed follow the range; expected cash and AR are the whole book.
   const t = useMemo(() => (data ? revenueTotals(inRange, data.today, { overdueDays: data.totals.overdueDays }, book) : null), [inRange, book, data]);
@@ -105,7 +105,7 @@ export default function ProductionRevenue() {
           {started && <StartedPanel s={started} range={range} today={data.today} />}
 
           <GroupHeading>For the selected period · {range}{started?.block ? ` (${fmtDay(started.block.from)} – ${fmtDay(started.block.to)})` : ""}</GroupHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {started && (
               <Card tone="green" label="Paid in Full" value={money(started.paidInFull.totalRev)}
                 sub={<>
@@ -131,6 +131,19 @@ export default function ProductionRevenue() {
                   {started.expected.jobs > 0 && (
                     <span className="block mt-1" title={started.expected.rows.map((r) => `${r.customer || r.label}: ${money(r.balance)} (${fmtDay(r.expectedDay)})`).join("\n")}>
                       {started.expected.rows.slice(0, 4).map((r) => `${r.customer || r.label} ${money(r.balance)}`).join(" · ")}{started.expected.jobs > 4 ? ` · +${started.expected.jobs - 4} more` : ""}
+                    </span>
+                  )}
+                </>} />
+            )}
+            {started && (
+              <Card tone="slate" label={`Invoiced AR · ${range}`} value={money(started.invoiced.amount)}
+                sub={<>
+                  <span title={started.invoiced.open.map((i) => `${i.customer} · ${i.number ?? "no number"} · ${fmtDay(i.date)}: ${money(i.open)}`).join("\n")}>
+                    Unpaid on {started.invoiced.openInvoices} of {started.invoiced.invoices} invoice{started.invoiced.invoices === 1 ? "" : "s"} dated in this period ({money(started.invoiced.invoiced)} invoiced)
+                  </span>
+                  {started.invoiced.noInvoice.length > 0 && (
+                    <span className="block mt-1 font-semibold text-red-700" title={started.invoiced.noInvoice.join(", ")}>
+                      {started.invoiced.noInvoice.length} started with no invoice: {started.invoiced.noInvoice.slice(0, 4).join(", ")}{started.invoiced.noInvoice.length > 4 ? ` +${started.invoiced.noInvoice.length - 4} more` : ""}
                     </span>
                   )}
                 </>} />

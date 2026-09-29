@@ -74,6 +74,11 @@ describe.skipIf(!reachable)("Revenue & AR", () => {
     await job("d", "Paid New Roof", daysAgo(90), 40000, 37000, 3000); await visit("sd", "d", daysAgo(60)); await payment("pd", "d", daysAgo(90), 37000);
     // In production with nothing received — and a cancelled payment that must not count.
     await job("e", "Gutters/Solar/Punchlist", daysAgo(30), 15500, 0, 15500); await visit("se", "e", daysAgo(5)); await payment("pe", "e", daysAgo(30), 2000, true);
+    // Job a's invoice, part paid; a deleted one that must not come back.
+    await db.owner.query(`INSERT INTO jp_job_invoice (jp_invoice_id, jp_job_id, invoice_number, invoice_date, total_amount, open_balance, status)
+                          VALUES ('i1', 'a', '667-1', $1::date, 20000, 15000, 'open')`, [daysAgo(1)]);
+    await db.owner.query(`INSERT INTO jp_job_invoice (jp_invoice_id, jp_job_id, invoice_number, invoice_date, total_amount, open_balance, status, deleted_at)
+                          VALUES ('i2', 'a', '667-2', $1::date, 500, 500, 'open', now())`, [daysAgo(1)]);
     // Booked, not started: not in this view.
     await job("f", "Approved New Installs", daysAgo(3), 9000, 900, 8100); await visit("sf", "f", iso(new Date(today.getTime() + 10 * 86_400_000)));
   });
@@ -115,6 +120,10 @@ describe.skipIf(!reachable)("Revenue & AR", () => {
     expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a")).toMatchObject({ totalRev: 20000, customer: "Maureen Bondy", pifStatus: "NO", received: 5000, owed: 15000 });
     // d: a Paid stage with $3,000 still on the ledger — the sheet's "YES (ledger still shows a balance)".
     expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "d")).toMatchObject({ pifStatus: "YES (ledger still shows a balance)" });
+    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a").invoices).toEqual([
+      { number: "667-1", date: daysAgo(1), dueDate: null, total: 20000, open: 15000, status: "open" },
+    ]);
+    expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "b").invoices).toEqual([]);
     expect(p.started.splitFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

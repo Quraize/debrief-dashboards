@@ -274,6 +274,35 @@ export function operationalAr(rows, today) {
   };
 }
 
+/**
+ * Invoiced AR (the PM's rule 2): unpaid amounts already invoiced, filtered by
+ * the INVOICE date — which should be the job's start date when the process is
+ * followed. `inPeriod(day)` is the page's date filter.
+ *   amount       open balance of the invoices dated in the period
+ *   invoiced     their total, and how many invoices
+ *   noInvoice    jobs whose install STARTED in the period (and today or
+ *                earlier) with no invoice at all: the process was not followed
+ * A closed or cancelled/void invoice owes nothing, whatever its balance says.
+ */
+export function invoicedAr(rows, inPeriod, today) {
+  const invoices = [];
+  for (const r of rows ?? []) for (const inv of r.invoices ?? []) {
+    if (inv.date && inPeriod(inv.date)) invoices.push({ ...inv, jobId: r.jobId, customer: r.customer || r.label || r.jobId });
+  }
+  const openOf = (i) => (/closed|void|cancel/i.test(String(i.status ?? "")) ? 0 : Math.max(0, num(i.open) ?? 0));
+  const open = invoices.filter((i) => openOf(i) > 0).sort((a, b) => openOf(b) - openOf(a));
+  const noInvoice = (rows ?? []).filter((r) => r.firstInstall && r.firstInstall <= today && inPeriod(r.firstInstall) && !(r.invoices ?? []).length)
+    .map((r) => r.customer || r.label || r.jobId);
+  return {
+    amount: round(invoices.reduce((n, i) => n + openOf(i), 0)),
+    openInvoices: open.length,
+    invoiced: round(invoices.reduce((n, i) => n + (num(i.total) ?? 0), 0)),
+    invoices: invoices.length,
+    open: open.map((i) => ({ customer: i.customer, number: i.number, date: i.date, open: openOf(i) })),
+    noInvoice,
+  };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

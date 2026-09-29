@@ -19,15 +19,27 @@ export function arSettings(env = process.env) {
 }
 
 export async function revenueReport(ctx: SessionContext, today = todayInBoardZone(), env = process.env) {
-  const [jobs, sheet] = await Promise.all([loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx)]);
+  const [jobs, sheet, invoices] = await Promise.all([loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx), loadInvoices(ctx)]);
   return {
     ...revenueSummary(jobs, today, arSettings(env)),
-    started: { rows: startedRows(sheet.rows), splitFrom: sheetSplitFrom(env) },
+    started: { rows: startedRows(sheet.rows, invoices), splitFrom: sheetSplitFrom(env) },
     ar: sheetAr(sheet.rows, today, arSettings(env).overdueDays),
   };
 }
 
 type SheetFeedRow = Awaited<ReturnType<typeof weeklyJobSheet>>["rows"][number];
+export interface InvoiceLite { number: string | null; date: string | null; dueDate: string | null; total: number; open: number | null; status: string | null }
+
+/** Every live invoice JobProgress has for our jobs, by job (jp_job_invoice, 0033). */
+async function loadInvoices(ctx: SessionContext): Promise<Map<string, InvoiceLite[]>> {
+  const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<{ jp_job_id: string; invoices: InvoiceLite[] }>(
+    `SELECT jp_job_id, json_agg(json_build_object(
+              'number', invoice_number, 'date', invoice_date::text, 'dueDate', due_date::text,
+              'total', total_amount, 'open', open_balance, 'status', status)
+            ORDER BY invoice_date, invoice_number) AS invoices
+       FROM jp_job_invoice WHERE deleted_at IS NULL GROUP BY jp_job_id`)).rows);
+  return new Map(rows.map((r) => [r.jp_job_id, r.invoices.map((i) => ({ ...i, total: Number(i.total), open: i.open === null ? null : Number(i.open) }))]));
+}
 
 /**
  * AR as of today, over every job the Weekly Job Sheet knows, by the SAME rule
@@ -56,7 +68,7 @@ export function sheetAr(rows: SheetFeedRow[], today: string, overdueDays: number
  * begins) comes with firstInstall null: the period cards skip it, and
  * Operational AR counts it as started by its stage.
  */
-export function startedRows(rows: SheetFeedRow[]) {
+export function startedRows(rows: SheetFeedRow[], invoices: Map<string, InvoiceLite[]> = new Map()) {
   return rows.filter(bringsMoney).flatMap((r) => {
     const firstInstall = firstInstallDay(r);
     const lastInstall = r.visits.filter((v) => isInstallCode(v.code)).map((v) => v.day).sort().at(-1) ?? null;
@@ -69,6 +81,7 @@ export function startedRows(rows: SheetFeedRow[]) {
       deposit: r.deposit, progressPayments: r.progressPayments,
       // When its balance is expected: see expectedDayOf (shared/revenueAr.js).
       completionDate: r.completionDate, lastInstall,
+      invoices: invoices.get(r.jobId) ?? [],
     }];
   });
 }

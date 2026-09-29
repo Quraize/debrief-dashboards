@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("invoicedAr — unpaid amounts already invoiced, by invoice date", () => {
+  const inSept = (d) => d >= "2026-09-01" && d <= "2026-09-30";
+  const rows = [
+    { jobId: "guinto", customer: "Rolito Guinto", firstInstall: "2026-09-01", invoices: [
+      { number: "667-1823", date: "2026-09-02", total: 20599, open: 0, status: "closed" },
+      { number: "667-1832", date: "2026-09-15", total: 3600, open: 0, status: "closed" }] },
+    { jobId: "diss", customer: "Lisa Diss", firstInstall: "2026-09-30", invoices: [{ number: "667-1900", date: "2026-09-30", total: 26749, open: 21249, status: "open" }] },
+    { jobId: "old", customer: "Maryann Schnell", firstInstall: null, invoices: [{ number: "667-1100", date: "2026-01-27", total: 1000, open: 1000, status: "open" }] },
+    { jobId: "willis", customer: "Robert Willis", firstInstall: "2026-09-29", invoices: [] },   // started, never invoiced
+    { jobId: "future", customer: "Later", firstInstall: "2026-09-30", invoices: [] },          // not started yet on 9/29
+    { jobId: "void", customer: "Voided", firstInstall: "2026-09-10", invoices: [{ number: "x", date: "2026-09-10", total: 500, open: 500, status: "void" }] },
+  ];
+  it("sums the open balance of invoices dated in the period, and names started jobs with no invoice", () => {
+    const a = invoicedAr(rows, inSept, "2026-09-29");
+    expect(a).toMatchObject({ amount: 21249, openInvoices: 1, invoiced: 20599 + 3600 + 26749 + 500, invoices: 4, noInvoice: ["Robert Willis"] });
+    expect(a.open).toEqual([{ customer: "Lisa Diss", number: "667-1900", date: "2026-09-30", open: 21249 }]);
+    // All time: Schnell's January invoice too.
+    expect(invoicedAr(rows, () => true, "2026-09-29").amount).toBe(22249);
+    expect(invoicedAr(undefined, inSept, "2026-09-29")).toMatchObject({ amount: 0, invoices: 0, noInvoice: [] });
+  });
+});
 
 describe("operationalAr — all unpaid value on started jobs, today", () => {
   const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: 5000, progressPayments: null, ...over });

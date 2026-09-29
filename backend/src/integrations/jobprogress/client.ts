@@ -386,6 +386,14 @@ export class JobProgressClient {
     return this.collect<Record<string, unknown>>(`/jobs/${jobId}/vendor_bills`, { "includes[]": ["vendor"] }, "vendor_bills");
   }
 
+  /**
+   * Every invoice raised on a job, open and closed: number, date, due date,
+   * total_amount, open_balance, status. Verified live 2026-09-29.
+   */
+  async listJobInvoices(jobId: string | number): Promise<Record<string, unknown>[]> {
+    return this.collect<Record<string, unknown>>(`/jobs/${jobId}/invoices`, { status: "all" }, "invoices");
+  }
+
   /** The company's payment methods: method code → the office's label ("echeque" → "Check"). */
   async listPaymentTypes(): Promise<Record<string, unknown>[]> {
     return this.collect<Record<string, unknown>>("/company/payment_types", {}, "payment_types");

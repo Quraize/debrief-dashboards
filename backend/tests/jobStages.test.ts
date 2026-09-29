@@ -31,7 +31,7 @@ const job = (id: number, stage: typeof STAGES[number], over: Record<string, unkn
 interface Stub {
   stages: Record<string, unknown>[]; inStages: Record<string, unknown>[]; byId: Record<string, Record<string, unknown>>;
   summaries: Record<string, Record<string, unknown>>; payments: Record<string, Record<string, unknown>[]>;
-  bills: Record<string, Record<string, unknown>[]>; calls: string[];
+  bills: Record<string, Record<string, unknown>[]>; invoices?: Record<string, Record<string, unknown>[]>; calls: string[];
 }
 const PAYMENT_TYPES = [
   { id: 122, label: "Cash", method: "cash" }, { id: 123, label: "Check", method: "echeque" }, { id: 124, label: "Credit Card", method: "cc" },
@@ -46,6 +46,11 @@ function stubClient(stub: Stub) {
       const id = /jobs\/(\d+)\/payment_history/.exec(u)![1]!;
       stub.calls.push(`payments:${id}`);
       data = stub.payments[id] ?? [];
+    }
+    else if (u.includes("/invoices")) {
+      const id = /jobs\/(\d+)\/invoices/.exec(u)![1]!;
+      stub.calls.push(`invoices:${id}:${new URL(u).searchParams.get("status")}`);
+      data = stub.invoices?.[id] ?? [];
     }
     else if (u.includes("/vendor_bills")) {
       const id = /jobs\/(\d+)\/vendor_bills/.exec(u)![1]!;
@@ -123,6 +128,14 @@ describe.skipIf(!reachable)("jobs by stage", () => {
         { id: 9104, job_id: 1, bill_date: "2026-08-25", total_amount: 4000, vendor: { data: { id: 3, display_name: "Lucy LD Construction Corp.", origin: "QuickBooks" } } },
       ],
     },
+    // Shaped like the live GET /jobs/{id}/invoices answer (Guinto, 2026-09-29). Job 1: the
+    // contract invoice, part paid, and a closed change order. Job 2: none.
+    invoices: {
+      "1": [
+        { id: 55001, job_id: 1, invoice_number: "667-1823", date: "2026-09-02", due_date: "2026-09-02", total_amount: 20599, open_balance: "12599.00", status: "open", type: "job" },
+        { id: 55002, job_id: 1, invoice_number: "667-1832", date: "2026-09-15", total_amount: 3600, open_balance: "0.00", status: "closed", type: "change_order" },
+      ],
+    },
   };
 
   beforeAll(async () => {
@@ -153,7 +166,16 @@ describe.skipIf(!reachable)("jobs by stage", () => {
       financials_from_listing: 1, financial_summaries_fetched: 1, financial_summary_errors: 0,
       payments_jobs_fetched: 2, payments_upserted: 4, payments_retired: 0, payment_errors: 0,
       bills_jobs_fetched: 2, bills_upserted: 4, bills_retired: 0, bill_errors: 0,
+      invoices_jobs_fetched: 2, invoices_upserted: 2, invoices_retired: 0, invoice_errors: 0,
     });
+    // Open AND closed invoices are asked for.
+    expect(stub.calls).toContain("invoices:1:all");
+    const inv = (await db.owner.query(
+      `SELECT jp_job_id, invoice_number, invoice_date::text, total_amount::text, open_balance::text, status FROM jp_job_invoice ORDER BY invoice_number`)).rows;
+    expect(inv).toEqual([
+      { jp_job_id: "1", invoice_number: "667-1823", invoice_date: "2026-09-02", total_amount: "20599.00", open_balance: "12599.00", status: "open" },
+      { jp_job_id: "1", invoice_number: "667-1832", invoice_date: "2026-09-15", total_amount: "3600.00", open_balance: "0.00", status: "closed" },
+    ]);
     expect(stub.calls).toContain("summary:2");
     expect(stub.calls).not.toContain("summary:1");
     expect(stub.calls.filter((c) => c === "payment-types")).toHaveLength(1);

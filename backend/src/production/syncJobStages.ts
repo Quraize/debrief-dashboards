@@ -41,6 +41,11 @@ export interface StageSyncCounts {
   bills_upserted: number;
   bills_retired: number;
   bill_errors: number;
+  /** Jobs whose invoices were (re)read this run, and the invoices written. */
+  invoices_jobs_fetched: number;
+  invoices_upserted: number;
+  invoices_retired: number;
+  invoice_errors: number;
   api_requests: number;
   retries: number;
   rate_limit_hits: number;
@@ -67,11 +72,17 @@ const emptyCounts = (): StageSyncCounts => ({
   locations_fetched: 0, financials_from_listing: 0, financial_summaries_fetched: 0, financial_summary_errors: 0,
   payments_jobs_fetched: 0, payments_upserted: 0, payments_retired: 0, payment_errors: 0,
   bills_jobs_fetched: 0, bills_upserted: 0, bills_retired: 0, bill_errors: 0,
+  invoices_jobs_fetched: 0, invoices_upserted: 0, invoices_retired: 0, invoice_errors: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
 
 /** Vendor bills have no change signal on the job, so each job's list is re-read this often. */
 export const BILLS_MAX_AGE_HOURS = 24;
+/**
+ * Invoices are re-read this often, and sooner when the job's payments were
+ * re-read since (a payment moves an invoice's open balance).
+ */
+export const INVOICES_MAX_AGE_HOURS = 6;
 
 const str = (v: unknown): string | null => (v === null || v === undefined || v === "" ? null : String(v));
 const num = (v: unknown): number | null => {
@@ -349,6 +360,68 @@ export async function refreshVendorBills(
   }
 }
 
+/** One invoices entry → a jp_job_invoice row; null when it has no id. */
+export function mapInvoice(api: Record<string, unknown>, jpJobId: string): Record<string, unknown> | null {
+  const id = str(api["id"]);
+  if (!id) return null;
+  return {
+    jp_invoice_id: id,
+    jp_job_id: str(api["job_id"]) ?? jpJobId,
+    invoice_number: str(api["invoice_number"]),
+    title: str(api["title"]),
+    invoice_date: str(api["date"])?.slice(0, 10) ?? null,
+    due_date: str(api["due_date"])?.slice(0, 10) ?? null,
+    total_amount: num(api["total_amount"]) ?? num(api["amount"]) ?? 0,
+    open_balance: num(api["open_balance"]),
+    status: str(api["status"]),
+    invoice_type: str(api["type"]),
+    raw: JSON.stringify(api),
+    last_seen_at: new Date(),
+    deleted_at: null,
+  };
+}
+
+/** Re-reads the invoices of tracked jobs that are due (see INVOICES_MAX_AGE_HOURS). */
+export async function refreshInvoices(
+  client: JobProgressClient, counts: StageSyncCounts,
+  perRun = Number(process.env.PRODUCTION_INVOICES_PER_RUN ?? FINANCIALS_PER_RUN_DEFAULT),
+): Promise<void> {
+  if (perRun <= 0) return;
+  const stale = await withServiceRole(async (c) => {
+    const { rows } = await c.query<{ jp_job_id: string }>(
+      `SELECT jp_job_id FROM jp_job
+        WHERE stage_seen_at IS NOT NULL
+          AND (invoices_fetched_at IS NULL
+               OR invoices_fetched_at < now() - make_interval(hours => $1)
+               OR (payments_fetched_at IS NOT NULL AND payments_fetched_at > invoices_fetched_at))
+        ORDER BY invoices_fetched_at NULLS FIRST, jp_job_id
+        LIMIT $2`,
+      [INVOICES_MAX_AGE_HOURS, perRun]);
+    return rows.map((r) => r.jp_job_id);
+  }, "job-stages:invoices-stale", { quiet: true });
+
+  for (const id of stale) {
+    try {
+      counts.invoices_jobs_fetched++;
+      const rows = (await client.listJobInvoices(id))
+        .map((i) => mapInvoice(i, id))
+        .filter((r): r is Record<string, unknown> => r !== null);
+      counts.invoices_upserted += await upsertJpRows("jp_job_invoice", "jp_invoice_id", rows);
+      await withServiceRole(async (c) => {
+        const gone = await c.query(
+          `UPDATE jp_job_invoice SET deleted_at = now()
+            WHERE jp_job_id = $1 AND deleted_at IS NULL AND NOT (jp_invoice_id = ANY($2::text[]))`,
+          [id, rows.map((r) => String(r["jp_invoice_id"]))]);
+        counts.invoices_retired += gone.rowCount ?? 0;
+        await c.query(`UPDATE jp_job SET invoices_fetched_at = now() WHERE jp_job_id = $1`, [id]);
+      }, "job-stages:invoices-mark", { quiet: true });
+    } catch (err) {
+      counts.invoice_errors++;
+      console.warn(`[job-stages] invoices failed for job ${id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** A jp_job row from a job payload, with the stage sweep's own extras. */
 export function mapStageJob(api: Record<string, unknown>, divisionNames: Map<string, string>, seen: boolean): Record<string, unknown> {
   const row = mapJpJob(api, divisionNames);
@@ -390,6 +463,7 @@ export async function runJobStageSync(options: StageSyncOptions = {}): Promise<S
     await refreshFinancials(client, jobs, counts);
     await refreshPayments(client, counts);
     await refreshVendorBills(client, counts);
+    await refreshInvoices(client, counts);
 
     // Sweep 2: jobs we last saw in a tracked stage that were not returned now.
     const seenIds = new Set(rows.map((r) => String(r["jp_job_id"])));
