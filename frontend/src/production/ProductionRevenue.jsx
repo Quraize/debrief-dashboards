@@ -233,12 +233,13 @@ export default function ProductionRevenue() {
                       </tr>
                     ))}
                   </tbody>
+                  {/* The total stays in view at the bottom while the rows scroll under it. */}
                   {!q && (
-                    <tfoot>
-                      <tr className="bg-secondary font-semibold">
-                        <td className="px-3 py-2 sticky left-0 bg-secondary" colSpan={6}>Total · the card&apos;s figure</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{money(current.total)}</td>
-                        <td colSpan={2} />
+                    <tfoot className="sticky bottom-0 z-10">
+                      <tr className="bg-secondary font-semibold shadow-[0_-1px_0_0_hsl(var(--border))]">
+                        <td className="px-3 py-2 sticky left-0 z-20 bg-secondary" colSpan={6}>Total · the card&apos;s figure</td>
+                        <td className="px-3 py-2 text-right tabular-nums bg-secondary">{money(current.total)}</td>
+                        <td className="bg-secondary" colSpan={2} />
                       </tr>
                     </tfoot>
                   )}
