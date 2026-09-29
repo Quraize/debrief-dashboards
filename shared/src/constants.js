@@ -184,6 +184,9 @@ export const DATE_FILTERS = ["Today","Yesterday","This Week","Last Week","This M
 export const ALL_TIME_FILTER = "All Time";
 // "Next Week" is for the forward-looking pages (the pipeline, the queue): what is booked to start or run.
 export const QUEUE_DATE_FILTERS = [ALL_TIME_FILTER,"Today","Yesterday","Last 7 Days","This Week","Last Week","Next Week","This Month","Last Month","Next Month","Custom Range"];
+// Revenue & AR: "Month to Date" is the 1st of the month through today — what
+// has actually started so far; "This Month" also counts installs booked later on.
+export const REVENUE_DATE_FILTERS = [ALL_TIME_FILTER,"This Week","Last Week","Next Week","Month to Date","This Month","Last Month","Next Month","Custom Range"];
 
 // Admin Settings list manager categories
 export const LIST_CATEGORIES = [
@@ -250,6 +253,7 @@ export function inDateRange(dateStr, filter, customStart, customEnd) {
     case "Next Week": { const day = (today.getDay() + 6) % 7; const ws = startToday - day * 86400000 + 7 * 86400000; return d.getTime() >= ws && d.getTime() < ws + 7 * 86400000; }
     case "Last 7 Days": return d.getTime() >= startToday - 6 * 86400000 && d.getTime() < endToday;
     case "This Month": return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
+    case "Month to Date": return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getTime() < endToday;
     case "Last Month": { const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1); return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth(); }
     case "Next Month": { const nm = new Date(today.getFullYear(), today.getMonth() + 1, 1); return d.getFullYear() === nm.getFullYear() && d.getMonth() === nm.getMonth(); }
     case "This Quarter": { const qs = new Date(today.getFullYear(), qIdx * 3, 1).getTime(); return d.getTime() >= qs && d.getTime() < endToday; }
@@ -294,6 +298,7 @@ export function getDateRangeBounds(filter, customStart, customEnd) {
     }
     case "Last 7 Days": { const s = new Date(today); s.setDate(today.getDate() - 6); return { start: fmt(s), end: fmt(today) }; }
     case "This Month": return { start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), end: fmt(today) };
+    case "Month to Date": return { start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), end: fmt(today) };
     case "Last Month": { const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1); const lme = new Date(today.getFullYear(), today.getMonth(), 0); return { start: fmt(lm), end: fmt(lme) }; }
     case "Next Month": { const nm = new Date(today.getFullYear(), today.getMonth() + 1, 1); const nme = new Date(today.getFullYear(), today.getMonth() + 2, 0); return { start: fmt(nm), end: fmt(nme) }; }
     case "This Quarter": return { start: fmt(new Date(today.getFullYear(), qIdx * 3, 1)), end: fmt(today) };

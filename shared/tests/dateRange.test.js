@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { inDateRange, getDateRangeBounds, QUEUE_DATE_FILTERS, DATE_FILTERS, ALL_TIME_FILTER } from "../src/constants.js";
+import { inDateRange, getDateRangeBounds, QUEUE_DATE_FILTERS, DATE_FILTERS, ALL_TIME_FILTER, REVENUE_DATE_FILTERS } from "../src/constants.js";
 
 // Tuesday 2026-09-08. This week = Mon 09-07 → Sun 09-13; last week = Mon 08-31 → Sun 09-06.
 beforeAll(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-08T10:00:00")); });
@@ -22,6 +22,17 @@ describe("Last 7 Days", () => {
     expect(inDateRange("2026-09-08", "Last 7 Days")).toBe(true);
     expect(inDateRange("2026-09-01", "Last 7 Days")).toBe(false);
     expect(inDateRange("2026-09-09", "Last 7 Days")).toBe(false);
+  });
+});
+
+describe("Month to Date", () => {
+  it("is the 1st of the month through today, never later in the month", () => {
+    expect(getDateRangeBounds("Month to Date")).toEqual({ start: "2026-09-01", end: "2026-09-08" });
+    expect(inDateRange("2026-09-01", "Month to Date")).toBe(true);
+    expect(inDateRange("2026-09-08", "Month to Date")).toBe(true);
+    expect(inDateRange("2026-09-09", "Month to Date")).toBe(false);
+    expect(inDateRange("2026-08-31", "Month to Date")).toBe(false);
+    expect(REVENUE_DATE_FILTERS).toContain("Month to Date");
   });
 });
 

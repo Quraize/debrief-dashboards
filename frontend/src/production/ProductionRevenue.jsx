@@ -13,7 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
 import { revenueTotals, startedRevenue, STATUSES } from "@allied/shared/revenueAr";
-import { QUEUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
+import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
 import { Loader2, ExternalLink, Search, ChevronDown, ChevronRight } from "lucide-react";
@@ -96,7 +96,7 @@ export default function ProductionRevenue() {
       </div>
 
       <DateRangeFilter filter={range} setFilter={setRange} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe}
-        filters={QUEUE_DATE_FILTERS} />
+        filters={REVENUE_DATE_FILTERS} />
 
       {isLoading || !t ? (
         error ? <p className="text-sm text-red-600">The summary could not be loaded right now.</p>
