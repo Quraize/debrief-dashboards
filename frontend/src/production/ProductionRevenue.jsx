@@ -43,18 +43,16 @@ export default function ProductionRevenue() {
   const [status, setStatus] = useState("all");
   const [flag, setFlag] = useState("");
   const [q, setQ] = useState("");
-  // The range applies to the START date by default (this is a started-revenue
-  // view); switch it to the completion date to look at what finished.
+  // The range always applies to the START date: this is a started-revenue view.
   const [range, setRange] = useState("This Week");
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
-  const [basis, setBasis] = useState("started");
 
   const book = data?.rows ?? [];
   const inRange = useMemo(() => {
     if (range === ALL_TIME_FILTER) return book;
-    return book.filter((r) => inDateRange(basis === "started" ? r.startedDay : r.completedDay, range, cs, ce));
-  }, [book, range, cs, ce, basis]);
+    return book.filter((r) => inDateRange(r.startedDay, range, cs, ce));
+  }, [book, range, cs, ce]);
   // Revenue started: the Weekly Job Sheet's jobs, each once, in the week its
   // first install falls in; the date range picks which weeks.
   // This / Last / Next Week are the sheet's blocks: a week that crosses a
@@ -97,21 +95,8 @@ export default function ProductionRevenue() {
         </p>
       </div>
 
-      <div className="flex flex-col lg:flex-row lg:items-start gap-3">
-        <DateRangeFilter filter={range} setFilter={setRange} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe}
-          filters={QUEUE_DATE_FILTERS} className="flex-1" />
-        <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1.5">Range applies to</div>
-          <div className="flex rounded-lg border border-border overflow-hidden" role="group" aria-label="Which date the range filters">
-            {[["started", "Start date"], ["completed", "Completion date"]].map(([k, label]) => (
-              <button key={k} onClick={() => setBasis(k)} aria-pressed={basis === k}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${basis === k ? "bg-accent text-white" : "bg-white text-muted-foreground hover:bg-secondary"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <DateRangeFilter filter={range} setFilter={setRange} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe}
+        filters={QUEUE_DATE_FILTERS} />
 
       {isLoading || !t ? (
         error ? <p className="text-sm text-red-600">The summary could not be loaded right now.</p>
