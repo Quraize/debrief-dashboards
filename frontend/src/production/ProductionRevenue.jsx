@@ -136,9 +136,18 @@ export default function ProductionRevenue() {
                   )}
                 </>} />
             )}
-            <Card tone={t.totalAR > 0 ? "amber" : "green"} label="Total AR" value={money(t.totalAR)} sub={`${t.totalARJobs} completed, unpaid`} onClick={() => setFlag(flag === "ar" ? "" : "ar")} active={flag === "ar"} />
-            <Card tone={t.overdueAR > 0 ? "red" : "green"} label={`Overdue AR (${t.overdueDays}+ days)`} value={money(t.overdueAR)}
-              sub={`31–60: ${money(t.aging.d31_60)} · 61–90: ${money(t.aging.d61_90)} · 90+: ${money(t.aging.d90plus)}`} onClick={() => setFlag(flag === "overdue" ? "" : "overdue")} active={flag === "overdue"} />
+            {data.ar && (() => {
+              const ar = data.ar;
+              const names = (list) => list.map((r) => `${r.customer || r.label}: ${money(r.owed)} (${r.daysOutstanding ?? "?"} days)`).join("\n");
+              return (<>
+                <Card tone={ar.totalAR > 0 ? "amber" : "green"} label="Total AR · today" value={money(ar.totalAR)}
+                  sub={<span title={names(ar.rows)}>{ar.totalARJobs} finished job{ar.totalARJobs === 1 ? "" : "s"} still owing · not affected by the date filter</span>} />
+                <Card tone={ar.overdueAR > 0 ? "red" : "green"} label={`Overdue AR · ${ar.overdueDays}+ days · today`} value={money(ar.overdueAR)}
+                  sub={<span title={names(ar.rows.filter((r) => r.overdue))}>
+                    {ar.overdueARJobs} job{ar.overdueARJobs === 1 ? "" : "s"} · 31–60: {money(ar.aging.d31_60)} · 61–90: {money(ar.aging.d61_90)} · 90+: {money(ar.aging.d90plus)}
+                  </span>} />
+              </>);
+            })()}
           </div>
 
           {/* What the numbers cannot see. */}

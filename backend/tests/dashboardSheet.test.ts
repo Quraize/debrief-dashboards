@@ -69,6 +69,23 @@ describe("dashboardData", () => {
   });
 });
 
+describe("the Revenue & AR page's AR", () => {
+  it("is the dashboard's overdue figure, from the same jobs and the same rule", async () => {
+    const { sheetAr } = await import("../src/production/revenue.js");
+    const feed = [
+      job("1"),
+      job("4", { stage: "COMPLETED NEED FINAL PAYMENT!!", completionDate: "2026-08-01", balanceOwed: 1500, totalPayments: 0 }),   // 54 days: overdue
+      job("5", { stage: "COMPLETED NEED FINAL PAYMENT!!", completionDate: "2026-09-10", balanceOwed: 900, totalPayments: 100 }),  // 14 days: AR, not overdue
+      job("6", { stage: "Paid New Roof", completionDate: "2026-07-01", balanceOwed: 0, totalPayments: 10000 }),
+    ];
+    const dash = dashboardData([["Town/Address/Customer"]] as never, feed, [], "2026-09-24", 30);
+    const ar = sheetAr(feed, "2026-09-24", 30);
+    expect(ar.overdueAR).toBe(dash.overdue);
+    expect(ar).toMatchObject({ overdueAR: 1500, overdueARJobs: 1, totalAR: 2400, totalARJobs: 2 });
+    expect(ar.rows.map((r) => [r.jobId, r.overdue])).toEqual([["4", true], ["5", false]]);
+  });
+});
+
 describe("renameRequests", () => {
   it("renames the overdue heading on an existing dashboard only while it still has the old text", () => {
     const heads: (string | null)[][] = Array.from({ length: 12 }, () => []);
