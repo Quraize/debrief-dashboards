@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, completedUnpaid, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("completedUnpaid — physically complete, money still out", () => {
+  const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", gross: 20000, changeOrders: 0, deposit: 5000, progressPayments: null, ...over });
+  it("puts walk-through, punch-list and crew-finished jobs in their tiers, and leaves billed, building and paid jobs out", () => {
+    const c = completedUnpaid([
+      job({ jobId: "walk", stage: "Need Final Walk-Through" }),                               // $15,000
+      job({ jobId: "insp", stage: "City & Manufacturer Inspection", gross: 6000 }),           // $1,000
+      job({ jobId: "punch", stage: "Gutters/Solar/Punchlist", progressPayments: 10000 }),     // $5,000
+      job({ jobId: "crew", stage: "Production Started", crewDone: true, gross: 9000 }),       // $4,000: stage never moved on
+      job({ jobId: "building", stage: "Production Started" }),                                 // still being built
+      job({ jobId: "billed", stage: "COMPLETED NEED FINAL PAYMENT!!", crewDone: true }),       // Total AR's, not here
+      job({ jobId: "paid", stage: "Need Final Walk-Through", pifStatus: "YES" }),
+      job({ jobId: "square", stage: "Need Final Walk-Through", deposit: 20000 }),              // nothing owed
+    ]);
+    expect(c.rows.map((r) => [r.jobId, r.tier, r.balance])).toEqual([["walk", "walkthrough", 15000], ["punch", "punchlist", 5000], ["crew", "crew", 4000], ["insp", "walkthrough", 1000]]);
+    expect([c.walkthrough, c.punchlist, c.crew].map((t) => [t.amount, t.jobs])).toEqual([[16000, 2], [5000, 1], [4000, 1]]);
+    expect(c).toMatchObject({ amount: 25000, jobs: 4 });
+    expect(completedUnpaid(undefined)).toMatchObject({ amount: 0, jobs: 0 });
+  });
+});
 
 describe("expectedSchedule — today, next 7 and next 14 days, cumulative, by job", () => {
   const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", gross: 10000, changeOrders: 0, deposit: 2000, progressPayments: null, salesRep: "Jason", lastInstall: "2026-09-29", ...over });

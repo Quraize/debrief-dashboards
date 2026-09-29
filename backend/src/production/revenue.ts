@@ -11,7 +11,7 @@ import { todayInBoardZone } from "./board.js";
 import { revenueSummary, revenueRow, revenueTotals, AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
 import { weeklyJobSheet } from "./weeklyJobSheet.js";
 import { firstInstallDay, bringsMoney, sheetSplitFrom } from "./sheetPlan.js";
-import { isInstallCode } from "@allied/shared/production";
+import { isInstallCode, INSTALL_CODES } from "@allied/shared/production";
 
 export function arSettings(env = process.env) {
   const n = Number(env.AR_OVERDUE_DAYS);
@@ -19,16 +19,35 @@ export function arSettings(env = process.env) {
 }
 
 export async function revenueReport(ctx: SessionContext, today = todayInBoardZone(), env = process.env) {
-  const [jobs, sheet, invoices, owners] = await Promise.all([loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx), loadInvoices(ctx), loadOwners(ctx)]);
+  const [jobs, sheet, invoices, owners, crewDone] = await Promise.all([
+    loadJobs((fn) => withUser(dbApp(), ctx, fn)), weeklyJobSheet(ctx), loadInvoices(ctx), loadOwners(ctx), loadCrewDone(ctx)]);
   return {
     ...revenueSummary(jobs, today, arSettings(env)),
-    started: { rows: startedRows(sheet.rows, invoices).map((r) => ({ ...r, owner: owners.get(r.jobId) ?? null })), splitFrom: sheetSplitFrom(env) },
+    started: {
+      rows: startedRows(sheet.rows, invoices).map((r) => ({ ...r, owner: owners.get(r.jobId) ?? null, crewDone: crewDone.has(r.jobId) })),
+      splitFrom: sheetSplitFrom(env),
+    },
     ar: sheetAr(sheet.rows, today, arSettings(env).overdueDays),
   };
 }
 
 type SheetFeedRow = Awaited<ReturnType<typeof weeklyJobSheet>>["rows"][number];
 export interface InvoiceLite { number: string | null; date: string | null; dueDate: string | null; total: number; open: number | null; status: string | null }
+
+/**
+ * Jobs the crew has finished by the calendar: at least one install visit, and
+ * every install visit in the past and marked completed. Completed but Unpaid
+ * uses it to catch a finished job whose stage was never moved on.
+ */
+async function loadCrewDone(ctx: SessionContext): Promise<Set<string>> {
+  const rows = await withUser(dbApp(), ctx, async (c) => (await c.query<{ jp_job_id: string }>(
+    `SELECT jp_job_id FROM jp_schedule
+      WHERE deleted_at IS NULL AND jp_job_id IS NOT NULL
+        AND upper(replace(replace(coalesce(job_type_code, ''), ' ', ''), '/', '+')) = ANY($1::text[])
+      GROUP BY jp_job_id
+     HAVING bool_and(is_completed AND start_at < now())`, [INSTALL_CODES])).rows);
+  return new Set(rows.map((r) => r.jp_job_id));
+}
 
 /** The Owner managers set on the Sold-Job Pipeline, by job (job_pipeline_note, 0030). */
 async function loadOwners(ctx: SessionContext): Promise<Map<string, string>> {

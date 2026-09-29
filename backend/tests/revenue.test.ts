@@ -128,6 +128,8 @@ describe.skipIf(!reachable)("Revenue & AR", () => {
     expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "b").invoices).toEqual([]);
     expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "e").owner).toBe("Matt Steussing");
     expect(p.started.rows.find((r: { jobId: string }) => r.jobId === "a").owner).toBeNull();
+    // No visit in the fixtures is marked completed, so no job is crew-finished.
+    expect(p.started.rows.some((r: { crewDone: boolean }) => r.crewDone)).toBe(false);
     expect(p.started.splitFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

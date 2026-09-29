@@ -357,6 +357,45 @@ export function progressDue(rows, today) {
   };
 }
 
+/**
+ * Completed but Unpaid (the PM's rule 5): jobs physically complete with money
+ * still outstanding — the highest-priority exception report. Decided
+ * 2026-09-29 to count the work as done as soon as the main job is (the page
+ * exists because production got ahead of collections, so it looks early),
+ * in tiers so nobody mistakes one for another:
+ *   walkthrough  Need Final Walk-Through, City & Manufacturer Inspection
+ *   punchlist    Gutters/Solar/Punchlist — main work done, small items left
+ *   crew         the crew finished every install visit on the calendar but
+ *                the stage was never moved on (`crewDone` from the server)
+ * The billed tier (COMPLETED NEED FINAL PAYMENT, Collections) is Total AR,
+ * as the sheet's dashboard counts it, so it is not repeated here. Amount is
+ * the sheet balance; paid-in-full and dead jobs are out.
+ */
+export const WALKTHROUGH_STAGES = ["Need Final Walk-Through", "City & Manufacturer Inspection"];
+export const PUNCHLIST_STAGES = ["Gutters/Solar/Punchlist"];
+export function completedUnpaid(rows) {
+  const walk = keys(WALKTHROUGH_STAGES), punch = keys(PUNCHLIST_STAGES);
+  const tierOf = (r) => {
+    const k = stageKey(r.stage);
+    if (walk.has(k)) return "walkthrough";
+    if (punch.has(k)) return "punchlist";
+    if (!isCompletedStage(r.stage) && r.crewDone) return "crew";
+    return null;
+  };
+  const list = (rows ?? []).filter((r) => !DEAD_STAGE.test(String(r.stage ?? "")) && !isDisqualifiedStage(String(r.stage ?? ""))
+      && r.pifStatus !== PIF_STATUS.yes && r.pifStatus !== PIF_STATUS.mismatch)
+    .map((r) => ({ jobId: r.jobId, customer: r.customer || r.label || r.jobId, tier: tierOf(r), balance: sheetBalance(r) }))
+    .filter((r) => r.tier && r.balance > 0)
+    .sort((a, b) => b.balance - a.balance);
+  const pack = (l) => ({ amount: round(l.reduce((n, r) => n + r.balance, 0)), jobs: l.length, rows: l });
+  return {
+    ...pack(list),
+    walkthrough: pack(list.filter((r) => r.tier === "walkthrough")),
+    punchlist: pack(list.filter((r) => r.tier === "punchlist")),
+    crew: pack(list.filter((r) => r.tier === "crew")),
+  };
+}
+
 /** One line, for a hover: how a job's expected payment date is worked out. */
 export const EXPECTED_DATE_RULE =
   "JobProgress has no payment due dates, so we expect a job's balance when the job finishes: its completion date once the stage says it is finished, otherwise its last scheduled install day.";

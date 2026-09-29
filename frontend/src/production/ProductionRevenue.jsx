@@ -14,7 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES, REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import {
-  startedRevenue, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, sheetBalance, isCompletedStage, EXPECTED_DATE_RULE,
+  startedRevenue, operationalAr, invoicedAr, depositsMissing, progressDue, expectedSchedule, completedUnpaid, sheetBalance, isCompletedStage, EXPECTED_DATE_RULE,
 } from "@allied/shared/revenueAr";
 import { PIF_STATUS } from "@allied/shared/weeklyJobSheet";
 import { sheetWeekFrom } from "@allied/shared/production";
@@ -90,6 +90,11 @@ export default function ProductionRevenue() {
     const prog = progressDue(all, today);
     const dep = depositsMissing(all, today);
     const building = op.rows.filter((r) => !r.finished);
+    // Completed but Unpaid: its three tiers here, plus the billed jobs (Total AR).
+    const cu = completedUnpaid(all);
+    const TIER_NOTE = { walkthrough: "Work done · walk-through or inspection left", punchlist: "Main work done · punch list or gutters left", crew: "Crew finished · stage not updated" };
+    const cuRows = (list2) => list2.map((r) => row(r.jobId, r.balance, TIER_NOTE[r.tier]));
+    const cuAll = Math.round((cu.amount + ar.totalAR) * 100) / 100;
 
     const cards = {
       started: {
@@ -121,8 +126,8 @@ export default function ProductionRevenue() {
       operational: {
         title: "Operational AR · today", amountLabel: "Still owed", total: Math.round((op.inProgress.amount + ar.totalAR) * 100) / 100,
         value: money(op.inProgress.amount + ar.totalAR), tone: "amber",
-        sub: <>{money(op.inProgress.amount)} on {op.inProgress.jobs} still being built + {money(ar.totalAR)} Total AR</>,
-        rows: [...building.map((r) => row(r.jobId, r.balance, "Being built")), ...ar.rows.map((r) => row(r.jobId, r.owed, "Finished · Total AR"))]
+        sub: <>{money(op.inProgress.amount)} on {op.inProgress.jobs} jobs not yet billed + {money(ar.totalAR)} Total AR</>,
+        rows: [...building.map((r) => row(r.jobId, r.balance, "Not yet billed")), ...ar.rows.map((r) => row(r.jobId, r.owed, "Finished · Total AR"))]
           .sort((a, b) => b.amount - a.amount),
       },
       totalAr: {
@@ -142,6 +147,28 @@ export default function ProductionRevenue() {
           {prog.noneYet.jobs > 0 && <span className="block mt-1 font-semibold text-red-700">{prog.noneYet.jobs} with no progress payment yet</span>}
         </>,
         rows: prog.rows.map((r) => row(r.jobId, r.due, r.progress <= 0 ? "No progress payment yet" : `${money(r.progress)} of ${money(r.afterDeposit)} collected`)),
+      },
+      cuAll: {
+        title: "All completed but unpaid", amountLabel: "Owed", total: cuAll, value: money(cuAll), tone: cuAll > 0 ? "red" : "green",
+        hint: "Physically complete (the main work is done) with money still outstanding. Chase these first.",
+        sub: <>{plural(cu.jobs + ar.totalARJobs)} · includes {money(ar.totalAR)} Total AR (billed)</>,
+        rows: [...ar.rows.map((r) => row(r.jobId, r.owed, `Billed · ${r.daysOutstanding ?? "?"} days since completion`)), ...cuRows(cu.rows)]
+          .sort((a, b) => b.amount - a.amount),
+      },
+      cuWalk: {
+        title: "Walk-through or inspection left", amountLabel: "Owed", total: cu.walkthrough.amount, value: money(cu.walkthrough.amount), tone: "amber",
+        hint: "Need Final Walk-Through or City & Manufacturer Inspection: the work is done.",
+        sub: <>{plural(cu.walkthrough.jobs)} · Need Final Walk-Through, City &amp; Manufacturer Inspection</>, rows: cuRows(cu.walkthrough.rows),
+      },
+      cuPunch: {
+        title: "Punch list or gutters left", amountLabel: "Owed", total: cu.punchlist.amount, value: money(cu.punchlist.amount), tone: "amber",
+        hint: "Gutters/Solar/Punchlist: the main job is done, small items are left.",
+        sub: <>{plural(cu.punchlist.jobs)} · Gutters/Solar/Punchlist</>, rows: cuRows(cu.punchlist.rows),
+      },
+      cuCrew: {
+        title: "Crew finished, stage not updated", amountLabel: "Owed", total: cu.crew.amount, value: money(cu.crew.amount), tone: cu.crew.jobs ? "red" : "green",
+        hint: "Every install visit is done on the calendar, but the job's stage was never moved on in JobProgress.",
+        sub: <>{cu.crew.jobs ? `${plural(cu.crew.jobs)} · move the stage on in JobProgress` : "None: every finished job has its stage moved on"}</>, rows: cuRows(cu.crew.rows),
       },
       exToday: exCard("today", "Expected today", fmtDay(today)),
       ex7: exCard("next7", "Expected in the next 7 days", `today through ${fmtDay(ex.next7.to)}`),
@@ -186,17 +213,22 @@ export default function ProductionRevenue() {
         <>
           <StartedPanel s={m.s} block={m.block} range={range} today={m.today} active={sel === "started"} onSelect={() => pick("started")} />
 
-          <GroupHeading>For the selected period · {range}{m.block ? ` (${fmtDay(m.block.from)} – ${fmtDay(m.block.to)})` : ""}</GroupHeading>
+          <GroupHeading tone="period">For the selected period · {range}{m.block ? ` (${fmtDay(m.block.from)} – ${fmtDay(m.block.to)})` : ""}</GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {["paid", "remaining", "invoiced"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
-          <GroupHeading>Owed today · not affected by the date filter</GroupHeading>
+          <GroupHeading tone="today">Owed today · not affected by the date filter</GroupHeading>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {["operational", "totalAr", "overdue", "progress", "deposits"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
-          <GroupHeading>
+          <GroupHeading tone="priority">Completed but unpaid · top priority · not affected by the date filter</GroupHeading>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {["cuAll", "cuWalk", "cuPunch", "cuCrew"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} hint={m.cards[k].hint} />)}
+          </div>
+
+          <GroupHeading tone="expected">
             Expected Collections · from today, not affected by the date filter
             <span className="inline-flex align-middle ml-1.5 text-muted-foreground cursor-help normal-case" title={EXPECTED_DATE_RULE} aria-label={EXPECTED_DATE_RULE}>
               <Info className="w-3.5 h-3.5" /><span className="ml-1 text-[11px] font-normal">How is the date worked out?</span>
@@ -338,8 +370,19 @@ function StartedPanel({ s, block, range, today, active, onSelect }) {
   );
 }
 
-function GroupHeading({ children }) {
-  return <h2 className="text-xs uppercase tracking-wide font-semibold text-muted-foreground pt-1">{children}</h2>;
+/** A section heading, made hard to miss: large, bold, in its section's colour, with a colour bar. */
+const HEADING_TONE = {
+  period: "text-blue-800 border-blue-600 bg-blue-50",
+  today: "text-amber-900 border-amber-500 bg-amber-50",
+  priority: "text-red-800 border-red-600 bg-red-50",
+  expected: "text-emerald-800 border-emerald-600 bg-emerald-50",
+};
+function GroupHeading({ tone = "period", children }) {
+  return (
+    <h2 className={`mt-3 text-base sm:text-lg uppercase tracking-wide font-extrabold border-l-8 rounded-r-lg px-3 py-2 ${HEADING_TONE[tone]}`}>
+      {children}
+    </h2>
+  );
 }
 
 /**
