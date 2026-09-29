@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, startedRevenue, expectedCollections, operationalAr, invoicedAr, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, STATUSES } from "@allied/shared/revenueAr";
 import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
@@ -151,7 +151,7 @@ export default function ProductionRevenue() {
           </div>
 
           <GroupHeading>Owed today · not affected by the date filter</GroupHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {started && data.ar && (() => {
               // Operational AR = what is owed on jobs still being built + Total AR (the
               // finished jobs, the card beside it), so the two cards always reconcile.
@@ -179,13 +179,21 @@ export default function ProductionRevenue() {
                   </span>} />
               </>);
             })()}
+            {started && (() => {
+              const d = depositsMissing(data.started.rows, data.today);
+              return (
+                <Card tone={d.jobs > 0 ? "red" : "green"} label="Deposits Missing" value={`${d.jobs} job${d.jobs === 1 ? "" : "s"}`}
+                  sub={<span title={d.rows.map((r) => `${r.customer}: started ${fmtDay(r.firstInstall)} · ${r.stage ?? ""} · ${money(r.totalRev)}`).join("\n")}>
+                    {d.jobs === 0 ? "Every started job has a deposit recorded"
+                      : <>Started with $0 deposit in JobProgress ({money(d.contract)} of contracts)
+                          <span className="block mt-1 font-semibold">{d.rows.slice(0, 4).map((r) => r.customer).join(", ")}{d.jobs > 4 ? ` +${d.jobs - 4} more` : ""}</span></>}
+                  </span>} />
+              );
+            })()}
           </div>
 
           {/* What the numbers cannot see. */}
           <div className="flex flex-wrap gap-2 text-xs">
-            <FlagChip on={flag === "noPayment"} onClick={() => setFlag(flag === "noPayment" ? "" : "noPayment")} tone={t.flags.noPayment ? "red" : "green"}>
-              {t.flags.noPayment} started job{t.flags.noPayment === 1 ? "" : "s"} with no payment recorded in JobProgress
-            </FlagChip>
             <FlagChip on={flag === "paidStageOwed"} onClick={() => setFlag(flag === "paidStageOwed" ? "" : "paidStageOwed")} tone={t.flags.paidStageOwed ? "amber" : "green"}>
               {t.flags.paidStageOwed} in a Paid stage but ledger shows {money(t.flags.paidStageOwedAmount)} owed
             </FlagChip>

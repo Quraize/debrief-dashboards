@@ -304,6 +304,27 @@ export function invoicedAr(rows, inPeriod, today) {
   };
 }
 
+/**
+ * Deposits missing (the PM's rule 3): a deposit is due when the job starts;
+ * a started job with nothing in the sheet's Deposit column (blank or $0 — the
+ * first payment recorded in JobProgress, whatever its method) is missing its
+ * deposit. No exceptions, as on the sheet: a financed job whose lender has
+ * not funded, or an insurance job with no check yet, is money not in either.
+ * Started is Operational AR's test. A job the office marked paid is left out.
+ */
+export function depositsMissing(rows, today) {
+  const started = (r) => (r.firstInstall && r.firstInstall <= today) || isStartedStage(r.stage);
+  const missing = (rows ?? []).filter((r) => !DEAD_STAGE.test(String(r.stage ?? "")) && !isDisqualifiedStage(String(r.stage ?? ""))
+      && started(r) && r.pifStatus !== PIF_STATUS.yes && r.pifStatus !== PIF_STATUS.mismatch && !((num(r.deposit) ?? 0) > 0))
+    .sort((a, b) => String(a.firstInstall ?? "").localeCompare(String(b.firstInstall ?? "")));
+  return {
+    jobs: missing.length,
+    contract: round(missing.reduce((n, r) => n + (num(r.gross) ?? 0) + (num(r.changeOrders) ?? 0), 0)),
+    rows: missing.map((r) => ({ jobId: r.jobId, customer: r.customer || r.label || r.jobId, firstInstall: r.firstInstall ?? null, stage: r.stage ?? null,
+      totalRev: round((num(r.gross) ?? 0) + (num(r.changeOrders) ?? 0)) })),
+  };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

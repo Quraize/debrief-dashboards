@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("depositsMissing — started, and nothing in the Deposit column", () => {
+  const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: null, ...over });
+  it("lists every started job with a blank or $0 deposit, financed and insurance alike, and nothing else", () => {
+    const d = depositsMissing([
+      job({ jobId: "contessa", customer: "Mike Contessa", firstInstall: "2026-09-27", gross: 50000 }),
+      job({ jobId: "financed", customer: "Financed", firstInstall: "2026-09-20", gross: 15000, deposit: 0 }),   // lender not funded yet: still missing
+      job({ jobId: "old", customer: "Maryann Schnell", stage: "COMPLETED NEED FINAL PAYMENT!!", firstInstall: null, gross: 1000 }), // by stage
+      job({ jobId: "paid", deposit: 4000 }),
+      job({ jobId: "notYet", stage: "Roof/Siding Scheduled", firstInstall: "2026-10-05" }),   // due when it starts, not before
+      job({ jobId: "paidStage", stage: "Paid New Roof", pifStatus: "YES" }),                  // the office marked it paid
+      job({ jobId: "dead", stage: "Cancelled" }),
+    ], "2026-09-29");
+    expect(d.rows.map((r) => r.customer)).toEqual(["Maryann Schnell", "Financed", "Mike Contessa"]);
+    expect(d).toMatchObject({ jobs: 3, contract: 66000 });
+    expect(depositsMissing(undefined, "2026-09-29")).toEqual({ jobs: 0, contract: 0, rows: [] });
+  });
+});
 
 describe("invoicedAr — unpaid amounts already invoiced, by invoice date", () => {
   const inSept = (d) => d >= "2026-09-01" && d <= "2026-09-30";
