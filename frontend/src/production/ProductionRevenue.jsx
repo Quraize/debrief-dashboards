@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, STATUSES } from "@allied/shared/revenueAr";
 import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
@@ -151,7 +151,7 @@ export default function ProductionRevenue() {
           </div>
 
           <GroupHeading>Owed today · not affected by the date filter</GroupHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {started && data.ar && (() => {
               // Operational AR = what is owed on jobs still being built + Total AR (the
               // finished jobs, the card beside it), so the two cards always reconcile.
@@ -178,6 +178,20 @@ export default function ProductionRevenue() {
                     {ar.overdueARJobs} finished job{ar.overdueARJobs === 1 ? "" : "s"} unpaid more than {ar.overdueDays} days after completion · 31–60: {money(ar.aging.d31_60)} · 61–90: {money(ar.aging.d61_90)} · 90+: {money(ar.aging.d90plus)}
                   </span>} />
               </>);
+            })()}
+            {started && (() => {
+              const p = progressDue(data.started.rows, data.today);
+              return (
+                <Card tone={p.amount > 0 ? "amber" : "green"} label="Progress Payments Due" value={money(p.amount)}
+                  sub={<span title={p.rows.map((r) => `${r.customer}: ${money(r.due)} still to collect (${money(r.progress)} of ${money(r.afterDeposit)} after the deposit) · ${r.stage ?? ""}`).join("\n")}>
+                    Still to collect after the deposit on {p.jobs} started job{p.jobs === 1 ? "" : "s"} ({money(p.collected)} of {money(p.afterDeposit)} collected)
+                    {p.noneYet.jobs > 0 && (
+                      <span className="block mt-1 font-semibold text-red-700">
+                        {p.noneYet.jobs} with no progress payment yet ({money(p.noneYet.amount)}): {p.noneYet.names.slice(0, 3).join(", ")}{p.noneYet.jobs > 3 ? ` +${p.noneYet.jobs - 3} more` : ""}
+                      </span>
+                    )}
+                  </span>} />
+              );
             })()}
             {started && (() => {
               const d = depositsMissing(data.started.rows, data.today);

@@ -325,6 +325,38 @@ export function depositsMissing(rows, today) {
   };
 }
 
+/**
+ * Progress payments due (the PM's rule 4). On the sheet the first payment is
+ * the Deposit (Y) and every payment after it is a Progress Payment (Z). So
+ * once a started job has its deposit, the rest of the contract — Total Rev
+ * w/ C.O.s minus the deposit — is collected as progress payments, and what is
+ * still uncollected is Total Rev − Deposit − Progress received: the sheet's
+ * Balance Owed on that job. Jobs with no deposit are rule 3 (Deposits
+ * Missing) and are not counted here, so nothing is counted twice. Finished
+ * jobs awaiting their final payment are included: the final payment is a
+ * progress payment on the sheet too.
+ */
+export function progressDue(rows, today) {
+  const started = (r) => (r.firstInstall && r.firstInstall <= today) || isStartedStage(r.stage);
+  const due = (rows ?? []).filter((r) => !DEAD_STAGE.test(String(r.stage ?? "")) && !isDisqualifiedStage(String(r.stage ?? ""))
+      && started(r) && r.pifStatus !== PIF_STATUS.yes && r.pifStatus !== PIF_STATUS.mismatch && (num(r.deposit) ?? 0) > 0)
+    .map((r) => {
+      const totalRev = (num(r.gross) ?? 0) + (num(r.changeOrders) ?? 0), deposit = num(r.deposit) ?? 0, progress = num(r.progressPayments) ?? 0;
+      return { jobId: r.jobId, customer: r.customer || r.label || r.jobId, stage: r.stage ?? null, firstInstall: r.firstInstall ?? null,
+        afterDeposit: round(totalRev - deposit), progress: round(progress), due: round(totalRev - deposit - progress) };
+    })
+    .filter((r) => r.due > 0)
+    .sort((a, b) => b.due - a.due);
+  const sum = (k, list = due) => round(list.reduce((n, r) => n + r[k], 0));
+  const none = due.filter((r) => r.progress <= 0);
+  return {
+    amount: sum("due"), jobs: due.length, afterDeposit: sum("afterDeposit"), collected: sum("progress"),
+    // Production ahead of collections: started, deposit in, not one progress payment yet.
+    noneYet: { amount: sum("due", none), jobs: none.length, names: none.map((r) => r.customer) },
+    rows: due,
+  };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

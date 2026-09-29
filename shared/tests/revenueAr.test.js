@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, operationalAr, invoicedAr, depositsMissing, progressDue, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("progressDue — the rest of the contract after the deposit, still uncollected", () => {
+  const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: 4000, progressPayments: null, ...over });
+  it("is Total Rev − Deposit − Progress on started jobs with a deposit, and names those with no progress payment yet", () => {
+    const p = progressDue([
+      job({ jobId: "marrero", customer: "Dave Marrero", gross: 80000, deposit: 16000 }),                          // $64,000, none yet
+      job({ jobId: "remington", customer: "Leigh Remington", gross: 38986, deposit: 7790, progressPayments: 19493, stage: "Gutters/Solar/Punchlist" }), // $11,703
+      job({ jobId: "guinto", gross: 20599, changeOrders: 3600, deposit: 19199, progressPayments: 5000 }),            // paid up: $0
+      job({ jobId: "contessa", deposit: null }),                                                                    // no deposit: rule 3, not here
+      job({ jobId: "notStarted", stage: "Roof/Siding Scheduled", firstInstall: "2026-10-05" }),
+      job({ jobId: "paid", pifStatus: "YES" }),
+    ], "2026-09-29");
+    expect(p.rows.map((r) => [r.customer, r.due])).toEqual([["Dave Marrero", 64000], ["Leigh Remington", 11703]]);
+    expect(p).toMatchObject({ amount: 75703, jobs: 2, afterDeposit: 64000 + 31196, collected: 19493, noneYet: { amount: 64000, jobs: 1, names: ["Dave Marrero"] } });
+    expect(progressDue(undefined, "2026-09-29")).toMatchObject({ amount: 0, jobs: 0, rows: [] });
+  });
+});
 
 describe("depositsMissing — started, and nothing in the Deposit column", () => {
   const job = (over) => ({ jobId: "j", customer: "C", stage: "Production Started", pifStatus: "NO", firstInstall: "2026-09-15", gross: 20000, changeOrders: 0, deposit: null, ...over });
