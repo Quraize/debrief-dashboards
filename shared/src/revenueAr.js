@@ -191,12 +191,26 @@ export function startedRevenue(rows, today, splitFrom) {
   // received, or a Paid stage. A Paid stage whose ledger still shows a
   // balance is neither YES nor NO there, and here it is its own count.
   const paid = rows.filter((r) => r.pifStatus === PIF_STATUS.yes);
+  // Remaining owed: the sheet's own row formulas, added up the sheet's way —
+  // Total Rev w/ C.O.s (Gross + Change Orders) minus Total Payments Received
+  // (Deposit + Progress Payments), so it equals the Balance Owed on the
+  // sheet's Weekly Total and Cumulative rows for the same jobs.
+  const billed = (r) => (num(r.gross) ?? 0) + (num(r.changeOrders) ?? 0);
+  const paidIn = (r) => (num(r.deposit) ?? 0) + (num(r.progressPayments) ?? 0);
+  const owing = rows.filter((r) => billed(r) - paidIn(r) > 0);
+  const remainingOwed = {
+    amount: round(rows.reduce((n, r) => n + billed(r) - paidIn(r), 0)),
+    totalRev: round(rows.reduce((n, r) => n + billed(r), 0)),
+    received: round(rows.reduce((n, r) => n + paidIn(r), 0)),
+    jobs: owing.length,
+  };
   return {
     ...totals(rows),
     started: totals(rows.filter((r) => r.firstInstall <= today)),
     upcoming: totals(rows.filter((r) => r.firstInstall > today)),
     weeks,
     paidInFull: totals(paid),
+    remainingOwed,
     notPaidInFull: totals(rows.filter((r) => r.pifStatus === PIF_STATUS.no)),
     paidStageOwed: totals(rows.filter((r) => r.pifStatus === PIF_STATUS.mismatch)),
     // Paid, but the stage still says the work is open (walk-through, punch list):

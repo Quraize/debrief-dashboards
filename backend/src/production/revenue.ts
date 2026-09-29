@@ -35,6 +35,8 @@ export function startedRows(rows: Awaited<ReturnType<typeof weeklyJobSheet>>["ro
       stage: r.stage, salesRep: r.salesRep, firstInstall, gross: r.gross, changeOrders: r.changeOrders, totalRev: r.totalRev, jpUrl: r.jpUrl,
       // The sheet's PAID-IN-FULL answer (YES / NO / YES with a ledger balance), and the money behind it.
       pifStatus: r.pifStatus, received: r.totalPayments, owed: r.balanceOwed,
+      // The sheet's Deposit and Progress Payment columns (its Total Payments Received is their sum).
+      deposit: r.deposit, progressPayments: r.progressPayments,
     }] : [];
   });
 }

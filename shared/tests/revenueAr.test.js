@@ -30,10 +30,23 @@ describe("startedRevenue — the Weekly Job Sheet's numbers", () => {
     expect(s.paidNotClosed).toEqual(["Rolito Guinto"]);
   });
 
+  it("owes what the sheet's rows owe: Gross + C.O. minus Deposit + Progress, added up", () => {
+    const owedRows = [
+      { jobId: "diss", firstInstall: "2026-09-30", gross: 26749, changeOrders: 0, deposit: 5500, progressPayments: null },
+      { jobId: "faggello", firstInstall: "2026-09-30", gross: 27971, changeOrders: 0, deposit: 5594, progressPayments: 11188 },
+      { jobId: "guinto", firstInstall: "2026-09-01", gross: 20599, changeOrders: 3600, deposit: 19199, progressPayments: 5000 },
+    ];
+    // Diss and Faggello as on the sheet's 9/28–9/30 rows; Guinto paid off, change order included.
+    expect(startedRevenue(owedRows, "2026-09-29", "2026-08-31").remainingOwed).toEqual({
+      amount: 21249 + 11189 + 0, totalRev: 26749 + 27971 + 24199, received: 5500 + 16782 + 24199, jobs: 2,
+    });
+  });
+
   it("is all zeros with no rows", () => {
     const zero = { jobs: 0, gross: 0, changeOrders: 0, totalRev: 0 };
     expect(startedRevenue([], "2026-09-29", "2026-08-31")).toEqual({
       ...zero, weeks: [], started: zero, upcoming: zero, paidInFull: zero, notPaidInFull: zero, paidStageOwed: zero, paidNotClosed: [],
+      remainingOwed: { amount: 0, totalRev: 0, received: 0, jobs: 0 },
     });
     expect(startedRevenue(undefined, "2026-09-29").jobs).toBe(0);
   });

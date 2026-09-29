@@ -121,7 +121,10 @@ export default function ProductionRevenue() {
                   )}
                 </>} />
             )}
-            <Card tone="amber" label="Remaining Owed" value={money(t.remainingOwed)} sub={`${t.remainingOwedJobs} started jobs in range still owing`} onClick={() => { setStatus("all"); setFlag(""); }} active={status === "all" && !flag} />
+            {started && (
+              <Card tone="amber" label="Remaining Owed" value={money(started.remainingOwed.amount)}
+                sub={`${started.remainingOwed.jobs} of ${started.jobs} jobs still owing · ${money(started.remainingOwed.totalRev)} Total Rev − ${money(started.remainingOwed.received)} received`} />
+            )}
             <Card tone="blue" label="Expected Collections This Week" value={money(t.expectedThisWeek)} sub={`${t.expectedThisWeekJobs} job${t.expectedThisWeekJobs === 1 ? "" : "s"} completing this week`} />
             <Card tone="blue" label="Expected Collections Next Week" value={money(t.expectedNextWeek)} sub={`${t.expectedNextWeekJobs} job${t.expectedNextWeekJobs === 1 ? "" : "s"} · ${fmtDay(t.nextWeek.from)} – ${fmtDay(t.nextWeek.to)}`} />
             <Card tone={t.totalAR > 0 ? "amber" : "green"} label="Total AR" value={money(t.totalAR)} sub={`${t.totalARJobs} completed, unpaid`} onClick={() => setFlag(flag === "ar" ? "" : "ar")} active={flag === "ar"} />
