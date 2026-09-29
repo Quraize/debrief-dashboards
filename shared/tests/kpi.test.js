@@ -156,6 +156,21 @@ describe("twoLegStats", () => {
     expect(s.denominator).toBe(1);
   });
 
+  it("shows the unanswered rest so One-Leg + Two-Leg + Not Answered read 100%, rounding included", () => {
+    const s = twoLegStats([
+      ...Array.from({ length: 24 }, () => retail({ decision_maker_status: "Two-Leg" })),
+      ...Array.from({ length: 6 }, () => retail({ decision_maker_status: "One-Leg" })),
+      retail({ decision_maker_status: "", customer_name: "Blank", sales_rep: "Jason" }),
+      retail({ decision_maker_status: "N/A", customer_name: "Na", sales_rep: "Joe" }),
+    ]);
+    // 24/32 = 75%, 6/32 = 19% (18.75 rounded), the rest 6%: they add to 100.
+    expect(s).toMatchObject({ denominator: 32, rate: 75, oneLegRate: 19, notAnswered: 2, notAnsweredRate: 6 });
+    expect(s.rate + s.oneLegRate + s.notAnsweredRate).toBe(100);
+    expect(s.notAnsweredList.map((d) => [d.customer, d.rep, d.answer])).toEqual([["Blank", "Jason", null], ["Na", "Joe", "N/A"]]);
+    // Everyone answered: nothing left over.
+    expect(twoLegStats([retail({ decision_maker_status: "Two-Leg" })])).toMatchObject({ notAnswered: 0, notAnsweredRate: 0 });
+  });
+
   it("reports a zero rate rather than dividing by zero", () => {
     expect(twoLegStats([]).rate).toBe(0);
     expect(twoLegStats([]).denominator).toBe(0);

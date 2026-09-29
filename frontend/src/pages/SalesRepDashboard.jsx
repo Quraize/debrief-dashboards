@@ -161,6 +161,10 @@ export default function SalesRepDashboard() {
               title={`One-Leg ÷ the same eligible visits Two-Leg uses (${tl.denominator} in this period). Lower is better.`} />
             <KpiCard label="Two-Leg %" value={tl.denominator > 0 ? teamTwoLegPct + "%" : "—"}
               title="Two-Leg count ÷ eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only). The same denominator as One-Leg %, so the two read against each other." />
+            <KpiCard label="Not Answered %" value={tl.denominator > 0 ? tl.notAnsweredRate + "%" : "—"}
+              rating={tl.denominator > 0 ? (tl.notAnswered === 0 ? "green" : "yellow") : null}
+              title={`The rest of the same ${tl.denominator} visits: the debrief has no One-Leg / Two-Leg answer (blank or N/A), so One-Leg % + Two-Leg % + Not Answered % = 100%.`
+                + (tl.notAnsweredList.length ? "\n\n" + tl.notAnsweredList.map((d) => `${d.customer ?? "?"} · ${d.rep ?? "?"} · ${d.date ?? ""}${d.answer ? ` (${d.answer})` : ""}`).join("\n") : "")} />
             <KpiCard label="Demos" value={teamDemos} />
             <KpiCard label="Demo %" value={aq.aqOpportunities > 0 ? teamDemoPct + "%" : "—"} />
             <CountWithChip label="No Demo" value={aq.aqNoDemo} chip={aq.aqAttended > 0 ? aq.noDemoRate + "%" : ""} />

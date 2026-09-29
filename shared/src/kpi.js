@@ -101,6 +101,14 @@ export function twoLegStats(debriefs) {
     // denominator as Two-Leg, so the two rates are comparable; unlike Two-Leg,
     // LOW is good, which is why it is rated the other way round on screen.
     oneLegRate: denominator > 0 ? Math.round((oneLeg / denominator) * 100) : 0,
+    // The rest of the same denominator: no One-Leg / Two-Leg answer (blank,
+    // N/A, anything else). Shown beside the two so the three read as 100%; the
+    // percentage is what is left after the two rounded rates, so they add up.
+    notAnswered: denominator - twoLeg - oneLeg,
+    notAnsweredRate: denominator > 0 && denominator - twoLeg - oneLeg > 0
+      ? Math.max(0, 100 - Math.round((twoLeg / denominator) * 100) - Math.round((oneLeg / denominator) * 100)) : 0,
+    notAnsweredList: denomRecords.filter((d) => d.decision_maker_status !== "Two-Leg" && d.decision_maker_status !== "One-Leg")
+      .map((d) => ({ customer: d.customer_name ?? null, rep: d.sales_rep ?? null, date: d.appointment_date ?? null, answer: d.decision_maker_status || null })),
   };
 }
 
