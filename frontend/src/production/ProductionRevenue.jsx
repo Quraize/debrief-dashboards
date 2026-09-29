@@ -37,6 +37,7 @@ const PERIOD = "Follows the date filter.";
 const TODAY_ONLY = "As of today; the date filter does not change it.";
 const DEF = {
   started: `Gross contract of every job whose first install falls in the period, counted once, in the week its install starts (weeks cut at the month end), as on the Weekly Job Sheet. $0 jobs are left out. ${PERIOD}`,
+  closed: `Jobs started in the period that are BOTH finished and paid in full: PAID-IN-FULL is YES on the Weekly Job Sheet, and the stage says the work is done and nobody is going back (Completed Need Final Payment, Collections, a Paid stage, Client Satisfaction, touch points, Warranty or Closed Warranty Claims — not Walk-Through, Inspection, Punchlist or an open warranty claim). Added up at Total Rev w/ C.O.s. ${PERIOD}`,
   paid: `Jobs started in the period whose PAID-IN-FULL is YES on the Weekly Job Sheet (nothing owed in JobProgress with money received, or a Paid stage), added up at Total Rev w/ C.O.s. ${PERIOD}`,
   remaining: `Jobs started in the period: Total Rev w/ C.O.s minus Deposit and Progress Payments, the Weekly Job Sheet's Balance Owed. ${PERIOD}`,
   invoiced: `Open balance of the JobProgress invoices dated in the period (closed or void invoices owe nothing), and the jobs that started in it with no invoice. ${PERIOD}`,
@@ -94,6 +95,8 @@ export default function ProductionRevenue() {
     };
 
     const paid = list.filter((r) => r.pifStatus === PIF_STATUS.yes);
+    // Completed & Paid in Full: paid, and the work is done with nobody going back (the same test as "paid but not closed out").
+    const closedPaid = paid.filter((r) => isCompletedStage(r.stage));
     // Expected Collections from today: owner is the Sold-Job Pipeline's Owner (each sheet job carries it).
     const ex = expectedSchedule(all, today, (id) => byId.get(id)?.owner ?? null);
     const exRows = (list2) => list2.map((r) => ({ ...row(r.jobId, r.amount), expectedDay: r.expectedDay, basis: r.basis, owner: r.owner, ownerSource: r.ownerSource }));
@@ -133,6 +136,13 @@ export default function ProductionRevenue() {
           {s.paidNotClosed.length > 0 && <span className="block mt-1 font-semibold text-amber-800">{s.paidNotClosed.length} paid but not closed out</span>}
         </>,
         rows: paid.map((r) => row(r.jobId, num(r.totalRev), isCompletedStage(r.stage) ? "" : "Paid, not closed out")),
+      },
+      closed: {
+        title: `Completed & Paid in Full · ${range}`, hint: DEF.closed, amountLabel: "Total Rev",
+        total: Math.round(closedPaid.reduce((n, r) => n + num(r.totalRev), 0) * 100) / 100,
+        value: money(closedPaid.reduce((n, r) => n + num(r.totalRev), 0)), tone: "green",
+        sub: <>{closedPaid.length} of {plural(s.jobs)} started in this period · work finished and all money in</>,
+        rows: closedPaid.map((r) => row(r.jobId, num(r.totalRev), "Finished · paid in full")),
       },
       remaining: {
         title: `Remaining Owed · ${range}`, hint: DEF.remaining, amountLabel: "Still owed", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
@@ -241,8 +251,8 @@ export default function ProductionRevenue() {
           <StartedPanel s={m.s} block={m.block} range={range} today={m.today} active={sel === "started"} onSelect={() => pick("started")} hint={DEF.started} />
 
           <GroupHeading tone="period">For the selected period · {range}{m.block ? ` (${fmtDay(m.block.from)} – ${fmtDay(m.block.to)})` : ""}</GroupHeading>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {["paid", "remaining", "invoiced"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {["paid", "closed", "remaining", "invoiced"].map((k) => <CardFor key={k} k={k} c={m.cards[k]} sel={sel} pick={pick} />)}
           </div>
 
           <GroupHeading tone="today">Owed today · not affected by the date filter</GroupHeading>
