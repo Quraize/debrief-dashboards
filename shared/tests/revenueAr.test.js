@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+import { revenueRow, revenueRows, revenueTotals, revenueSummary, startedRevenue, expectedCollections, expectedDayOf, sheetBalance, isStartedStage, isCompletedStage, livePayments, STATUSES } from "../src/revenueAr.js";
+
+describe("expectedCollections — the balance due in a period", () => {
+  const job = (over) => ({ jobId: "j", stage: "Production Started", pifStatus: "NO", gross: 20000, changeOrders: 1000, deposit: 5000, progressPayments: 6000, completionDate: null, lastInstall: "2026-09-30", ...over });
+  const inWeek = (d) => d >= "2026-09-28" && d <= "2026-09-30";
+  it("dates a job by its completion once finished, else its last install day, and sums the sheet balance", () => {
+    expect(expectedDayOf(job({}))).toBe("2026-09-30");
+    expect(expectedDayOf(job({ stage: "COMPLETED NEED FINAL PAYMENT!!", completionDate: "2026-09-29" }))).toBe("2026-09-29");
+    expect(expectedDayOf(job({ completionDate: "2026-09-01" }))).toBe("2026-09-30");   // a target date on an open job is not a fact
+    expect(sheetBalance(job({}))).toBe(10000);
+    const e = expectedCollections([
+      job({ jobId: "a" }),                                                   // due 9/30: $10,000
+      job({ jobId: "b", pifStatus: "YES", deposit: 21000, progressPayments: null }), // paid in full: nothing due
+      job({ jobId: "c", lastInstall: "2026-10-02" }),                          // next week
+      job({ jobId: "d", stage: "COMPLETED NEED FINAL PAYMENT!!", completionDate: "2026-09-28", deposit: 20000, progressPayments: null }), // $1,000
+    ], inWeek);
+    expect(e.amount).toBe(11000);
+    expect(e.rows.map((r) => r.jobId)).toEqual(["d", "a"]);
+    expect(expectedCollections(undefined, inWeek)).toEqual({ amount: 0, jobs: 0, rows: [] });
+  });
+});
 
 describe("startedRevenue — the Weekly Job Sheet's numbers", () => {
   // Three of September's reconciled jobs and one October one.

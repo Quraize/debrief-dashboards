@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import { PIPELINE_ROLES } from "@allied/shared/constants";
-import { revenueTotals, startedRevenue, STATUSES } from "@allied/shared/revenueAr";
+import { revenueTotals, startedRevenue, expectedCollections, STATUSES } from "@allied/shared/revenueAr";
 import { REVENUE_DATE_FILTERS, ALL_TIME_FILTER, inDateRange } from "@allied/shared/constants";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import ScrollTable from "@/components/ScrollTable";
@@ -61,10 +61,10 @@ export default function ProductionRevenue() {
     if (!data?.started) return null;
     const { rows: all, splitFrom } = data.started;
     const block = BLOCK_OFFSET[range] === undefined ? null : sheetWeekFrom(data.today, BLOCK_OFFSET[range], splitFrom);
-    const list = range === ALL_TIME_FILTER ? all
-      : block ? all.filter((r) => r.firstInstall >= block.from && r.firstInstall <= block.to)
-      : all.filter((r) => inDateRange(r.firstInstall, range, cs, ce));
-    return { rows: list, block, ...startedRevenue(list, data.today, splitFrom) };
+    // One test for "is this day in the period picked", used by every card.
+    const inPeriod = (day) => !!day && (range === ALL_TIME_FILTER ? true : block ? day >= block.from && day <= block.to : inDateRange(day, range, cs, ce));
+    const list = all.filter((r) => inPeriod(r.firstInstall));
+    return { rows: list, block, expected: expectedCollections(all, inPeriod), ...startedRevenue(list, data.today, splitFrom) };
   }, [data, range, cs, ce]);
   // Started / paid / owed follow the range; expected cash and AR are the whole book.
   const t = useMemo(() => (data ? revenueTotals(inRange, data.today, { overdueDays: data.totals.overdueDays }, book) : null), [inRange, book, data]);
@@ -125,8 +125,17 @@ export default function ProductionRevenue() {
               <Card tone="amber" label="Remaining Owed" value={money(started.remainingOwed.amount)}
                 sub={`${started.remainingOwed.jobs} of ${started.jobs} jobs still owing · ${money(started.remainingOwed.totalRev)} Total Rev − ${money(started.remainingOwed.received)} received`} />
             )}
-            <Card tone="blue" label="Expected Collections This Week" value={money(t.expectedThisWeek)} sub={`${t.expectedThisWeekJobs} job${t.expectedThisWeekJobs === 1 ? "" : "s"} completing this week`} />
-            <Card tone="blue" label="Expected Collections Next Week" value={money(t.expectedNextWeek)} sub={`${t.expectedNextWeekJobs} job${t.expectedNextWeekJobs === 1 ? "" : "s"} · ${fmtDay(t.nextWeek.from)} – ${fmtDay(t.nextWeek.to)}`} />
+            {started && (
+              <Card tone="blue" label={`Expected Collections · ${range}`} value={money(started.expected.amount)}
+                sub={<>
+                  {started.expected.jobs} job{started.expected.jobs === 1 ? "" : "s"} finishing in this period, not yet paid in full
+                  {started.expected.jobs > 0 && (
+                    <span className="block mt-1" title={started.expected.rows.map((r) => `${r.customer || r.label}: ${money(r.balance)} (${fmtDay(r.expectedDay)})`).join("\n")}>
+                      {started.expected.rows.slice(0, 4).map((r) => `${r.customer || r.label} ${money(r.balance)}`).join(" · ")}{started.expected.jobs > 4 ? ` · +${started.expected.jobs - 4} more` : ""}
+                    </span>
+                  )}
+                </>} />
+            )}
             <Card tone={t.totalAR > 0 ? "amber" : "green"} label="Total AR" value={money(t.totalAR)} sub={`${t.totalARJobs} completed, unpaid`} onClick={() => setFlag(flag === "ar" ? "" : "ar")} active={flag === "ar"} />
             <Card tone={t.overdueAR > 0 ? "red" : "green"} label={`Overdue AR (${t.overdueDays}+ days)`} value={money(t.overdueAR)}
               sub={`31–60: ${money(t.aging.d31_60)} · 61–90: ${money(t.aging.d61_90)} · 90+: ${money(t.aging.d90plus)}`} onClick={() => setFlag(flag === "overdue" ? "" : "overdue")} active={flag === "overdue"} />

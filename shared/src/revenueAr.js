@@ -219,6 +219,32 @@ export function startedRevenue(rows, today, splitFrom) {
   };
 }
 
+/** The sheet's row formulas: Total Rev w/ C.O.s = Gross + C.O.; Total Paid = Deposit + Progress; Balance = the difference. */
+export const sheetBalance = (r) => round((num(r.gross) ?? 0) + (num(r.changeOrders) ?? 0) - (num(r.deposit) ?? 0) - (num(r.progressPayments) ?? 0));
+
+/**
+ * The day a sheet job's balance is expected: the week it completes — its
+ * completion date once the stage says it is finished, else its last
+ * scheduled install day (the crew's last day on site). JobProgress has no due
+ * dates on customer money, so this is the rule, not a field.
+ */
+export function expectedDayOf(r) {
+  if (isCompletedStage(r.stage) && r.completionDate) return String(r.completionDate).slice(0, 10);
+  return r.lastInstall ?? null;
+}
+
+/**
+ * Expected collections for a period: the sheet balance of every job NOT paid
+ * in full whose expected day falls in it. `inPeriod(day)` is the page's date
+ * filter. Jobs are the sheet's (the same list Revenue Started reads).
+ */
+export function expectedCollections(rows, inPeriod) {
+  const due = (rows ?? []).map((r) => ({ ...r, expectedDay: expectedDayOf(r), balance: sheetBalance(r) }))
+    .filter((r) => r.pifStatus !== PIF_STATUS.yes && r.balance > 0 && r.expectedDay && inPeriod(r.expectedDay))
+    .sort((a, b) => a.expectedDay.localeCompare(b.expectedDay));
+  return { amount: round(due.reduce((n, r) => n + r.balance, 0)), jobs: due.length, rows: due };
+}
+
 /** The whole report. */
 export function revenueSummary(jobs, today, opts = {}) {
   const rows = revenueRows(jobs, today, opts);

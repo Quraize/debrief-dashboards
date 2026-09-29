@@ -11,6 +11,7 @@ import { todayInBoardZone } from "./board.js";
 import { revenueSummary, AR_OVERDUE_DAYS_DEFAULT } from "@allied/shared/revenueAr";
 import { weeklyJobSheet } from "./weeklyJobSheet.js";
 import { firstInstallDay, bringsMoney, sheetSplitFrom } from "./sheetPlan.js";
+import { isInstallCode } from "@allied/shared/production";
 
 export function arSettings(env = process.env) {
   const n = Number(env.AR_OVERDUE_DAYS);
@@ -30,6 +31,7 @@ export async function revenueReport(ctx: SessionContext, today = todayInBoardZon
 export function startedRows(rows: Awaited<ReturnType<typeof weeklyJobSheet>>["rows"]) {
   return rows.filter(bringsMoney).flatMap((r) => {
     const firstInstall = firstInstallDay(r);
+    const lastInstall = r.visits.filter((v) => isInstallCode(v.code)).map((v) => v.day).sort().at(-1) ?? null;
     return firstInstall ? [{
       jobId: r.jobId, label: r.label, customer: r.customer, jobNumber: r.jobNumber, city: r.city, address: r.address,
       stage: r.stage, salesRep: r.salesRep, firstInstall, gross: r.gross, changeOrders: r.changeOrders, totalRev: r.totalRev, jpUrl: r.jpUrl,
@@ -37,6 +39,8 @@ export function startedRows(rows: Awaited<ReturnType<typeof weeklyJobSheet>>["ro
       pifStatus: r.pifStatus, received: r.totalPayments, owed: r.balanceOwed,
       // The sheet's Deposit and Progress Payment columns (its Total Payments Received is their sum).
       deposit: r.deposit, progressPayments: r.progressPayments,
+      // When its balance is expected: see expectedDayOf (shared/revenueAr.js).
+      completionDate: r.completionDate, lastInstall,
     }] : [];
   });
 }
