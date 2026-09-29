@@ -14,6 +14,8 @@ const DASHBOARDS = [
   { to: "/marketing", label: "Marketing", icon: Megaphone },
   { to: "/setters", label: "Call Center", icon: PhoneCall },
   { to: "/sales-reps", label: "Sales", icon: Users },
+  // Management's (admin, sales manager, project manager); not on the phone's bottom bar, which holds five.
+  { to: "/production/revenue", label: "Revenue & AR", icon: BarChart3, roles: PIPELINE_ROLES, mobileBar: false },
   { to: "/insurance", label: "Insurance", icon: Shield },
 ];
 
@@ -46,7 +48,6 @@ const ADMIN_OPERATIONS = [
 const PRODUCTION_NAV = [
   { to: "/production/schedule", label: "Production Schedule", icon: MapPin },
   { to: "/production/pipeline", label: "Sold Pipeline", icon: BadgeDollarSign, roles: PIPELINE_ROLES },
-  { to: "/production/revenue", label: "Revenue & AR", icon: BarChart3, roles: PIPELINE_ROLES },
   { to: "/production/jobs", label: "Jobs by Stage", icon: HardHat },
   { to: "/production/weekly-job-sheet", label: "Weekly Job Sheet", icon: Table2 },
 ];
@@ -91,6 +92,7 @@ export default function AppLayout() {
   const showProduction = PRODUCTION_ROLES.includes(me?.role);
   // Items with a `roles` list show only to those roles (the Sold Pipeline is management's).
   const productionNav = PRODUCTION_NAV.filter((i) => !i.roles || i.roles.includes(me?.role));
+  const dashboards = DASHBOARDS.filter((i) => !i.roles || i.roles.includes(me?.role));
   if (productionOnly && !PRODUCTION_ONLY_PREFIXES.some((p) => location.pathname.startsWith(p))) {
     return <Navigate to={PRODUCTION_HOME} replace />;
   }
@@ -136,7 +138,7 @@ export default function AppLayout() {
         <aside className="scroll-subtle hidden lg:flex flex-col w-64 shrink-0 self-start h-[calc(100vh-3.5rem)] bg-white border-r border-border p-3 gap-1 sticky top-14 overflow-y-auto">
           {showSales && (
             <>
-              <NavSection label="Dashboards" items={DASHBOARDS} />
+              <NavSection label="Dashboards" items={dashboards} />
               <div className="my-1 border-t border-border/60" />
               <NavSection label="Operations" items={OPERATIONS} pending={pending} />
             </>
@@ -167,7 +169,7 @@ export default function AppLayout() {
               <div className="flex flex-col gap-1">
                 {showSales && (
                   <>
-                    <NavSection label="Dashboards" items={DASHBOARDS} onClick={() => setOpen(false)} />
+                    <NavSection label="Dashboards" items={dashboards} onClick={() => setOpen(false)} />
                     <div className="my-1 border-t border-border/60" />
                     <NavSection label="Operations" items={OPERATIONS} onClick={() => setOpen(false)} pending={pending} />
                   </>
@@ -199,7 +201,7 @@ export default function AppLayout() {
 
       {/* Mobile bottom nav — dashboard switcher (sales roles only) */}
       {showSales && <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border grid grid-cols-5 h-16">
-        {DASHBOARDS.map((item) => {
+        {dashboards.filter((item) => item.mobileBar !== false).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink key={item.to} to={item.to} end={item.end}
