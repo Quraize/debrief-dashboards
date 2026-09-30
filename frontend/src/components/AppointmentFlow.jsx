@@ -34,8 +34,8 @@ const BASES = [
   { key: "cohort", label: "Leads that came in" },
 ];
 
-export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/results" }) {
-  const [basis, setBasis] = useState("activity");
+export default function AppointmentFlow({ from, to, rangeLabel, resultsHref = "/results", defaultBasis = "activity" }) {
+  const [basis, setBasis] = useState(defaultBasis);
   const enabled = !!from && !!to;
   const { data: f, isLoading, error } = useQuery({
     queryKey: ["leads-flow", from, to, basis],

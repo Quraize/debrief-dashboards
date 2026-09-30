@@ -2,6 +2,9 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/client";
 import DateRangeFilter from "@/components/DateRangeFilter";
+import TopOfFunnel from "@/components/TopOfFunnel";
+import AppointmentFlow from "@/components/AppointmentFlow";
+import { getDateRangeBounds } from "@allied/shared/constants";
 import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
 import FilterSelect from "@/components/FilterSelect";
@@ -193,6 +196,18 @@ export default function MarketingDashboard() {
         <span className="bg-amber-50 text-amber-700 font-semibold px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Missing Lead ID: {missingLeadIds}</span>
       </div>
 
+      {/* The top of the funnel lives here, not on the Sales dashboard (the PM, 2026-09-30). */}
+      {(() => {
+        const bounds = getDateRangeBounds(filter, cs, ce);
+        const rangeLabel = bounds?.start ? `${filter}: ${bounds.start}${bounds.end && bounds.end !== bounds.start ? ` – ${bounds.end}` : ""}` : filter;
+        return (
+          <>
+            <TopOfFunnel from={bounds?.start} to={bounds?.end || bounds?.start} />
+            <AppointmentFlow rangeLabel={rangeLabel} from={bounds?.start} to={bounds?.end || bounds?.start} defaultBasis="cohort" />
+          </>
+        );
+      })()}
+
       <DebriefSectionHeader />
 
       {isLoading ? (
@@ -200,16 +215,16 @@ export default function MarketingDashboard() {
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            <KpiCard label="Set Appointments" value={eligible} accent
-              title="Appointments that were booked and resolved: First Appointments and Rehashes that either ran or were a No See / cancelled. Reset Demos, Follow-Ups, rescheduled-before and still-pending are not counted. Built from filed debriefs." />
-            <KpiCard label="Appointments Ran" title="Set Appointments minus No See — the visits that actually happened. Demo Rate is measured against this number."
+            <KpiCard label="Appointments Resolved" value={eligible} accent
+              title="Appointments booked and resolved by a filed debrief: First Appointments and Rehashes that either ran or were a No Show / cancelled. Reset Demos, Follow-Ups, rescheduled-before and still-pending are not counted. (Appointments Set, by lead, is in the funnel above.)" />
+            <KpiCard label="Appointments Ran" title="Appointments Ran = Appointments Resolved minus No Shows: First Appointments and Rehashes the rep actually attended. Demo Rate is measured against this number."
               value={<>{aq.aqOpportunities} <span className="text-sm font-semibold text-muted-foreground">{eligible > 0 ? pct(aq.aqOpportunities, eligible) + "%" : ""}</span></>} />
             <KpiCard label="Demos" value={aq.aqDemos} />
             <KpiCard label="Demo Rate" value={aq.demoRate + "%"} />
             <KpiCard label="No Demo" value={aq.aqNoDemo} />
             <KpiCard label="No Demo Rate" value={aq.noDemoRate + "%"} />
-            <KpiCard label="No See" value={aq.aqNoSee} />
-            <KpiCard label="No See Rate" value={aq.noSeeRate + "%"} />
+            <KpiCard label="No Show" value={aq.aqNoSee} />
+            <KpiCard label="No Show Rate" value={aq.noSeeRate + "%"} title="No Show Rate = No Shows ÷ Appointments Resolved." />
             <KpiCard label="Sales" value={salesRecs.length} />
             <KpiCard label="Sales / Close Rate" value={pct(salesRecs.length, aq.aqDemos) + "%"} />
             <KpiCard label="Revenue" value={money(revenue)} />
