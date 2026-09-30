@@ -6,8 +6,7 @@ import DashboardSwitcher from "@/components/DashboardSwitcher";
 import KpiCard from "@/components/KpiCard";
 import {
   repStatsFromDebriefs, filterByDate, filterByEffectiveSaleDate, missingDebriefRecords,
-  appointmentQualityStats, twoLegStats, isSale, isAppointmentOpportunity,
-  APPOINTMENT_OPPORTUNITIES_DEFINITION,
+  appointmentQualityStats, twoLegStats, isSale, isAppointmentRan, APPOINTMENTS_RAN_DEFINITION,
   DEMO_RATE_DEFINITION, NO_DEMO_RATE_DEFINITION, NO_SEE_RATE_DEFINITION, TWO_LEG_DEFINITION
 } from "@allied/shared/kpi";
 import { DEMO_OUTCOMES } from "@allied/shared/constants";
@@ -70,7 +69,8 @@ export default function SalesRepDashboard() {
 
   // Team totals (selected period)
   const aq = useMemo(() => appointmentQualityStats(apptDb), [apptDb]);
-  const teamAppts = apptDb.filter(isAppointmentOpportunity).length;
+  // Appointments Ran: the rep went out and engaged (every no-show out).
+  const teamAppts = apptDb.filter(isAppointmentRan).length;
   const teamDemos = apptDb.filter((d) => DEMO_OUTCOMES.includes(d.appointment_outcome)).length;
   const teamSales = saleDb.length;
   const teamRevenue = saleDb.reduce((s, d) => s + num(d.sale_amount), 0);
@@ -152,44 +152,48 @@ export default function SalesRepDashboard() {
         </div>
       ) : (
         <>
-          {/* Primary KPI strip — exact order */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <KpiCard label="Appointments" value={teamAppts} title={APPOINTMENT_OPPORTUNITIES_DEFINITION} />
-            <KpiCard label="One-Leg" value={tl.oneLeg} title="Visits where only one decision maker was there, among eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only)." />
-            <KpiCard label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"}
-              rating={tl.denominator > 0 ? (tl.oneLegRate <= 10 ? "green" : tl.oneLegRate <= 20 ? "yellow" : "red") : null}
-              title={`One-Leg ÷ the same eligible visits Two-Leg uses (${tl.denominator} in this period). Lower is better.`} />
+          {/* The PM's three rows (2026-09-30): rates, volume, secondary. Every card says its definition and formula on hover. */}
+          <KpiRow label="Rates" note="each card shows its formula on hover">
+            <KpiCard label="Demo %" value={aq.aqOpportunities > 0 ? teamDemoPct + "%" : "—"}
+              title={`Demo % = Demos ÷ eligible First Appointments + Rehashes ran (${aq.aqOpportunities}). ${DEMO_RATE_DEFINITION}`} />
+            <KpiCard label="No Show %" value={aq.aqNoSeeDenom > 0 ? aq.noSeeRate + "%" : "—"}
+              rating={aq.aqNoSeeDenom > 0 ? (aq.noSeeRate <= 10 ? "green" : aq.noSeeRate <= 20 ? "yellow" : "red") : null}
+              title={`No Show % = No Shows (${aq.aqNoSee}) ÷ eligible scheduled opportunities including the no-shows (${aq.aqNoSeeDenom}). ${NO_SEE_RATE_DEFINITION}`} />
             <KpiCard label="Two-Leg %" value={tl.denominator > 0 ? teamTwoLegPct + "%" : "—"}
-              title="Two-Leg count ÷ eligible attended Appointment Opportunities (Roofing, Siding, Roofing + Siding only). The same denominator as One-Leg %, so the two read against each other." />
-            <KpiCard label="Not Answered %" value={tl.denominator > 0 ? tl.notAnsweredRate + "%" : "—"}
-              rating={tl.denominator > 0 ? (tl.notAnswered === 0 ? "green" : "yellow") : null}
-              title={`The rest of the same ${tl.denominator} visits: the debrief has no One-Leg / Two-Leg answer (blank or N/A), so One-Leg % + Two-Leg % + Not Answered % = 100%.`
-                + (tl.notAnsweredList.length ? "\n\n" + tl.notAnsweredList.map((d) => `${d.customer ?? "?"} · ${d.rep ?? "?"} · ${d.date ?? ""}${d.answer ? ` (${d.answer})` : ""}`).join("\n") : "")} />
-            <KpiCard label="Demos" value={teamDemos} />
-            <KpiCard label="Demo %" value={aq.aqOpportunities > 0 ? teamDemoPct + "%" : "—"} />
-            <CountWithChip label="No Demo" value={aq.aqNoDemo} chip={aq.aqAttended > 0 ? aq.noDemoRate + "%" : ""} />
-            <CountWithChip label="No See" value={aq.aqNoSee} chip={aq.aqNoSeeDenom > 0 ? aq.noSeeRate + "%" : ""} />
-            <KpiCard label="Sales" value={teamSales} accent />
-            <KpiCard label="Sales %" value={teamDemos > 0 ? teamSalesPct + "%" : "0%"} />
-            <KpiCard label="Revenue" value={"$" + teamRevenue.toLocaleString()} />
-            <KpiCard label="Average Job Size" value={teamSales > 0 ? "$" + teamAvgJob.toLocaleString() : "$0"} />
-            <Link to="/queue" title="Sales appointments in this date range that have already happened and still have no debrief filed. Click to open the queue.">
+              title={`Two-Leg % = Two-Leg (${tl.twoLeg}) ÷ eligible retail visits ran (${tl.denominator}). ${TWO_LEG_DEFINITION}`} />
+            <KpiCard label="Sales / Close %" value={teamDemos > 0 ? teamSalesPct + "%" : "0%"}
+              title={`Sales / Close % = Sales signed in the period (${teamSales}) ÷ Demos in the period (${teamDemos}). Denominator awaiting the PM's confirmation (÷ Demos or ÷ Appointments Ran).`} />
+          </KpiRow>
+          <KpiRow label="Volume">
+            <KpiCard label="Appointments Ran" value={teamAppts} title={APPOINTMENTS_RAN_DEFINITION} />
+            <KpiCard label="Demos" value={teamDemos} title="Debriefs in the period with a demo outcome (Sale or Demo No Sale), by appointment date." />
+            <KpiCard label="Sales" value={teamSales} accent title="Sales whose signed date is in the period (Sale Signed Date, else the appointment date for legacy sales)." />
+            <KpiCard label="Revenue" value={"$" + teamRevenue.toLocaleString()} title="Sale amounts from the debriefs of those sales, added up." />
+            <KpiCard label="Average Job Size" value={teamSales > 0 ? "$" + teamAvgJob.toLocaleString() : "$0"} title="Revenue ÷ Sales." />
+          </KpiRow>
+          <KpiRow label="Secondary / diagnostic">
+            <KpiCard label="One-Leg" value={tl.oneLeg} title={`Visits where a decision maker was missing, among the ${tl.denominator} eligible retail visits ran (Roofing, Siding, Roofing + Siding). One-Leg % is in the Two-Leg breakdown below.`} />
+            <CountWithChip label="No Demo" value={aq.aqNoDemo} chip={aq.aqAttended > 0 ? aq.noDemoRate + "%" : ""} title={`No Demo % = attended visits with no demo ÷ attended visits (${aq.aqAttended}). ${NO_DEMO_RATE_DEFINITION}`} />
+            <Link to="/queue" title="Sales appointments in this date range that have already happened and still have no debrief filed — the operational KPI to watch. Click to open the queue.">
               <KpiCard label="Missing Debriefs" value={missing} rating={missing > 0 ? "red" : "green"} />
             </Link>
-          </div>
+          </KpiRow>
 
           {/* Two-Leg context — Residential Install only, prevents 1/1 without context */}
           <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-2">Two-Leg Breakdown (Roofing, Siding, Roofing + Siding eligible only)</div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-2">Two-Leg Breakdown · diagnostic (Roofing, Siding, Roofing + Siding eligible only) — Two-Leg % + One-Leg % + Not Answered % = 100%</div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-9 gap-2">
+              <MiniStat label="Denominator" value={tl.denominator} title="Eligible retail visits ran in the period: First Appointments + Reset Demos + Rehashes, Roofing / Siding / Roofing + Siding, no-shows and DQ out." />
               <MiniStat label="Two-Leg" value={tl.twoLeg} />
-              <MiniStat label="Denominator" value={tl.denominator} />
               <MiniStat label="Two-Leg %" value={tl.denominator > 0 ? tl.rate + "%" : "—"} />
               <MiniStat label="One-Leg" value={tl.oneLeg} />
-              <MiniStat label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"} />
-              <MiniStat label="Missing Answer" value={tl.missingAnswer} />
-              <MiniStat label="Excluded No C/No Show" value={tl.excludedNoCNoShow} />
-              <MiniStat label="N/A / Needs Review" value={tl.naNeedsReview} />
+              <MiniStat label="One-Leg %" value={tl.denominator > 0 ? tl.oneLegRate + "%" : "—"} title="One-Leg ÷ the same denominator. Lower is better." />
+              <MiniStat label="Not Answered %" value={tl.denominator > 0 ? tl.notAnsweredRate + "%" : "—"}
+                title={`Missing Answer + N/A / Needs Review, the rest of the same denominator (worked out after rounding so the three add to 100%).`
+                  + (tl.notAnsweredList.length ? "\n\n" + tl.notAnsweredList.map((d) => `${d.customer ?? "?"} · ${d.rep ?? "?"} · ${d.date ?? ""}${d.answer ? ` (${d.answer})` : ""}`).join("\n") : "")} />
+              <MiniStat label="Missing Answer" value={tl.missingAnswer} title="Filed debriefs in the denominator with the decision-maker question left blank (the form requires it now; blanks are older or imported debriefs)." />
+              <MiniStat label="N/A / Needs Review" value={tl.naNeedsReview} title="Filed debriefs in the denominator answered N/A. The form's N/A means commercial or not applicable, but these are retail install visits, so either the product is misclassified or the answer should be One-Leg / Two-Leg." />
+              <MiniStat label="Excluded No C/No Show" value={tl.excludedNoCNoShow} title="First Appointments, Reset Demos and Rehashes with a No C / No Show or Cancelled Before Appointment outcome: not in the denominator." />
             </div>
           </div>
 
@@ -202,12 +206,13 @@ export default function SalesRepDashboard() {
           </div>
 
           <div className="bg-secondary/40 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
-            <p><strong className="text-foreground">Date attribution:</strong> Appointments, Two-Leg, Demos, Demo %, No Demo, and No See use the <em>appointment date</em>. Sales, Revenue, and Average Job Size use the <em>signed month</em> (Sale Signed Date, falling back to appointment date for legacy sales).</p>
+            <p><strong className="text-foreground">Appointments Ran:</strong> {APPOINTMENTS_RAN_DEFINITION}</p>
+            <p><strong className="text-foreground">Date attribution:</strong> Appointments Ran, Two-Leg, Demos, Demo %, No Demo, and No Show use the <em>appointment date</em>. Sales, Revenue, and Average Job Size use the <em>signed month</em> (Sale Signed Date, falling back to appointment date for legacy sales).</p>
             <p><strong className="text-foreground">Split-Sale Credits:</strong> <em>Jobs In</em> = sales the rep participated in (primary or secondary). <em>Cred. Sales</em> = fractional sale count (split %). <em>Cred. Revenue</em> = sale amount × split %. Team Sales and Revenue remain unduplicated (each sale counted once). Secondary reps appear even with no primary-owned debriefs.</p>
-            <p><strong className="text-foreground">Sales %</strong> = sales whose signed month is in the selected period ÷ demos whose appointment date is in the selected period (0% when no demos).</p>
+            <p><strong className="text-foreground">Sales / Close %</strong> = sales whose signed month is in the selected period ÷ demos whose appointment date is in the selected period (0% when no demos).</p>
             <p><strong className="text-foreground">Demo %</strong> {DEMO_RATE_DEFINITION}</p>
             <p><strong className="text-foreground">No Demo %</strong> {NO_DEMO_RATE_DEFINITION}</p>
-            <p><strong className="text-foreground">No See %</strong> {NO_SEE_RATE_DEFINITION}</p>
+            <p><strong className="text-foreground">No Show %</strong> {NO_SEE_RATE_DEFINITION}</p>
             <p><strong className="text-foreground">Two-Leg %</strong> {TWO_LEG_DEFINITION}</p>
           </div>
 
@@ -289,18 +294,31 @@ function CompareCells({ s }) {
   ));
 }
 
-function MiniStat({ label, value }) {
+/** One labelled row of KPI cards: Rates, Volume, Secondary / diagnostic. */
+function KpiRow({ label, note, children }) {
   return (
-    <div className="text-center">
+    <div>
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-xs font-bold uppercase tracking-wide text-primary">{label}</span>
+        {note && <span className="text-[11px] text-muted-foreground">· {note}</span>}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">{children}</div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, title }) {
+  return (
+    <div className="text-center" title={title}>
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">{label}</div>
       <div className="text-lg font-heading font-bold text-primary">{value}</div>
     </div>
   );
 }
 
-function CountWithChip({ label, value, chip }) {
+function CountWithChip({ label, value, chip, title }) {
   return (
-    <div className="rounded-xl border border-border bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-border bg-white p-4 shadow-sm" title={title}>
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold leading-tight">{label}</div>
       <div className="text-2xl font-heading font-bold text-primary mt-1">{value}</div>
       {chip && <span className="inline-block mt-1 text-[10px] font-bold bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full">{chip}</span>}

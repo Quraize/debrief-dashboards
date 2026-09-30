@@ -122,6 +122,18 @@ export function isSale(d) {
 export const AQ_FOLLOW_UP = ["Follow-Up", "Follow Up", "Followup"];
 const AQ_NO_SEE_OUTCOMES = ["No Show", "No C / No Show — Reset Needed", "No C / No Show — Do Not Reset", "Cancelled Before Appointment"];
 const AQ_NO_SEE_TYPES = ["No Show"];
+/**
+ * Appointments Ran (the PM's term, 2026-09-30): the rep actually went out and
+ * engaged with the opportunity. An Appointment Opportunity minus every kind
+ * of no-show — including the plain "No Show" outcome/type, which the
+ * opportunity count keeps (it only drops the "No C / No Show" outcomes).
+ */
+export const APPOINTMENTS_RAN_DEFINITION =
+  "Appointments Ran = a sales rep went out to the appointment and engaged with the opportunity: First Appointments + Reset Demos + Rehashes, minus every no-show and cancellation, DQ, Follow-Ups and non-sales appointments.";
+export function isAppointmentRan(d) {
+  return isAppointmentOpportunity(d) && !isNoSeeRecord(d);
+}
+
 const AQ_NO_SEE_STATUSES = ["Cancelled", "Canceled"];
 const AQ_CORE_EXCLUDE_OUTCOMES = ["Rescheduled Before Appointment", "Pending / Not Updated"];
 // A DQ'd no-demo is still an attended visit with no demo: it counts against the

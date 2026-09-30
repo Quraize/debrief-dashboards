@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, repStatsFromDebriefs, appointmentQualityStats, missingDebriefRecords,
+  effectiveSaleDate, isSale, twoLegStats, isAppointmentOpportunity, isAppointmentRan, repStatsFromDebriefs, appointmentQualityStats, missingDebriefRecords,
   appointmentFlow,
 } from "../src/kpi.js";
 
@@ -134,6 +134,18 @@ describe("isAppointmentOpportunity", () => {
   it("accepts legacy type spellings via normalization", () => {
     expect(isAppointmentOpportunity(retail({ appointment_type: "New Appointment" }))).toBe(true);
     expect(isAppointmentOpportunity(retail({ appointment_type: "Re-engagement" }))).toBe(true);
+  });
+});
+
+describe("isAppointmentRan", () => {
+  it("is an opportunity the rep actually attended: every no-show out, the plain No Show outcome included", () => {
+    expect(isAppointmentRan(retail({ appointment_outcome: "Demo Completed — Sale" }))).toBe(true);
+    expect(isAppointmentRan(retail({ appointment_outcome: "No Demo / Not Presented" }))).toBe(true);
+    // Counted as an opportunity today, but the rep never engaged.
+    expect(isAppointmentOpportunity(retail({ appointment_outcome: "No Show" }))).toBe(true);
+    expect(isAppointmentRan(retail({ appointment_outcome: "No Show" }))).toBe(false);
+    expect(isAppointmentRan(retail({ appointment_outcome: "No C / No Show — Reset Needed" }))).toBe(false);
+    expect(isAppointmentRan(retail({ appointment_type: "Follow-Up" }))).toBe(false);
   });
 });
 
