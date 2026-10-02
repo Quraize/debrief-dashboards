@@ -16,7 +16,8 @@ import {
   mapJpJob, upsertJpRows, financialsFromRecord, isCompleteFinancialRecord, updateJpJobFinancials,
 } from "../jobs/syncJobProgress.js";
 import { parseApiTimestamp } from "./syncSchedules.js";
-import { isTrackedStage } from "@allied/shared/jobStages";
+import { isTrackedStage, COMPLETED_UNPAID_STAGES, PAID_STAGES } from "@allied/shared/jobStages";
+import { INSTALL_CODES } from "@allied/shared/production";
 import { classifyVendor } from "@allied/shared/weeklyJobSheet";
 
 export interface StageSyncCounts {
@@ -75,6 +76,27 @@ const emptyCounts = (): StageSyncCounts => ({
   invoices_jobs_fetched: 0, invoices_upserted: 0, invoices_retired: 0, invoice_errors: 0,
   api_requests: 0, retries: 0, rate_limit_hits: 0, errors: 0,
 });
+
+/**
+ * Whose money is kept fresh: every job the stage sweep tracks, PLUS a finished
+ * job (completed, paid, client satisfaction, warranty…) that has an install
+ * visit on the calendar — the same rule that keeps it on the Weekly Job
+ * Sheet. Without this a job the office closed out kept its row with the
+ * payments frozen, or blank if it was never tracked while we synced (Carrie
+ * Jones -03: $3,000 paid in JobProgress, $0 on the sheet).
+ * Returns the SQL fragment with its two parameters placed at `first` and `first + 1`.
+ */
+const FINISHED_STAGES = [...COMPLETED_UNPAID_STAGES, ...PAID_STAGES, "Open Warranty Claims/CallBacks"];
+function moneyScope(first: number): { sql: string; params: unknown[] } {
+  return {
+    sql: `(jp_job.stage_seen_at IS NOT NULL
+           OR ((jp_job.current_stage = ANY($${first}::text[]) OR jp_job.current_stage ~* '^paid')
+               AND EXISTS (SELECT 1 FROM jp_schedule s
+                            WHERE s.jp_job_id = jp_job.jp_job_id AND s.deleted_at IS NULL
+                              AND upper(replace(replace(coalesce(s.job_type_code, ''), ' ', ''), '/', '+')) = ANY($${first + 1}::text[]))))`,
+    params: [FINISHED_STAGES, INSTALL_CODES],
+  };
+}
 
 /** Vendor bills have no change signal on the job, so each job's list is re-read this often. */
 export const BILLS_MAX_AGE_HOURS = 24;
@@ -175,14 +197,14 @@ export async function refreshFinancials(
   const stale = await withServiceRole(async (c) => {
     const { rows } = await c.query<{ jp_job_id: string }>(
       `SELECT jp_job_id FROM jp_job
-        WHERE stage_seen_at IS NOT NULL
+        WHERE ${moneyScope(4).sql}
           AND NOT (jp_job_id = ANY($1::text[]))
           AND (financials_fetched_at IS NULL
                OR financials_fetched_at < jp_updated_at
                OR financials_fetched_at < now() - make_interval(hours => $2))
         ORDER BY financials_fetched_at NULLS FIRST, jp_job_id
         LIMIT $3`,
-      [[...fromListing], FINANCIALS_MAX_AGE_HOURS, perRun]);
+      [[...fromListing], FINANCIALS_MAX_AGE_HOURS, perRun, ...moneyScope(4).params]);
     return rows.map((r) => r.jp_job_id);
   }, "job-stages:financials-stale", { quiet: true });
 
@@ -243,14 +265,14 @@ export async function refreshPayments(
   const stale = await withServiceRole(async (c) => {
     const { rows } = await c.query<{ jp_job_id: string; total: string | null }>(
       `SELECT jp_job_id, total_payment_received::text AS total FROM jp_job
-        WHERE stage_seen_at IS NOT NULL
+        WHERE ${moneyScope(2).sql}
           AND (coalesce(total_payment_received, 0) > 0 OR coalesce(payments_fetched_total, 0) > 0)
           AND (payments_fetched_at IS NULL
                OR payments_fetched_total IS DISTINCT FROM total_payment_received
                OR payments_fetched_at < now() - interval '7 days')
         ORDER BY payments_fetched_at NULLS FIRST, jp_job_id
         LIMIT $1`,
-      [perRun]);
+      [perRun, ...moneyScope(2).params]);
     return rows;
   }, "job-stages:payments-stale", { quiet: true });
   if (stale.length === 0) return;
@@ -330,11 +352,11 @@ export async function refreshVendorBills(
   const stale = await withServiceRole(async (c) => {
     const { rows } = await c.query<{ jp_job_id: string }>(
       `SELECT jp_job_id FROM jp_job
-        WHERE stage_seen_at IS NOT NULL
+        WHERE ${moneyScope(3).sql}
           AND (bills_fetched_at IS NULL OR bills_fetched_at < now() - make_interval(hours => $1))
         ORDER BY bills_fetched_at NULLS FIRST, jp_job_id
         LIMIT $2`,
-      [BILLS_MAX_AGE_HOURS, perRun]);
+      [BILLS_MAX_AGE_HOURS, perRun, ...moneyScope(3).params]);
     return rows.map((r) => r.jp_job_id);
   }, "job-stages:bills-stale", { quiet: true });
 
@@ -390,13 +412,13 @@ export async function refreshInvoices(
   const stale = await withServiceRole(async (c) => {
     const { rows } = await c.query<{ jp_job_id: string }>(
       `SELECT jp_job_id FROM jp_job
-        WHERE stage_seen_at IS NOT NULL
+        WHERE ${moneyScope(3).sql}
           AND (invoices_fetched_at IS NULL
                OR invoices_fetched_at < now() - make_interval(hours => $1)
                OR (payments_fetched_at IS NOT NULL AND payments_fetched_at > invoices_fetched_at))
         ORDER BY invoices_fetched_at NULLS FIRST, jp_job_id
         LIMIT $2`,
-      [INVOICES_MAX_AGE_HOURS, perRun]);
+      [INVOICES_MAX_AGE_HOURS, perRun, ...moneyScope(3).params]);
     return rows.map((r) => r.jp_job_id);
   }, "job-stages:invoices-stale", { quiet: true });
 

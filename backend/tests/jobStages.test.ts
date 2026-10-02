@@ -280,6 +280,41 @@ describe.skipIf(!reachable)("jobs by stage", () => {
     expect((await app.inject({ method: "GET", url: "/api/production/weekly-job-sheet", ...as("rep@allied.test") })).statusCode).toBe(403);
   });
 
+  it("keeps the money fresh on a finished, installed job the stage sweep no longer tracks", async () => {
+    // Carrie Jones -03: closed out to Client Satisfaction, never in a tracked stage while we synced,
+    // so no financials or payments were ever read — yet it sits on the sheet (gutters installed).
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, job_number, current_stage, total_job_price, total_change_order_amount, stage_seen_at)
+       VALUES ('9', '2608-9-03', 'Client Satisfaction/Referrals', 4750, 2100, NULL)`);
+    await db.owner.query(
+      `INSERT INTO jp_schedule (jp_schedule_id, jp_job_id, title, job_type_code, start_at, end_at, is_completed)
+       VALUES ('S10', '9', 'GUTTERS: Carrie Jones', 'GUTTERS', '2026-08-31 12:00+00', '2026-08-31 20:00+00', true)`);
+    // A finished job with NO install visit (a warranty claim): not on the sheet, so not refreshed either.
+    await db.owner.query(
+      `INSERT INTO jp_job (jp_job_id, job_number, current_stage, total_job_price, stage_seen_at)
+       VALUES ('10', '2312-10-02', 'Closed Warranty Claims', 4750, NULL)`);
+    stub.summaries["9"] = { total_job_price: 4750, total_change_order_amount: 2100, total_job_revenue: 6850, total_payment_received: 3000, total_amount_owed: 3850 };
+    stub.payments["9"] = [{ id: 7090, customer_id: 9009, job_id: 9, canceled: null, method: "echeque", payment: 3000, status: "applied", date: "2026-08-20" }];
+    stub.calls.length = 0;
+    try {
+      const r = await runJobStageSync({ client: stubClient(stub), startedBy: "test" });
+      expect(r.status).toBe("completed");
+      expect(stub.calls).toContain("summary:9");
+      expect(stub.calls).toContain("payments:9");
+      expect(stub.calls.some((c) => c.startsWith("summary:10") || c.startsWith("payments:10"))).toBe(false);
+      const row = (await db.owner.query(
+        `SELECT total_payment_received::text AS paid, total_amount_owed::text AS owed, financials_fetched_at IS NOT NULL AS f, payments_fetched_at IS NOT NULL AS p
+           FROM jp_job WHERE jp_job_id = '9'`)).rows[0];
+      expect(row).toEqual({ paid: "3000.00", owed: "3850.00", f: true, p: true });
+      expect((await db.owner.query(`SELECT count(*)::int AS n FROM jp_job_payment WHERE jp_job_id = '9' AND deleted_at IS NULL`)).rows[0].n).toBe(1);
+    } finally {
+      delete stub.summaries["9"]; delete stub.payments["9"];
+      await db.owner.query(`DELETE FROM jp_job_payment WHERE jp_job_id = '9'`);
+      await db.owner.query(`DELETE FROM jp_schedule WHERE jp_schedule_id = 'S10'`);
+      await db.owner.query(`DELETE FROM jp_job WHERE jp_job_id IN ('9','10')`);
+    }
+  });
+
   it("keeps a finished job that was installed on the sheet after the office moves it past Production, never a dead one", async () => {
     // The stage sync no longer follows these (stage_seen_at NULL): 3 is done and was installed, 4 is dead,
     // 5 is done but never had an install (a site assessment only).
