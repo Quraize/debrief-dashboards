@@ -21,7 +21,6 @@
  */
 import { MASTER_COLUMNS, MASTER_MANUAL, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
 import { weekBounds } from "@allied/shared/production";
-import { labelLink } from "@allied/shared/weeklyJobSheet";
 import { inPipeline, bucketFor, isReadyStage } from "@allied/shared/soldPipeline";
 import { isInstallCode } from "@allied/shared/production";
 import { stageKey } from "@allied/shared/jobStages";
@@ -36,7 +35,7 @@ export interface CellWrite { row: number; col: number; value: CellValue | { form
 // The planner formats only what is its own: the rows it creates (label, total,
 // cumulative, month summary) and the PAID-IN-FULL cell. A job row's other cells
 // — the team's fills, font colours, bold — are never written to.
-export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "paid" | "unpaid" | "mismatch";
+export type RowStyleName = "label" | "total" | "cumulative" | "summary" | "paid" | "unpaid" | "mismatch" | "job";
 /** A row's format; `cols` = [start, end) limits it to some columns (default: the whole row). */
 export interface RowStyle { row: number; style: RowStyleName; cols?: [number, number] }
 export type PlanOp =
@@ -194,14 +193,23 @@ export function headerColumnMap(headerRow: CellValue[] | undefined): { idx: Reco
   const norm = (v: CellValue | undefined) => cellStr(v).toLowerCase().replace(/[^a-z0-9$#%]+/g, " ").trim();
   const where = new Map<string, number[]>();
   headerRow.forEach((v, i) => { const k = norm(v); if (k) (where.get(k) ?? where.set(k, []).get(k)!).push(i); });
+  // Every column with a heading is followed, the team's checkbox columns
+  // included, so the tab's columns can be reordered (PIF Date before
+  // PAID-IN-FULL, Warranty Filed beside Job Complete) and each value still
+  // lands under its own heading. A heading that appears more than once
+  // ("PIF Date" is also a hidden ledger column) resolves to the hit nearest
+  // the template's position.
   for (const c of COLS) {
-    if (!c.key || c.formula || !c.header) continue;
+    if (c.formula || !c.header) continue;
     const want = norm(c.header);
-    if (norm(headerRow[IDX[c.col]!]) === want) continue;
+    const home = IDX[c.col]!;
+    if (norm(headerRow[home]) === want) continue;
     const hits = where.get(want);
-    if (hits && hits.length === 1 && hits[0] !== IDX[c.col]) {
-      idx[c.col] = hits[0]!;
-      followed.push({ header: c.header, template: c.col, tab: colLetter(hits[0]!) });
+    if (!hits || hits.length === 0) continue;
+    const hit = hits.reduce((best, i) => (Math.abs(i - home) < Math.abs(best - home) ? i : best), hits[0]!);
+    if (hit !== home) {
+      idx[c.col] = hit;
+      followed.push({ header: c.header, template: c.col, tab: colLetter(hit) });
     }
   }
   return { idx, followed };
@@ -222,8 +230,9 @@ export function syncedValue(column: Column, row: SheetRow, syncedAt: string | nu
   const v = (row as unknown as Record<string, unknown>)[column.key];
   // The status column is cleared when a job has none, so a tick left from the column's checkbox days goes away.
   if (column.key === "pifStatus") return v ? String(v) : "";
-  // Column A keeps its text and opens the job in JobProgress when clicked.
-  if (column.key === "label") return labelLink(v, row.jpUrl);
+  // Column A is plain text: a HYPERLINK here popped a preview chip on every
+  // click (Pema, 2026-10-02). The JobProgress link lives in its own column.
+  if (column.key === "label") return v === null || v === undefined || v === "" ? null : String(v);
   if (column.type === "check") return Boolean(v);
   if (v === null || v === undefined || v === "") return null;
   if (column.type === "date") return dateSerial(String(v));
@@ -249,8 +258,11 @@ function newRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): Ce
 
 /** The PAID-IN-FULL cell's colour on a job row: green YES, red NO, amber warning. */
 function toneStyle(rowIdx: number, row: SheetRow): RowStyle[] {
-  const col = ACTIVE["B"]!;
-  return row.statusTone ? [{ row: rowIdx, style: row.statusTone, cols: [col, col + 1] }] : [];
+  if (!row.statusTone) return [];
+  // PAID-IN-FULL and PIF Date, wherever the tab has them (they need not be adjacent).
+  const b = ACTIVE["B"]!, c = ACTIVE["C"]!;
+  const cells = c === b + 1 ? [[b, c + 1]] : [[b, b + 1], [c, c + 1]];
+  return cells.map(([c0, c1]) => ({ row: rowIdx, style: row.statusTone!, cols: [c0!, c1!] as [number, number] }));
 }
 
 /** Blank, or a formula error (#REF! from a pasted row, #VALUE!…): the row formula belongs back there. */
@@ -623,7 +635,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const cells: CellWrite[] = [];
       adds.forEach((r, i) => cells.push(...newRowCells(at + i, r, opts.syncedAt)));
       write(cells);
-      style(adds.flatMap((r, i) => toneStyle(at + i, r)));
+      style([...adds.map((_, i) => ({ row: at + i, style: "job" as const })), ...adds.flatMap((r, i) => toneStyle(at + i, r))]);
       summary.preApproved.added = adds.map((r) => r.label);
     }
     // A blank spacer after the block, then the weeks.
@@ -716,6 +728,8 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       insert(at, count);
       const cells: CellWrite[] = [{ row: at, col: 0, value: label }];
       rows.forEach((r, i) => cells.push(...withCarry(newRowCells(at + 1 + i, r, opts.syncedAt), at + 1 + i, r.jobId, false)));
+      // New job rows start white: an inserted row otherwise inherits the green of the total row next to it.
+      style(rows.map((_, i) => ({ row: at + 1 + i, style: "job" as const })));
       const totalIdx = at + 1 + rows.length;
       cells.push(...totalRowCells(totalIdx, at + 1, at + rows.length));
       cells.push({ row: totalIdx + 1, col: 0, value: CUMULATIVE_LABEL }); // formulas come in the final pass
@@ -776,7 +790,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
       const cells: CellWrite[] = [];
       additions.forEach((r, i) => cells.push(...withCarry(newRowCells(at + i, r, opts.syncedAt), at + i, r.jobId, false)));
       write(cells);
-      style(additions.flatMap((r, i) => toneStyle(at + i, r)));
+      style([...additions.map((_, i) => ({ row: at + i, style: "job" as const })), ...additions.flatMap((r, i) => toneStyle(at + i, r))]);
       summary.jobsAdded += additions.length;
       report.added = additions.map((r) => r.label);
     }

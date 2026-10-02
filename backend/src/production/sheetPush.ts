@@ -304,6 +304,11 @@ const ROW_STYLES: Record<string, Record<string, unknown>> = {
   // The PAID-IN-FULL cell (B) on a job row: YES green, NO red, and amber for
   // a paid stage whose ledger still shows a balance. Set on every push, so a
   // job that gets paid turns from red to green.
+  // A job row the automation has just inserted: white, not bold. Sheets gives
+  // an inserted row the format of the row after it, which is the green Weekly
+  // Total, and Pema was recolouring every new job row by hand. Set once, on
+  // insertion only; the team's colouring of existing rows is never touched.
+  job: { backgroundColor: rgb("FFFFFF"), textFormat: { bold: false } },
   paid: { backgroundColor: rgb("B7E1CD"), textFormat: { bold: true, foregroundColor: rgb("000000") } },
   unpaid: { backgroundColor: rgb("F4C7C3"), textFormat: { bold: true, foregroundColor: rgb("000000") } },
   mismatch: { backgroundColor: rgb("FCE8B2"), textFormat: { bold: true, foregroundColor: rgb("000000") } },

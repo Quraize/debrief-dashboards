@@ -74,8 +74,8 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 0, AC)).toBe("Job #");
     // Row 1 label; 2 job 3; 3 total; 4 cumulative; 5 spacer; 6 older label; 7,8 jobs; 9 total; 10 cumulative.
     expect(at(cells, 1, 0)).toBe("9/14/2026-9/20/2026");
-    // The job's own cell keeps its text and opens the job in JobProgress.
-    expect(at(cells, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/93/job/3/overview","Wayne/3 Main St/Customer 3")' });
+    // The job's own cell is plain text; the JobProgress link is in its own column.
+    expect(at(cells, 2, 0)).toBe("Wayne/3 Main St/Customer 3");
     expect(at(cells, 2, HU)).toBe("3");
     expect(at(cells, 2, R)).toBe(10000);
     expect(at(cells, 2, B)).toBe("NO"); // PAID-IN-FULL: not yet
@@ -300,18 +300,42 @@ describe("toRequests", () => {
   });
 });
 
-describe("column A links to the job", () => {
-  it("writes the label as a link on new and existing rows, plain when the job has no URL, and leaves the tab's own rows alone", () => {
+describe("column A is plain text, and new job rows start white", () => {
+  it("writes the label as text on new and existing rows (no HYPERLINK chip), and whitens only the rows it inserts", () => {
     const grid = [headerRow(), ["9/7/2026-9/13/2026"], ["Wayne/1 Main St/Customer 1", null, null, null, ...Array(HU - 4).fill(null), "1"], ["Weekly Total"], [CUMULATIVE_LABEL]];
     const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2", { jpUrl: null })] }], NO_MONTH);
     const cells = cellsOf(plan);
-    expect(at(cells, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/91/job/1/overview","Wayne/1 Main St/Customer 1")' });
-    expect(at(cells, 3, 0)).toBe("Wayne/2 Main St/Customer 2"); // no URL: plain text, as before
-    // The tab's own rows stay plain text: the Weekly Total moved down to row 4 by the insert.
+    expect(at(cells, 2, 0)).toBe("Wayne/1 Main St/Customer 1");   // an existing row's HYPERLINK is replaced by text
+    expect(at(cells, 3, 0)).toBe("Wayne/2 Main St/Customer 2");
     expect(at(cells, 4, 0)).toBe("Weekly Total");
-    // A quote in the customer's name is doubled so the formula survives it.
-    const quoted = cellsOf(planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1", { label: 'Wayne/1 Main St/Bob "Big Bob" Jones' })] }], NO_MONTH));
-    expect(at(quoted, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/91/job/1/overview","Wayne/1 Main St/Bob ""Big Bob"" Jones")' });
+    // Job 2 is inserted at row 3 and gets the white "job" style; the existing job 1 row is left as the team has it.
+    const styled = plan.ops.filter((o) => o.type === "style").flatMap((o) => o.rows);
+    expect(styled.filter((s) => s.style === "job").map((s) => s.row)).toEqual([3]);
+    expect(styled.some((s) => s.row === 2 && s.style === "job")).toBe(false);
+  });
+});
+
+describe("the tab's columns can be reordered", () => {
+  it("follows every heading, the checkbox columns too, and a duplicate heading resolves to the nearest", () => {
+    // Pema's order: PIF Date, PAID-IN-FULL, Job Complete, Warranty Filed, then the rest; "PIF Date" also sits far right as a ledger column.
+    const h = headerRow();
+    const B = colIndex("B"), C = colIndex("C"), D = colIndex("D"), H = colIndex("H");
+    const [pif, pifDate, complete, warranty] = [h[B], h[C], h[D], h[H]];
+    h[1] = pifDate; h[2] = pif; h[3] = complete; h[4] = warranty; h[5] = "Job Folder"; h[6] = "Site Assess"; h[7] = "Job Costing Complete";
+    h[43] = "PIF Date";
+    const map = headerColumnMap(h).idx;
+    expect([map["C"], map["B"], map["D"], map["H"], map["E"], map["F"], map["G"]]).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    // A new row's PIF answer, date, Job Complete tick and Warranty Filed box land under the moved headings.
+    const paidRow = row("1", { pifStatus: "YES", pifDate: "2026-09-10", jobComplete: true, statusTone: "paid" });
+    const plan = planSheet([h], [{ from: "2026-09-07", to: "2026-09-13", rows: [paidRow] }], NO_MONTH);
+    const cells = cellsOf(plan);
+    expect(at(cells, 2, 1)).toBe(dateSerial("2026-09-10"));
+    expect(at(cells, 2, 2)).toBe("YES");
+    expect(at(cells, 2, 3)).toBe(true);
+    expect(at(cells, 2, 4)).toBe(false);
+    // The green PIF tone covers PAID-IN-FULL and PIF Date, now at 2 and 1.
+    const tone = plan.ops.filter((o) => o.type === "style").flatMap((o) => o.rows).filter((s) => s.style === "paid");
+    expect(tone.map((s) => s.cols)).toEqual([[2, 3], [1, 2]]);
   });
 });
 
@@ -332,10 +356,11 @@ describe("PAID-IN-FULL — columns B..D", () => {
     expect(at(cells, 2, C)).toBe(dateSerial("2026-09-10"));
     expect(at(cells, 2, D)).toBe(true);
     const styles = plan.ops.flatMap((o) => (o.type === "style" ? o.rows : []));
-    expect(styles).toContainEqual({ row: 2, style: "paid", cols: [B, B + 1] });
+    // One run over PAID-IN-FULL and PIF Date, which sit side by side on the template.
+    expect(styles).toContainEqual({ row: 2, style: "paid", cols: [B, B + 2] });
     // New rows: job 2 (row 3) is NO in red with D unticked; the cancelled job (row 4) is left blank and uncoloured.
     expect(at(cells, 3, B)).toBe("NO"); expect(at(cells, 3, C)).toBeUndefined(); expect(at(cells, 3, D)).toBe(false);
-    expect(styles).toContainEqual({ row: 3, style: "unpaid", cols: [B, B + 1] });
+    expect(styles).toContainEqual({ row: 3, style: "unpaid", cols: [B, B + 2] });
     expect(at(cells, 4, B)).toBeUndefined();
     expect(styles.some((s) => s.row === 4 && s.cols)).toBe(false);
     // And the requests: validation removed on the body of B, the colour on the B cell alone with its text format.
@@ -343,7 +368,7 @@ describe("PAID-IN-FULL — columns B..D", () => {
     expect(reqs.find((r) => r["setDataValidation"])!["setDataValidation"]).toEqual({ range: { sheetId: 7, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: B, endColumnIndex: B + 1 } });
     const tone = reqs.find((r) => r["repeatCell"] && (r["repeatCell"]!["range"] as { startRowIndex: number; startColumnIndex: number }).startRowIndex === 2 && (r["repeatCell"]!["range"] as { startColumnIndex: number }).startColumnIndex === B)!["repeatCell"] as Record<string, unknown>;
     expect(tone["fields"]).toBe("userEnteredFormat(backgroundColor,textFormat)");
-    expect(tone["range"]).toEqual({ sheetId: 7, startRowIndex: 2, endRowIndex: 3, startColumnIndex: B, endColumnIndex: B + 1 });
+    expect(tone["range"]).toEqual({ sheetId: 7, startRowIndex: 2, endRowIndex: 3, startColumnIndex: B, endColumnIndex: B + 2 }); // PAID-IN-FULL and PIF Date
   });
   it("clears the TRUE/FALSE the checkbox days left on label, total, spacer and stale rows, but not a lock note", () => {
     const grid = [headerRow(),
@@ -545,12 +570,18 @@ describe("the team's formatting is never touched", () => {
     ], { ...NO_MONTH, today: "2026-09-18" });
     const labels = new Set<number>();
     for (const b of parseBlocks(plan.ops.length ? grid : grid)) { labels.add(b.labelIdx); if (b.totalIdx !== null) labels.add(b.totalIdx); if (b.cumulativeIdx !== null) labels.add(b.cumulativeIdx); }
+    // Rows the planner inserted, as numbered at the moment of each insert (a style follows its insert).
+    const inserted = new Set<number>();
     for (const op of plan.ops) {
+      if (op.type === "insertRows") for (let i = op.at; i < op.at + op.count; i++) inserted.add(i);
       if (op.type !== "style") continue;
       for (const r of op.rows) {
         const ownRow = ["label", "total", "cumulative", "summary"].includes(r.style);
-        // Either it is one of the planner's own rows, or it is the B-cell tone and nothing wider.
-        expect(ownRow || (["paid", "unpaid", "mismatch"].includes(r.style) && r.cols?.[0] === B && r.cols?.[1] === B + 1), JSON.stringify(r)).toBe(true);
+        // Either one of the planner's own rows, the PIF tone on the two PIF cells and nothing wider,
+        // or the white start of a row the planner has just inserted — never a row the team already had.
+        const tone = ["paid", "unpaid", "mismatch"].includes(r.style) && r.cols?.[0] === B && r.cols?.[1] === B + 2;
+        const fresh = r.style === "job" && inserted.has(r.row);
+        expect(ownRow || tone || fresh, JSON.stringify(r)).toBe(true);
       }
     }
     expect(plan.ops.some((o) => o.type === "style")).toBe(true);   // the guard is not vacuous
