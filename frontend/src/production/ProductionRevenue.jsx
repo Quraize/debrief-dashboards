@@ -53,6 +53,20 @@ const DEF = {
   expected: (rule) => `${rule} Amount: the sheet balance of jobs not paid in full. Owner: the Owner set on the Sold-Job Pipeline, else the sales rep. Counted from today; the date filter does not change it.`,
 };
 
+/** The jobs table, sorted by a column; null keeps the card's own order. Blanks sort last either way. */
+function sortRows(rows, sort) {
+  if (!sort) return rows;
+  const dir = sort.dir === "asc" ? 1 : -1;
+  const val = (r) => r[sort.key];
+  const cmp = (a, b) => {
+    const x = val(a), y = val(b);
+    const xe = x === null || x === undefined || x === "", ye = y === null || y === undefined || y === "";
+    if (xe || ye) return xe && ye ? 0 : xe ? 1 : -1;
+    return typeof x === "number" && typeof y === "number" ? (x - y) * dir : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" }) * dir;
+  };
+  return [...rows].sort(cmp);
+}
+
 /** The week filters, as steps through the sheet's blocks from today's. */
 const BLOCK_OFFSET = { "This Week": 0, "Last Week": -1, "Next Week": 1 };
 
@@ -73,6 +87,8 @@ export default function ProductionRevenue() {
   const [ce, setCe] = useState("");
   const [sel, setSel] = useState("started");
   const [q, setQ] = useState("");
+  // Column sort for the jobs table (Pema: at least by stage and balance). null = the card's own order.
+  const [sort, setSort] = useState(null);
 
   // Every card's figure, and the jobs behind it, from the sheet's jobs.
   const m = useMemo(() => {
@@ -145,7 +161,7 @@ export default function ProductionRevenue() {
         rows: closedPaid.map((r) => row(r.jobId, num(r.totalRev), "Finished · paid in full")),
       },
       remaining: {
-        title: `Remaining Owed · ${range}`, hint: DEF.remaining, amountLabel: "Still owed", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
+        title: `Remaining Owed · ${range}`, hint: DEF.remaining, amountLabel: "Balance", total: s.remainingOwed.amount, value: money(s.remainingOwed.amount), tone: "amber",
         sub: <>{s.remainingOwed.jobs} of {plural(s.jobs)} started in this period still owing</>,
         rows: list.map((r) => row(r.jobId, sheetBalance(r), sheetBalance(r) < 0 ? "Overpaid" : "")).filter((r) => r.amount !== 0).sort((a, b) => b.amount - a.amount),
       },
@@ -158,7 +174,7 @@ export default function ProductionRevenue() {
         rows: [...invoiceRows.sort((a, b) => b.amount - a.amount), ...noInvoiceIds.map((id) => row(id, 0, "Started, no invoice in JobProgress"))],
       },
       operational: {
-        title: "Operational AR · outstanding contract balance", hint: DEF.operational, amountLabel: "Still owed", total: Math.round((op.inProgress.amount + ar.totalAR) * 100) / 100,
+        title: "Operational AR · outstanding contract balance", hint: DEF.operational, amountLabel: "Balance", total: Math.round((op.inProgress.amount + ar.totalAR) * 100) / 100,
         value: money(op.inProgress.amount + ar.totalAR), tone: "amber",
         sub: <>
           <span className="block font-semibold text-amber-900">Not accounting receivables: includes work not yet billed</span>
@@ -178,7 +194,7 @@ export default function ProductionRevenue() {
         rows: ar.rows.filter((r) => r.overdue).map((r) => row(r.jobId, r.owed, `${r.daysOutstanding ?? "?"} days since completion`)),
       },
       progress: {
-        title: "Progress Payments Due · today", hint: DEF.progress, amountLabel: "Still to collect", total: prog.amount, value: money(prog.amount), tone: prog.amount > 0 ? "amber" : "green",
+        title: "Progress Payments Due · today", hint: DEF.progress, amountLabel: "Balance", total: prog.amount, value: money(prog.amount), tone: prog.amount > 0 ? "amber" : "green",
         sub: <>
           After the deposit on {plural(prog.jobs)}
           {prog.noneYet.jobs > 0 && <span className="block mt-1 font-semibold text-red-700">{prog.noneYet.jobs} with no progress payment yet</span>}
@@ -224,11 +240,20 @@ export default function ProductionRevenue() {
   if (me && !allowed) return <div className="py-20 text-center text-muted-foreground">Revenue &amp; AR is for managers: admin, sales manager or project manager.</div>;
 
   const current = m?.cards[sel];
-  const shown = (current?.rows ?? []).filter((r) => {
+  const shown = sortRows((current?.rows ?? []).filter((r) => {
     const t = q.trim().toLowerCase();
     return !t || [r.customer, r.jobNumber, r.stage, r.note].some((v) => String(v ?? "").toLowerCase().includes(t));
-  });
-  const pick = (key) => { setSel(key); setQ(""); };
+  }), sort);
+  const pick = (key) => { setSel(key); setQ(""); setSort(null); };
+  const onSort = (key) => setSort((cur) => (cur?.key !== key ? { key, dir: key === "customer" || key === "stage" ? "asc" : "desc" } : cur.dir === "desc" ? { key, dir: "asc" } : null));
+  const Th = ({ k, children, right }) => (
+    <th className={`px-3 py-2 ${right ? "text-right" : ""}`}>
+      <button type="button" onClick={() => onSort(k)} className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-primary ${sort?.key === k ? "text-primary" : ""}`}
+        title={`Sort by ${children}`} aria-sort={sort?.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        {children}<span aria-hidden="true" className="text-[10px]">{sort?.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}</span>
+      </button>
+    </th>
+  );
 
   return (
     <div className="space-y-4">
@@ -294,13 +319,17 @@ export default function ProductionRevenue() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-secondary">
                     <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide whitespace-nowrap">
-                      <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">Customer</th>
-                      <th className="px-3 py-2">Job #</th>
-                      <th className="px-3 py-2">Stage</th>
-                      <th className="px-3 py-2">Install started</th>
-                      <th className="px-3 py-2 text-right">Total Rev</th>
-                      <th className="px-3 py-2 text-right">Received</th>
-                      <th className="px-3 py-2 text-right">{current.amountLabel}</th>
+                      <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">
+                        <button type="button" onClick={() => onSort("customer")} className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-primary ${sort?.key === "customer" ? "text-primary" : ""}`} title="Sort by customer">
+                          Customer<span aria-hidden="true" className="text-[10px]">{sort?.key === "customer" ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                        </button>
+                      </th>
+                      <Th k="jobNumber">Job #</Th>
+                      <Th k="stage">Stage</Th>
+                      <Th k="firstInstall">Install started</Th>
+                      <Th k="totalRev" right>Total Rev</Th>
+                      <Th k="received" right>Received</Th>
+                      <Th k="amount" right>{current.amountLabel}</Th>
                       <th className="px-3 py-2">Note</th>
                       <th className="px-3 py-2" />
                     </tr>
@@ -310,7 +339,7 @@ export default function ProductionRevenue() {
                       <tr key={r.key} className="border-b border-border/50 hover:bg-secondary bg-white">
                         <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))] font-semibold text-primary">{r.customer}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{r.jobNumber || "—"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{r.stage || "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs font-bold text-primary">{r.stage || "—"}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{fmtDay(r.firstInstall)}</td>
                         <td className="px-3 py-2 text-right">{money(r.totalRev)}</td>
                         <td className="px-3 py-2 text-right">{money(r.received)}</td>
