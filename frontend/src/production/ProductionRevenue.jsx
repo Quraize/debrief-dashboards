@@ -246,11 +246,18 @@ export default function ProductionRevenue() {
   }), sort);
   const pick = (key) => { setSel(key); setQ(""); setSort(null); };
   const onSort = (key) => setSort((cur) => (cur?.key !== key ? { key, dir: key === "customer" || key === "stage" ? "asc" : "desc" } : cur.dir === "desc" ? { key, dir: "asc" } : null));
+  const sortBtn = (k) => `inline-flex items-center gap-1.5 uppercase tracking-wide rounded-md px-1.5 py-0.5 -mx-1.5 border transition-colors ${
+    sort?.key === k ? "bg-accent text-white border-accent" : "border-transparent hover:border-border hover:bg-white hover:text-primary"}`;
+  const sortIcon = (k) => (
+    <span aria-hidden="true" className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${sort?.key === k ? "bg-white/25" : "bg-secondary-foreground/10 text-muted-foreground"}`}>
+      {sort?.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}
+    </span>
+  );
   const Th = ({ k, children, right }) => (
     <th className={`px-3 py-2 ${right ? "text-right" : ""}`}>
-      <button type="button" onClick={() => onSort(k)} className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-primary ${sort?.key === k ? "text-primary" : ""}`}
-        title={`Sort by ${children}`} aria-sort={sort?.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
-        {children}<span aria-hidden="true" className="text-[10px]">{sort?.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}</span>
+      <button type="button" onClick={() => onSort(k)} className={sortBtn(k)} title={`Sort by ${children}`}
+        aria-sort={sort?.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        {children}{sortIcon(k)}
       </button>
     </th>
   );
@@ -305,6 +312,7 @@ export default function ProductionRevenue() {
               <h2 id="jobs-h" className="font-heading font-bold text-primary">
                 {current.title} <span className="font-normal text-muted-foreground">· {plural(current.rows.length, current.rows.length && sel === "invoiced" ? "row" : "job")} · {money(current.total)}</span>
               </h2>
+              <span className="text-xs text-muted-foreground">Click a column heading to sort{sort ? "" : " · showing the card's own order"}</span>
               <div className="relative ml-auto">
                 <Search className="w-4 h-4 absolute left-2 top-2.5 text-muted-foreground" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Customer, job #, stage…" aria-label="Search these jobs"
@@ -320,8 +328,8 @@ export default function ProductionRevenue() {
                   <thead className="sticky top-0 z-10 bg-secondary">
                     <tr className="text-left text-muted-foreground border-b border-border text-xs uppercase tracking-wide whitespace-nowrap">
                       <th className="px-3 py-2 sticky left-0 z-20 bg-secondary">
-                        <button type="button" onClick={() => onSort("customer")} className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-primary ${sort?.key === "customer" ? "text-primary" : ""}`} title="Sort by customer">
-                          Customer<span aria-hidden="true" className="text-[10px]">{sort?.key === "customer" ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                        <button type="button" onClick={() => onSort("customer")} className={sortBtn("customer")} title="Sort by customer">
+                          Customer{sortIcon("customer")}
                         </button>
                       </th>
                       <Th k="jobNumber">Job #</Th>
@@ -339,7 +347,9 @@ export default function ProductionRevenue() {
                       <tr key={r.key} className="border-b border-border/50 hover:bg-secondary bg-white">
                         <td className="px-3 py-2 whitespace-nowrap sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_0_hsl(var(--border))] font-semibold text-primary">{r.customer}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{r.jobNumber || "—"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs font-bold text-primary">{r.stage || "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {r.stage ? <span className="inline-block text-xs font-bold text-blue-900 bg-blue-100 border border-blue-200 rounded px-1.5 py-0.5">{r.stage}</span> : "—"}
+                        </td>
                         <td className="px-3 py-2 whitespace-nowrap">{fmtDay(r.firstInstall)}</td>
                         <td className="px-3 py-2 text-right">{money(r.totalRev)}</td>
                         <td className="px-3 py-2 text-right">{money(r.received)}</td>
