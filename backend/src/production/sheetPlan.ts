@@ -20,6 +20,7 @@
  * Status column instead.
  */
 import { MASTER_COLUMNS, MASTER_MANUAL, columnFormula, weekLabel } from "@allied/shared/weeklyJobSheetMaster";
+import { labelLink } from "@allied/shared/weeklyJobSheet";
 import { weekBounds } from "@allied/shared/production";
 import { inPipeline, bucketFor, isReadyStage } from "@allied/shared/soldPipeline";
 import { isInstallCode } from "@allied/shared/production";
@@ -230,9 +231,10 @@ export function syncedValue(column: Column, row: SheetRow, syncedAt: string | nu
   const v = (row as unknown as Record<string, unknown>)[column.key];
   // The status column is cleared when a job has none, so a tick left from the column's checkbox days goes away.
   if (column.key === "pifStatus") return v ? String(v) : "";
-  // Column A is plain text: a HYPERLINK here popped a preview chip on every
-  // click (Pema, 2026-10-02). The JobProgress link lives in its own column.
-  if (column.key === "label") return v === null || v === undefined || v === "" ? null : String(v);
+  // Column A keeps its text and opens the job in JobProgress when clicked.
+  // (Plain text 10/2-10/6 to avoid Google's link pop-up; the team chose the
+  // link back and turns off "Show link details" in their own accounts.)
+  if (column.key === "label") return v === null || v === undefined || v === "" ? null : labelLink(v, row.jpUrl);
   if (column.type === "check") return Boolean(v);
   if (v === null || v === undefined || v === "") return null;
   if (column.type === "date") return dateSerial(String(v));

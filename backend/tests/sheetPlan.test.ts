@@ -74,8 +74,8 @@ describe("planSheet on an empty tab", () => {
     expect(at(cells, 0, AC)).toBe("Job #");
     // Row 1 label; 2 job 3; 3 total; 4 cumulative; 5 spacer; 6 older label; 7,8 jobs; 9 total; 10 cumulative.
     expect(at(cells, 1, 0)).toBe("9/14/2026-9/20/2026");
-    // The job's own cell is plain text; the JobProgress link is in its own column.
-    expect(at(cells, 2, 0)).toBe("Wayne/3 Main St/Customer 3");
+    // The job's own cell keeps its text and opens the job in JobProgress.
+    expect(at(cells, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/93/job/3/overview","Wayne/3 Main St/Customer 3")' });
     expect(at(cells, 2, HU)).toBe("3");
     expect(at(cells, 2, R)).toBe(10000);
     expect(at(cells, 2, B)).toBe("NO"); // PAID-IN-FULL: not yet
@@ -300,13 +300,16 @@ describe("toRequests", () => {
   });
 });
 
-describe("column A is plain text, and new job rows start white", () => {
-  it("writes the label as text on new and existing rows (no HYPERLINK chip), and whitens only the rows it inserts", () => {
+describe("column A links to the job, and new job rows start white", () => {
+  it("writes the label as a link on new and existing rows, plain when the job has no URL, and whitens only the rows it inserts", () => {
     const grid = [headerRow(), ["9/7/2026-9/13/2026"], ["Wayne/1 Main St/Customer 1", null, null, null, ...Array(HU - 4).fill(null), "1"], ["Weekly Total"], [CUMULATIVE_LABEL]];
     const plan = planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2", { jpUrl: null })] }], NO_MONTH);
     const cells = cellsOf(plan);
-    expect(at(cells, 2, 0)).toBe("Wayne/1 Main St/Customer 1");   // an existing row's HYPERLINK is replaced by text
-    expect(at(cells, 3, 0)).toBe("Wayne/2 Main St/Customer 2");
+    expect(at(cells, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/91/job/1/overview","Wayne/1 Main St/Customer 1")' });
+    expect(at(cells, 3, 0)).toBe("Wayne/2 Main St/Customer 2"); // no URL: plain text
+    // A quote in the customer's name is doubled so the formula survives it.
+    const quoted = cellsOf(planSheet(grid, [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1", { label: 'Wayne/1 Main St/Bob "Big Bob" Jones' })] }], NO_MONTH));
+    expect(at(quoted, 2, 0)).toEqual({ formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/91/job/1/overview","Wayne/1 Main St/Bob ""Big Bob"" Jones")' });
     expect(at(cells, 4, 0)).toBe("Weekly Total");
     // Job 2 is inserted at row 3 and gets the white "job" style; the existing job 1 row is left as the team has it.
     const styled = plan.ops.filter((o) => o.type === "style").flatMap((o) => o.rows);
