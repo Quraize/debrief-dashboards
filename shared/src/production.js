@@ -22,6 +22,7 @@ export const JOB_TYPE_LABELS = {
   "CB": "Callback",
   "SHED": "Shed",
   "SOLAR": "Solar",
+  "TPO": "Flat Roof (TPO)",
 };
 
 /**
@@ -29,8 +30,9 @@ export const JOB_TYPE_LABELS = {
  * team's weekly job sheet is organised around. Service calls, callbacks,
  * punch lists, site assessments ("SA"), check-ins and material runs are
  * visits too, but they do not put a job on that week's sheet.
+ * TPO is a flat-roof install (commercial roofs, e.g. Secaucus Hudson, 2026-10-05).
  */
-export const INSTALL_CODES = ["RR", "SR", "RR+SR", "GUTTERS", "WR", "SOLAR", "SHED"];
+export const INSTALL_CODES = ["RR", "SR", "RR+SR", "GUTTERS", "WR", "SOLAR", "SHED", "TPO"];
 
 /**
  * A Monday–Sunday week, cut at a month end: [{from, to}] when the week sits in
@@ -100,6 +102,7 @@ export const JOB_TYPE_COLORS = {
   "CB": "#ea580c",
   "SHED": "#65a30d",      // lime
   "SOLAR": "#0891b2",     // cyan
+  "TPO": "#475569",       // slate
 };
 export const DEFAULT_TYPE_COLOR = "#334155";
 

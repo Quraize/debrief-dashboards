@@ -7,6 +7,7 @@ describe("isInstallCode — which visits put a job on the week's production shee
     expect(isInstallCode("rr")).toBe(true);
     expect(isInstallCode("RR + SR")).toBe(true);
     expect(isInstallCode("RR/SR")).toBe(true);
+    expect(isInstallCode("tpo")).toBe(true);   // flat-roof install
   });
   it("leaves out service calls, callbacks, punch lists, site assessments and unknown titles", () => {
     for (const c of ["MS", "MS REPAIR", "MS-CB", "CB", "MS SA", "SA", "PL", "PUNCHLIST", "PH", "MS CHECK IN", "MATERIAL", "PICK UP PAYMENT", null, undefined, ""]) {
