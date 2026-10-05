@@ -1,3 +1,4 @@
+/** @OnlyCurrentDoc */
 /**
  * "Open job" panel for the PRODUCTION MASTER SHEET.
  *
