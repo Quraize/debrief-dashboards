@@ -217,29 +217,6 @@ export function headerColumnMap(headerRow: CellValue[] | undefined): { idx: Reco
 
 /** The column map in force while a plan is being built (set by planSheet). */
 let ACTIVE: Record<string, number> = IDX;
-
-/**
- * "See Job in JP": an optional column the team adds by hand (Pema/Iqrma,
- * 2026-10-06), since column A is plain text. Wherever row 1 carries this
- * heading, each job row gets a link that opens the job in JobProgress. No
- * heading, nothing written. It must sit to the right of the template's
- * formula columns (BS): those are written by letter, so a column inserted
- * left of them would shift them.
- */
-export const JP_LINK_HEADER = "See Job in JP";
-const JP_LINK_TEXT = "Open in JP";
-let LINK_COL: number | null = null;
-function findLinkCol(headerRow: CellValue[] | undefined, taken: Record<string, number>): number | null {
-  const want = JP_LINK_HEADER.toLowerCase();
-  const i = (headerRow ?? []).findIndex((v) => cellStr(v).toLowerCase() === want);
-  if (i < 0 || Object.values(taken).includes(i)) return null;
-  return i;
-}
-function linkCell(rowIdx: number, row: SheetRow): CellWrite[] {
-  if (LINK_COL === null || !row.jpUrl) return [];
-  const q = (v: string) => v.replace(/"/g, '""');
-  return [{ row: rowIdx, col: LINK_COL, value: { formula: `HYPERLINK("${q(row.jpUrl)}","${JP_LINK_TEXT}")` } }];
-}
 const JOB_ID_COL = () => ACTIVE["HU"]!;
 
 const cellStr = (v: CellValue | undefined) => (v === null || v === undefined ? "" : String(v).trim());
@@ -276,7 +253,6 @@ function newRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null): Ce
     if (v !== null) out.push({ row: rowIdx, col, value: v });
     else if (c.type === "check") out.push({ row: rowIdx, col, value: false });
   }
-  out.push(...linkCell(rowIdx, row));
   return out;
 }
 
@@ -311,8 +287,6 @@ function updateRowCells(rowIdx: number, row: SheetRow, syncedAt: string | null, 
     if (v === "") out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: null });
     else if (v !== null) out.push({ row: rowIdx, col: ACTIVE[c.col]!, value: v });
   }
-  // The link is put in once; a cell that already shows it is left alone.
-  if (!cells || LINK_COL === null || cellStr(cells[LINK_COL]) !== JP_LINK_TEXT) out.push(...linkCell(rowIdx, row));
   return out;
 }
 
@@ -518,13 +492,11 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
   ACTIVE = headerMap.idx;
-  LINK_COL = findLinkCol(grid[0], ACTIVE);
   summary.columnsFollowed = headerMap.followed;
   try {
     return buildPlan();
   } finally {
     ACTIVE = IDX;
-    LINK_COL = null;
   }
 
   function buildPlan(): Plan {
