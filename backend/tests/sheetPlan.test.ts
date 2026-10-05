@@ -735,3 +735,23 @@ describe("week locks — read-only from the end of Thursday", () => {
     expect(off.requests).toEqual([{ deleteProtectedRange: { protectedRangeId: 1 } }, { deleteProtectedRange: { protectedRangeId: 2 } }]);
   });
 });
+
+describe("the See Job in JP column", () => {
+  it("links each job row to JobProgress wherever the heading sits, and writes nothing without the heading", () => {
+    const h = headerRow();
+    const LINK = colIndex("BV");
+    h[LINK] = "See Job in JP";
+    // Job 1 already has its row (and its link); job 2 is new; job 3 has no URL.
+    const existing = ["Wayne/1 Main St/Customer 1"];
+    existing[colIndex("HU")] = "1";
+    existing[LINK] = "Open in JP";
+    const grid = [h, ["9/7/2026-9/13/2026"], existing, ["Weekly Total"], [CUMULATIVE_LABEL]];
+    const weeks = [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2"), row("3", { jpUrl: null })] }];
+    const cells = cellsOf(planSheet(grid, weeks, NO_MONTH));
+    const links = cells.filter((c) => c.col === LINK);
+    expect(links).toEqual([{ row: 3, col: LINK, value: { formula: 'HYPERLINK("https://app.jobprogress.com/#/customer-jobs/92/job/2/overview","Open in JP")' } }]);
+    // No heading on the tab: the column is never written.
+    const plain = cellsOf(planSheet([headerRow(), ...grid.slice(1)], weeks, NO_MONTH));
+    expect(plain.some((c) => c.col === LINK)).toBe(false);
+  });
+});
