@@ -738,3 +738,71 @@ describe("week locks — read-only from the end of Thursday", () => {
     expect(off.requests).toEqual([{ deleteProtectedRange: { protectedRangeId: 1 } }, { deleteProtectedRange: { protectedRangeId: 2 } }]);
   });
 });
+
+describe("the estimate / GP block (costTotals, decision 5 and the self-healing totals)", () => {
+  const AV = colIndex("AV"), BN = colIndex("BN"), BP = colIndex("BP"), AW = colIndex("AW");
+  const setup = (over: (h: (string | null)[]) => void = () => {}) => {
+    const h = headerRow();
+    h[colIndex("BT")] = "Final Job Costing Complete ";
+    h[colIndex("BV")] = "Recognition";
+    over(h);
+    const r1: (string | null)[] = ["Wayne/1 Main St/Customer 1"]; r1[HU] = "1";
+    const r9: (string | null)[] = ["Old/9 Main St/Customer 9"]; r9[HU] = "9"; r9[HY] = SYNC_STATUS_STALE;
+    return [h, ["9/7/2026-9/13/2026"], r1, r9, ["Weekly Total"], [CUMULATIVE_LABEL]] as (string | number | boolean | null)[][];
+  };
+  const weeks = [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2")] }];
+  const rowOfJob = (g: (string | number | boolean | null)[][], id: string) => g.findIndex((r) => r?.[HU] === id);
+
+  it("writes the estimate formulas on every job row and totals that skip stale rows, honour HOLD and count Actual GP only when Final JCC is ticked", () => {
+    const grid = setup();
+    const plan = planSheet(grid, weeks, { ...NO_MONTH, costTotals: true });
+    const g = gridAfter(grid, plan) as unknown as (string | null)[][];
+    const j1 = rowOfJob(g, "1") + 1, j2 = rowOfJob(g, "2") + 1, j9 = rowOfJob(g, "9") + 1;
+    const t = g.findIndex((r) => r?.[0] === "Weekly Total");
+    // Job rows: ChatGPT's estimate formula (ledger cost if logged, else 30% of Total Rev).
+    expect(g[j1 - 1]![AV]).toContain("'JOB COST / AP LEDGER'");
+    expect(g[j1 - 1]![AV]).toContain(`$T${j1}*30%`);
+    expect(g[j2 - 1]![AW]).toBe(`=IFERROR(AV${j2}/T${j2},"")`);
+    // Weekly Total: live rows only (the stale row 9 is out), HOLD left out, percentages from summed dollars.
+    const total = g[t]!;
+    const live = [j1, j2].sort((a, b) => a - b);
+    expect(total[AV]).toBe("=" + live.map((n) => `N(AV${n})*(BV${n}<>"HOLD")`).join("+"));
+    expect(String(total[AV])).not.toContain(`AV${j9})`);
+    expect(total[AW]).toBe(`=IFERROR(AV${t + 1}/(${live.map((n) => `N(T${n})*(BV${n}<>"HOLD")`).join("+")}),"")`);
+    expect(total[BN]).toContain(`(BT${j1}=TRUE)`);
+    expect(total[BP]).toContain(`(BH${j1}<>"")`);
+    // The Cumulative row gets the same treatment.
+    expect(String(g[t + 1]![AV])).toContain(`N(AV${j1})`);
+    expect(plan.summary.costBlock?.status).toBe("written; HOLD from BV; Final JCC from BT");
+    expect(plan.summary.costBlock?.jobRows).toBe(3);
+  });
+
+  it("works without the optional columns: no HOLD filter, and no Actual GP total until Final Job Costing Complete exists", () => {
+    const grid = setup((h) => { h[colIndex("BT")] = null; h[colIndex("BV")] = null; });
+    const g = gridAfter(grid, planSheet(grid, weeks, { ...NO_MONTH, costTotals: true })) as unknown as (string | null)[][];
+    const t = g.findIndex((r) => r?.[0] === "Weekly Total");
+    expect(String(g[t]![AV])).not.toContain("HOLD");
+    expect(g[t]![BN] ?? null).toBeNull();
+  });
+
+  it("is off unless asked for, and skips itself when a column it writes by letter has moved", () => {
+    const grid = setup();
+    expect(cellsOf(planSheet(grid, weeks, NO_MONTH)).some((c) => c.col === AV)).toBe(false);
+    const moved = setup((h) => { h[AV] = "Something Else"; });
+    const plan = planSheet(moved, weeks, { ...NO_MONTH, costTotals: true });
+    expect(plan.summary.costBlock?.status).toMatch(/^skipped: column AV/);
+    expect(cellsOf(plan).some((c) => c.col === AV)).toBe(false);
+  });
+
+  it("fills the Month at a Glance lines from the jobs each line counts", () => {
+    const grid = setup();
+    const plan = planSheet(grid, weeks, { syncedAt: SYNCED_AT, today: "2026-09-10", allRows: [row("1"), row("2")], costTotals: true, preApproved: false });
+    const g = gridAfter(grid, plan) as unknown as (string | null)[][];
+    const projected = g.findIndex((r) => String(r?.[0] ?? "").startsWith("September 2026 — Projected"));
+    expect(projected).toBeGreaterThan(0);
+    const j1 = rowOfJob(g, "1") + 1, j2 = rowOfJob(g, "2") + 1;
+    expect(String(g[projected]![AV])).toContain(`N(AV${j1})`);
+    expect(String(g[projected]![AV])).toContain(`N(AV${j2})`);
+    expect(plan.summary.costBlock?.monthRows).toBeGreaterThan(0);
+  });
+});

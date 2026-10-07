@@ -37,6 +37,8 @@ export interface SheetPushSettings {
   splitFrom: string;
   /** The Production KPIs dashboard tab and its data tab (SHEET_DASHBOARD_ENABLED=false turns them off). */
   dashboard: boolean; dashboardTab: string; dashboardDataTab: string;
+  /** The automation owns the estimate / GP block and its totals (SHEET_COST_TOTALS=true). Off by default until reviewed. */
+  costTotals: boolean;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -54,6 +56,7 @@ export function sheetPushSettings(): SheetPushSettings {
     dashboard: process.env.SHEET_DASHBOARD_ENABLED !== "false",
     dashboardTab: process.env.SHEET_DASHBOARD_TAB || DASHBOARD_TAB_DEFAULT,
     dashboardDataTab: process.env.SHEET_DASHBOARD_DATA_TAB || DATA_TAB_DEFAULT,
+    costTotals: process.env.SHEET_COST_TOTALS === "true",
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -66,6 +69,8 @@ export interface SheetPushOptions {
   startedBy: string;
   weeksBack?: number;
   weeksAhead?: number;
+  /** Override SHEET_COST_TOTALS for this run (a preview with the cost block on). */
+  costTotals?: boolean;
   client?: GoogleSheetsClient;
   now?: Date;
   /** Injected in tests; the feed otherwise. */
@@ -116,7 +121,7 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
       now, today, allRows: sheetRows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
-      removeEmptyStale: settings.removeEmptyStale,
+      removeEmptyStale: settings.removeEmptyStale, costTotals: options.costTotals ?? settings.costTotals,
     });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
 

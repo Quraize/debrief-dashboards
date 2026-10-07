@@ -79,6 +79,8 @@ export interface PlanSummary {
   locks: WeekLock[];
   /** Synced columns written where the TAB's heading sits rather than the template's letter. */
   columnsFollowed: { header: string; template: string; tab: string }[];
+  /** The estimate / GP block (costTotals): what was written, or why it was skipped. */
+  costBlock: { status: string; jobRows: number; totalRows: number; monthRows: number } | null;
   /** Headings rewritten because the template renamed them (B: "PIF" → the status column). */
   headersRenamed: { from: string; to: string; col: string }[];
   /** TRUE/FALSE leftovers from column B's checkbox days, cleared off rows the feed does not write. */
@@ -219,6 +221,76 @@ export function headerColumnMap(headerRow: CellValue[] | undefined): { idx: Reco
 /** The column map in force while a plan is being built (set by planSheet). */
 let ACTIVE: Record<string, number> = IDX;
 const JOB_ID_COL = () => ACTIVE["HU"]!;
+
+/**
+ * The estimate / GP block, AV..BE: the job-row formulas Pema's ChatGPT work
+ * put on the tab (estimate = the job's JOB COST / AP LEDGER cost if logged,
+ * else 30% material / 1% dealer fee / 22% labor of Total Rev; GP estimate a
+ * flat 35%; GP actual copied from BN/BO). Owned by the automation since
+ * 2026-10-07 (decision 5): written on every job row each push, so new and
+ * moved jobs have them and nobody types estimates. Not template formulas:
+ * the Excel export has no ledger tab.
+ */
+const LEDGER = "'JOB COST / AP LEDGER'";
+const ledgerEst = (r: number, cat: string, pct: number) =>
+  `IF($A${r}="","",IF(COUNTIFS(${LEDGER}!$A$6:$A$1000,$A${r},${LEDGER}!$C$6:$C$1000,"${cat}",${LEDGER}!$E$6:$E$1000,">0",${LEDGER}!$J$6:$J$1000,"<>Voided")>0,`
+  + `SUMIFS(${LEDGER}!$E$6:$E$1000,${LEDGER}!$A$6:$A$1000,$A${r},${LEDGER}!$C$6:$C$1000,"${cat}",${LEDGER}!$J$6:$J$1000,"<>Voided"),IF($T${r}="","",$T${r}*${pct}%)))`;
+export const EST_JOB_FORMULAS: Record<string, (r: number) => string> = {
+  AV: (r) => ledgerEst(r, "Material", 30),
+  AW: (r) => `IFERROR(AV${r}/T${r},"")`,
+  AX: (r) => ledgerEst(r, "Dealer Fee", 1),
+  AY: (r) => ledgerEst(r, "Labor / Subcontractor", 22),
+  AZ: (r) => `IFERROR(AY${r}/T${r},"")`,
+  BA: (r) => `IF(T${r}="","",35%)`,
+  BB: (r) => `IF(BO${r}="","",BO${r})`,
+  BC: (r) => `IF(OR(BA${r}="",BB${r}=""),"",BB${r}-BA${r})`,
+  BD: (r) => `IF(T${r}="","",T${r}*35%)`,
+  BE: (r) => `IF(BN${r}="","",BN${r})`,
+};
+const OWNED_COLS = new Set(Object.keys(EST_JOB_FORMULAS));
+/** Columns the cost block reads or writes by letter; each must carry its template heading or the block is skipped. */
+const COST_BLOCK_COLS = ["T", ...OWNED_COLS, "BH", "BI", "BJ", "BK", "BL", "BM", "BN", "BO", "BP", "BQ", "BR", "BS"];
+/** Optional team columns found by heading: HOLD marker (decision 4) and the Final Job Costing Complete tick. */
+export const RECOGNITION_HEADER = "Recognition";
+const FINAL_JCC_HEADER = "final job costing complete";
+
+/**
+ * Estimate and actual totals for one total row (Weekly Total, Cumulative,
+ * Month at a Glance) over the job rows given (1-based numbers are built
+ * here). Dollar columns are summed; percentages are recomputed from the
+ * summed dollars over the summed revenue of the same rows, never averaged.
+ * HOLD rows (Recognition column) are left out of every cost and GP figure.
+ * Actual GP counts only jobs with Final Job Costing Complete ticked, as the
+ * ChatGPT formulas did. Rewritten every push from the rows actually there,
+ * so a moved or deleted job never leaves a #REF!.
+ */
+function costTotalCells(tr: number, rows: number[], holdCol: string | null, jccCol: string | null): CellWrite[] {
+  const r = tr + 1;
+  const ns = rows.map((i) => i + 1);
+  const hold = (n: number) => (holdCol ? `*(${holdCol}${n}<>"HOLD")` : "");
+  const join = (term: (n: number) => string) => (ns.length ? ns.map(term).join("+") : "0");
+  const sum = (X: string) => join((n) => `N(${X}${n})${hold(n)}`);
+  const count = (X: string) => join((n) => `(${X}${n}<>"")${hold(n)}`);
+  const rev = join((n) => `N(T${n})${hold(n)}`);
+  const revWith = (X: string) => join((n) => `N(T${n})*(${X}${n}<>"")${hold(n)}`);
+  const f = (L: string, formula: string | null): CellWrite => ({ row: tr, col: IDX[L]!, value: formula === null ? null : { formula } });
+  const out: CellWrite[] = [
+    f("AV", sum("AV")), f("AX", sum("AX")), f("AY", sum("AY")), f("BD", sum("BD")),
+    f("AW", `IFERROR(AV${r}/(${rev}),"")`), f("AZ", `IFERROR(AY${r}/(${rev}),"")`), f("BA", `IFERROR(BD${r}/(${rev}),"")`),
+    ...["BH", "BI", "BJ", "BK", "BL"].map((X) => f(X, `IF((${count(X)})=0,"",${sum(X)})`)),
+    f("BM", `IF(COUNT(BH${r}:BL${r})=0,"",SUM(BH${r}:BL${r}))`),
+  ];
+  if (jccCol) {
+    const den = join((n) => `N(T${n})*(${jccCol}${n}=TRUE)${hold(n)}`);
+    const gp = join((n) => `N(BN${n})*(${jccCol}${n}=TRUE)${hold(n)}`);
+    out.push(f("BN", `IF((${den})=0,"",${gp})`), f("BO", `IF((${den})=0,"",BN${r}/(${den}))`));
+  } else {
+    out.push(f("BN", null), f("BO", null));
+  }
+  [["BP", "BH"], ["BQ", "BI"], ["BR", "BJ"], ["BS", "BK"]].forEach(([P, X]) => out.push(f(P!, `IF((${revWith(X!)})=0,"",${X}${r}/(${revWith(X!)}))`)));
+  out.push(f("BB", `IF(BO${r}="","",BO${r})`), f("BC", `IF(OR(BA${r}="",BB${r}=""),"",BB${r}-BA${r})`), f("BE", `IF(BN${r}="","",BN${r})`));
+  return out;
+}
 
 const cellStr = (v: CellValue | undefined) => (v === null || v === undefined ? "" : String(v).trim());
 
@@ -481,6 +553,8 @@ export interface PlanOptions {
   removeEmptyStale?: boolean;
   /** Write the Sales Pre-Approved / Unscheduled block. Default: on whenever the month summary is. */
   preApproved?: boolean;
+  /** Own the estimate / GP block: job-row estimate formulas and every total row's estimate and actual totals (SHEET_COST_TOTALS). Default off. */
+  costTotals?: boolean;
 }
 
 export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanOptions): Plan {
@@ -489,7 +563,7 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const grid: CellValue[][] = gridIn.map((r) => [...r]);
   const ops: PlanOp[] = [];
   const summary: PlanSummary = {
-    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, preApproved: null, weeksSplit: [], cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0,
+    headerCreated: false, summaryCreated: false, blocksCreated: [], jobsAdded: 0, jobsUpdated: 0, jobsNotThisWeek: 0, jobsRemoved: 0, jobsAdopted: 0, jobsElsewhere: 0, jobsUnmatched: 0, preApproved: null, weeksSplit: [], cellsWritten: 0, weeks: [], months: [], locks: [], columnsFollowed: [], headersRenamed: [], checkboxLeftoversCleared: 0, costBlock: null,
   };
   // Write each synced value where the tab's heading for it sits.
   const headerMap = headerColumnMap(grid[0]);
@@ -527,7 +601,8 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
    * team's: the sheet computes them from synced cells, and a 0.0% on an
    * otherwise empty row is not a reason to keep it.
    */
-  const HAND_COLUMNS = (MASTER_MANUAL as Column[]).filter((c) => !c.formula);
+  // With the cost block on, the estimate columns are the automation's: not carried, not a reason to keep a row.
+  const HAND_COLUMNS = (MASTER_MANUAL as Column[]).filter((c) => !c.formula && !(opts.costTotals && OWNED_COLS.has(c.col)));
   const hasHandFilled = (cells: CellValue[] | undefined) => HAND_COLUMNS.some((c) => {
     const v = cells?.[ACTIVE[c.col]!];
     if (v === null || v === undefined || v === false) return false;
@@ -926,6 +1001,10 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
   const months = new Set(ordered.map((w) => monthOf(w.from)));
   for (const b of parseBlocks(grid)) if (months.has(monthOf(b.from))) writeCumulative(b.from);
 
+  // The estimate / GP block, off the final grid so every row number is the one
+  // the sheet will have once the inserts and deletes above have run.
+  if (opts.costTotals) writeCostBlock(months);
+
   // Column B was a checkbox column: Google put TRUE/FALSE in every cell of
   // it, and dropping the rule left them showing as text on the rows the
   // feed never writes (week labels, totals, spacers, rows stamped as not
@@ -967,6 +1046,78 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const ownJobs: [number, number] | null = me.totalIdx > me.labelIdx + 1 ? [me.labelIdx + 1, me.totalIdx - 1] : null;
     const below: [number, number] | null = endRow > cumulativeIdx ? [cumulativeIdx + 1, endRow] : null;
     write(cumulativeRowCells(cumulativeIdx, ownJobs, below));
+  }
+
+  /**
+   * Estimate formulas on every job row of the touched months and the
+   * pre-approved block, and estimate / actual totals on their Weekly Total,
+   * Cumulative and Month at a Glance rows. Skipped, with the reason in the
+   * summary, if any column it writes by letter does not carry its heading.
+   */
+  function writeCostBlock(touched: Set<string>): void {
+    const hdr = grid[0] ?? [];
+    const norm = (v: CellValue | undefined) => cellStr(v).toLowerCase().replace(/[^a-z0-9$%]+/g, " ").trim();
+    for (const L of COST_BLOCK_COLS) {
+      const want = COLS.find((c) => c.col === L)!.header;
+      if (ACTIVE[L] !== IDX[L] || norm(hdr[IDX[L]!]) !== norm(want)) {
+        summary.costBlock = { status: `skipped: column ${L} does not carry "${want}"`, jobRows: 0, totalRows: 0, monthRows: 0 };
+        return;
+      }
+    }
+    const taken = new Set(Object.values(ACTIVE));
+    const byHeader = (name: string) => { const i = hdr.findIndex((v) => norm(v) === norm(name)); return i >= 0 && !taken.has(i) ? colLetter(i) : null; };
+    const holdCol = byHeader(RECOGNITION_HEADER), jccCol = byHeader(FINAL_JCC_HEADER);
+    const stale = (i: number) => STALE_STATUSES.includes(cellStr(grid[i]?.[ACTIVE["HY"]!]));
+    const idOf = (i: number) => cellStr(grid[i]?.[JOB_ID_COL()]);
+    const cells: CellWrite[] = [];
+    const counts = { jobRows: 0, totalRows: 0, monthRows: 0 };
+    const estimates = (i: number) => { counts.jobRows++; for (const [L, fn] of Object.entries(EST_JOB_FORMULAS)) cells.push({ row: i, col: IDX[L]!, value: { formula: fn(i + 1) } }); };
+    const liveRows = (b: Block) => b.jobIdx.filter((i) => !stale(i));
+
+    const blocks = parseBlocks(grid);
+    for (const b of blocks) {
+      if (!touched.has(monthOf(b.from))) continue;
+      b.jobIdx.forEach(estimates);
+      if (b.totalIdx !== null) { cells.push(...costTotalCells(b.totalIdx, liveRows(b), holdCol, jccCol)); counts.totalRows++; }
+      if (b.cumulativeIdx !== null) {
+        // This week and the earlier weeks of its month, each job once (a job can sit in two blocks).
+        const seen = new Set<string>(), rows: number[] = [];
+        for (const o of blocks.filter((x) => monthOf(x.from) === monthOf(b.from) && x.from <= b.from)) {
+          for (const i of liveRows(o)) { const id = idOf(i); if (id) { if (seen.has(id)) continue; seen.add(id); } rows.push(i); }
+        }
+        cells.push(...costTotalCells(b.cumulativeIdx, rows, holdCol, jccCol)); counts.totalRows++;
+      }
+    }
+    const preLabel = grid.findIndex((r, i) => i > 0 && cellStr(r?.[0]) === PREAPPROVED_LABEL);
+    if (preLabel >= 0) preBlockRows(preLabel).forEach(estimates);
+
+    // Month at a Glance: the same jobs the line counts, at their row in the week their install starts.
+    const markerIdx = grid.findIndex((r, i) => i > 0 && cellStr(r?.[0]) === SUMMARY_MARKER);
+    if (opts.monthSummary !== false && markerIdx >= 0) {
+      const all = opts.allRows ?? weeks.flatMap((w) => w.rows);
+      const rowOf = new Map<string, number>();
+      for (const b of blocks) for (const i of liveRows(b)) {
+        const id = idOf(i); if (!id) continue;
+        const job = all.find((r) => r.jobId === id); const first = job ? firstInstallDay(job) : null;
+        if (!rowOf.has(id) || (first && first >= b.from && first <= b.to)) rowOf.set(id, i);
+      }
+      const thisMonth = monthOf(today);
+      const [y, m] = thisMonth.split("-").map(Number);
+      const prevMonth = `${m === 1 ? y! - 1 : y}-${String(m === 1 ? 12 : m! - 1).padStart(2, "0")}`;
+      let line = markerIdx + 1;
+      for (const ym of [thisMonth, prevMonth]) {
+        const projected = all.filter((r) => { const d = firstInstallDay(r); return d !== null && monthOf(d) === ym; });
+        const started = projected.filter((r) => firstInstallDay(r)! <= today && STARTED_STAGES.has(stageKey(r.stage)));
+        for (const set of [projected, started]) {
+          if (!cellStr(grid[line]?.[0]).startsWith(monthTitle(ym))) { line++; continue; }
+          const rows = set.map((r) => rowOf.get(r.jobId)).filter((i): i is number => i !== undefined).sort((a, b) => a - b);
+          cells.push(...costTotalCells(line, rows, holdCol, jccCol)); counts.monthRows++;
+          line++;
+        }
+      }
+    }
+    write(cells);
+    summary.costBlock = { status: `written${holdCol ? `; HOLD from ${holdCol}` : "; no Recognition column yet"}${jccCol ? `; Final JCC from ${jccCol}` : "; no Final Job Costing Complete column"}`, ...counts };
   }
   }
 }
