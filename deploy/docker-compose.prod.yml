@@ -131,6 +131,8 @@ services:
       SHEET_DASHBOARD_ENABLED: ${SHEET_DASHBOARD_ENABLED:-true}
       SHEET_DASHBOARD_TAB: ${SHEET_DASHBOARD_TAB:-[AUTOMATION] Production KPIs DASHBOARD}
       SHEET_DASHBOARD_DATA_TAB: ${SHEET_DASHBOARD_DATA_TAB:-[AUTOMATION] Dashboard Data}
+      # The automation owns the estimate / GP block and its totals (Phase 1, 2026-10-07). Off until switched on.
+      SHEET_COST_TOTALS: ${SHEET_COST_TOTALS:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEXT_ACTION_MODEL: ${NEXT_ACTION_MODEL:-claude-haiku-4-5}
       NEXT_ACTION_ENABLED: ${NEXT_ACTION_ENABLED:-true}
