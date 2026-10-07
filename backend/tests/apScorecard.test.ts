@@ -133,6 +133,29 @@ describe("the automated week blocks", () => {
   });
 });
 
+describe("what is not copied from Pema's tab, and what counts as paid", () => {
+  const pema2 = parsePemaTab([
+    ["WEEK OF 10/5/2026"],
+    ["SUBCONTRACTORS"],
+    ["east orange", "Roscoe Coleman", "Lucy", 1630, null, null, null, null, "X", "Ck1372"],
+    [null, "Ridgewood / Bill O'Sullivan — LABOR", "Cesar Chuma", 3453.78, "Subcontractor — 22% Planning Estimate", "EST"],
+    ["FIXED EXPENSES / DEBT SERVICE"],
+    [null, "PRIOR-WEEK SUBCONTRACTOR CATCH-UP — CASH ONLY", "9/21 + 9/28 SUBS", 25280],
+    [null, "BOA 6825 — WEEKLY PAYDOWN", "BANK OF AMERICA", 2500],
+    ["WEEK OF 10/12/2026"],
+    ["SUBCONTRACTORS"],
+  ] as never);
+  it("skips ChatGPT's planning-estimate lines and the catch-up lump, keeps Danny's check line as paid, and does not add the job again a week later", () => {
+    const coleman = job("RC", { label: "East Orange/197 Hollywood Avenue/Rosco Coleman", firstInstall: "2026-10-06", lastInstall: "2026-10-07", billLabor: 1630 });
+    const plan = planApScorecard({ today: TODAY, jobs: [coleman], pema: pema2, startRow: 5, syncedAt: null });
+    const w1 = blockOf(plan.rows, "2026-10-05"), w2 = blockOf(plan.rows, "2026-10-12");
+    expect(lines(w1, "sub").map((r) => r.cells[1])).toEqual(["Roscoe Coleman"]);            // Danny's line copied, ChatGPT's estimate not
+    expect(lines(w1, "fix").map((r) => r.cells[1])).toEqual(["BOA 6825 — WEEKLY PAYDOWN"]);  // no catch-up lump
+    expect(lines(w2, "sub")).toHaveLength(0);                                                 // already paid by Danny on 10/5
+    expect(plan.weeks[0]!.subs).toBe(0);                                                      // a check number = paid, not cash still needed
+  });
+});
+
 describe("the live area", () => {
   it("starts at the current week's block, or below the frozen weeks, or under the panel on a new tab", () => {
     expect(liveStartRow([], TODAY)).toBe(5);

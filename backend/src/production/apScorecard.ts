@@ -140,7 +140,12 @@ export function namesJob(typed: string, label: string): boolean {
   if (!surname || customer.length === 0) return false;
   return customer.some((w) => w === surname || (surname.length >= 5 && distance(w, surname) <= 2));
 }
-const isPaid = (cells: CellValue[]) => str(cells[10]) !== "" || /^(y|yes|true|x)$/i.test(str(cells[11])) || /paid/i.test(str(cells[7]));
+/** Danny marked it paid: a check number (J), Final WO paid (K), cleared (L) or a PAID status. */
+const isPaid = (cells: CellValue[]) => str(cells[9]) !== "" || str(cells[10]) !== "" || /^(y|yes|true|x)$/i.test(str(cells[11])) || /^paid/i.test(str(cells[7]));
+/** ChatGPT's own per-job estimate lines in Pema's tab: replaced by ours, never copied. */
+const isPlanningEstimate = (cells: CellValue[]) => /planning estimate/i.test(str(cells[4])) || /—\s*(LABOR|MATERIAL)/i.test(str(cells[1]));
+/** ChatGPT's "prior-week subcontractor catch-up" lump: replaced by carrying unpaid subs forward (decision 2). */
+const isCatchUp = (cells: CellValue[]) => /catch-?up/i.test(str(cells[1]));
 
 export interface ApPlanInput {
   today: string;
@@ -170,15 +175,18 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
   const blank = (): Cell[] => Array(NCOL).fill(null);
   const push = (kind: RowKind, cells: Cell[]) => { rows.push({ kind, cells: [...cells, ...Array(Math.max(0, NCOL - cells.length)).fill(null)].slice(0, NCOL) }); return rows.length - 1 + input.startRow + 1; };
   const sumRange = (a: number, b: number) => (b >= a ? { formula: `SUM(D${a}:D${b})` } : 0);
-  const unpaidRange = (a: number, b: number) => (b >= a ? `SUMIFS(D${a}:D${b},H${a}:H${b},"<>PAID",L${a}:L${b},"<>Y")` : "0");
+  const unpaidRange = (a: number, b: number) => (b >= a ? `SUMIFS(D${a}:D${b},H${a}:H${b},"<>PAID",L${a}:L${b},"<>Y",J${a}:J${b},"",K${a}:K${b},"")` : "0");
 
   // Subcontractor lines by due week, Danny's typed lines matched by job.
   const subDue = new Map<string, ApJob[]>();
   for (const j of live) { const done = completionDay(j); if (!done) continue; const due = addDays(mondayOf(done), 7); (subDue.get(due) ?? subDue.set(due, []).get(due)!).push(j); }
-  const dannyFor = (monday: string, j: ApJob) => input.pema.get(monday)?.lines.find((l) => l.section === "SUBCONTRACTORS" && namesJob(str(l.cells[1]), j.label));
+  const dannyFor = (monday: string, j: ApJob) => input.pema.get(monday)?.lines.find((l) => l.section === "SUBCONTRACTORS" && !isPlanningEstimate(l.cells) && namesJob(str(l.cells[1]), j.label));
+  /** The earlier week (before `monday`) where Danny already paid this job's sub, if any: that line stays there, no new line here. */
+  const paidEarlier = (monday: string, j: ApJob) => [...input.pema.values()].find((w) => w.monday < monday
+    && w.lines.some((l) => l.section === "SUBCONTRACTORS" && !isPlanningEstimate(l.cells) && isPaid(l.cells) && namesJob(str(l.cells[1]), j.label)))?.monday ?? null;
   // Carried: due in a past week (from carryFrom), not marked paid in that week's line.
   const carried: { job: ApJob; from: string }[] = [];
-  for (const [due, list] of subDue) if (due < current && due >= carryFrom) for (const j of list) { const d = dannyFor(due, j); if (!d || !isPaid(d.cells)) carried.push({ job: j, from: due }); }
+  for (const [due, list] of subDue) if (due < current && due >= carryFrom) for (const j of list) { const d = dannyFor(due, j); if ((!d || !isPaid(d.cells)) && !paidEarlier(due, j)) carried.push({ job: j, from: due }); }
 
   for (const monday of mondays) {
     const sunday = addDays(monday, 6);
@@ -194,7 +202,7 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
     const used = new Set<PemaLine>();
     const subLines: { job: ApJob; carriedFrom: string | null }[] = [
       ...(monday === current ? carried.map((c) => ({ job: c.job, carriedFrom: c.from })) : []),
-      ...(subDue.get(monday) ?? []).map((job) => ({ job, carriedFrom: null })),
+      ...(subDue.get(monday) ?? []).filter((job) => !paidEarlier(monday, job)).map((job) => ({ job, carriedFrom: null })),
     ];
     for (const { job, carriedFrom } of subLines) {
       const danny = dannyFor(monday, job) ?? (carriedFrom ? dannyFor(carriedFrom, job) : undefined);
@@ -210,7 +218,7 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
         [carriedFrom ? `Carried from week of ${fmtDay(carriedFrom)}.` : "", `Completion ${done ? fmtDay(done) : "?"}${job.completed ? " (Date Completed)" : job.mtc ? ` (MTC ${job.mtc} days)` : ""}.`, str(danny?.cells[12])].filter(Boolean).join(" "),
         danny ? `${SRC_SHEET} + Danny's line` : SRC_SHEET]);
     }
-    for (const l of pema?.lines.filter((x) => x.section === "SUBCONTRACTORS" && !used.has(x)) ?? []) push("sub", [...l.cells.slice(0, 13), SRC_PEMA]);
+    for (const l of pema?.lines.filter((x) => x.section === "SUBCONTRACTORS" && !used.has(x) && !isPlanningEstimate(x.cells)) ?? []) push("sub", [...l.cells.slice(0, 13), SRC_PEMA]);
     const subEnd = rowNo() - 1;
     rows[subHead - input.startRow - 1]!.cells[3] = sumRange(subStart, subEnd);
 
@@ -225,8 +233,7 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
         actual ? "ACT" : "EST", daySerial(job.firstInstall!), "MATERIAL THIS WEEK", null, null, null, null,
         actual ? "Actual material bills in JobProgress." : `30% of ${Math.round(job.totalRev).toLocaleString("en-US")} revenue; replace with the actual quote / bill.`, SRC_SHEET]);
     }
-    const jobMaterialLine = (cells: CellValue[]) => /—\s*.*MATERIAL/i.test(str(cells[1])) || /planning estimate/i.test(str(cells[4]));
-    for (const l of pema?.lines.filter((x) => x.section === "MATERIAL VENDORS" && !jobMaterialLine(x.cells)) ?? []) push("mat", [...l.cells.slice(0, 13), SRC_PEMA]);
+    for (const l of pema?.lines.filter((x) => x.section === "MATERIAL VENDORS" && !isPlanningEstimate(x.cells)) ?? []) push("mat", [...l.cells.slice(0, 13), SRC_PEMA]);
     const matEnd = rowNo() - 1;
     rows[matHead - input.startRow - 1]!.cells[3] = sumRange(matStart, matEnd);
 
@@ -234,7 +241,7 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
     const fixHead = push("fixHead", ["FIXED EXPENSES / DEBT SERVICE", null, null, null, null, null, null, null, null, null, null, null,
       "Copied from AP WEEKLY SCORECARD 5/2026 for the same week."]);
     const fixStart = rowNo();
-    for (const l of pema?.lines.filter((x) => x.section === "FIXED EXPENSES / DEBT SERVICE") ?? []) push("fix", [...l.cells.slice(0, 13), SRC_PEMA]);
+    for (const l of pema?.lines.filter((x) => x.section === "FIXED EXPENSES / DEBT SERVICE" && !isCatchUp(x.cells)) ?? []) push("fix", [...l.cells.slice(0, 13), SRC_PEMA]);
     const fixEnd = rowNo() - 1;
     rows[fixHead - input.startRow - 1]!.cells[3] = sumRange(fixStart, fixEnd);
 
@@ -291,7 +298,11 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
     push("notes", ["AP OWNER / REVIEW NOTES", null, null, null, null, null, null, null, null, null, null, null, str(v("AP OWNER / REVIEW NOTES")) || null, SRC_PEMA]);
     push("blank", blank());
 
-    const sumOf = (from: number, to: number) => { let n = 0; for (let r = from; r <= to; r++) n += num(rows[r - input.startRow - 1]?.cells[3]) ?? 0; return round2(n); };
+    const sumOf = (from: number, to: number) => {
+      let n = 0;
+      for (let r = from; r <= to; r++) { const c = rows[r - input.startRow - 1]?.cells ?? []; if (!isPaid(c as CellValue[]) && !/^y$/i.test(str(c[11] as CellValue))) n += num(c[3]) ?? 0; }
+      return round2(n);
+    };
     summaries.push({ monday, subs: sumOf(subStart, subEnd), materials: sumOf(matStart, matEnd), carting: sumOf(cartStart, cartEnd), fixed: sumOf(fixStart, fixEnd),
       ours: round2(sumOf(subStart, subEnd) + sumOf(matStart, matEnd) + sumOf(cartStart, cartEnd) + sumOf(fixStart, fixEnd) + (remote ?? 0) + (acr ?? 0)), pema: pemaNeed });
   }
