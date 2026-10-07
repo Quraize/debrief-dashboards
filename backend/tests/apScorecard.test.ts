@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  planApScorecard, parsePemaTab, completionDay, workingDayEnd, namesJob, liveStartRow, daySerial, type ApJob, type OutRow,
+  planApScorecard, parsePemaTab, completionDay, workingDayEnd, namesJob, liveStartRow, daySerial, planAmount, type ApJob, type OutRow,
 } from "../src/production/apScorecard.js";
 
 const job = (id: string, over: Partial<ApJob> = {}): ApJob => ({
@@ -153,6 +153,31 @@ describe("what is not copied from Pema's tab, and what counts as paid", () => {
     expect(lines(w1, "fix").map((r) => r.cells[1])).toEqual(["BOA 6825 — WEEKLY PAYDOWN"]);  // no catch-up lump
     expect(lines(w2, "sub")).toHaveLength(0);                                                 // already paid by Danny on 10/5
     expect(plan.weeks[0]!.subs).toBe(0);                                                      // a check number = paid, not cash still needed
+  });
+});
+
+describe("the larger of bills so far and the estimate, until the job is complete", () => {
+  it("decides each case the same way", () => {
+    expect(planAmount(3642.11, 15000, false)).toEqual({ amount: 15000, basis: "larger-estimate" }); // MGC: a first partial bill
+    expect(planAmount(18000, 15000, false)).toEqual({ amount: 18000, basis: "bills" });              // bills passed the estimate
+    expect(planAmount(14000, 15000, true)).toEqual({ amount: 14000, basis: "bills" });               // complete: what it cost
+    expect(planAmount(null, 15000, true)).toEqual({ amount: 15000, basis: "estimate" });             // no bills at all: the estimate
+    expect(planAmount(0, 2200, false)).toEqual({ amount: 2200, basis: "estimate" });
+  });
+  it("applies to material and labor lines, never to an amount Danny paid", () => {
+    const mgc = job("MGC", { firstInstall: "2026-10-12", lastInstall: "2026-10-12", totalRev: 50000, materialEst: 15000, billMaterial: 3642.11 });
+    const done = job("DONE", { firstInstall: "2026-10-13", lastInstall: "2026-10-13", materialEst: 3000, billMaterial: 2500, stage: "COMPLETED NEED FINAL PAYMENT!!" });
+    const fag = job("FAG", { firstInstall: "2026-10-01", lastInstall: "2026-10-10", laborEst: 6153.62, billLabor: 2385 });
+    const plan = planApScorecard({ today: TODAY, jobs: [mgc, done, fag], pema: new Map(), startRow: 5, syncedAt: null });
+    const w2 = blockOf(plan.rows, "2026-10-12");
+    const mat = (id: string) => lines(w2, "mat").find((r) => String(r.cells[1]).includes(`Customer ${id}`))!;
+    expect(mat("MGC").cells[3]).toBe(15000);
+    expect(mat("MGC").cells[5]).toBe("EST");
+    expect(String(mat("MGC").cells[12])).toContain("$3,642.11");
+    expect(mat("DONE").cells[3]).toBe(2500);   // complete: real bills only
+    expect(mat("DONE").cells[5]).toBe("ACT");
+    const sub = lines(w2, "sub").find((r) => String(r.cells[1]).includes("Customer FAG"))!;
+    expect(sub.cells[3]).toBe(6153.62);
   });
 });
 

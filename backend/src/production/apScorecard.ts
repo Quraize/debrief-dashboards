@@ -59,6 +59,8 @@ export interface ApJob {
   materialEst: number | null; laborEst: number | null;
   billMaterial: number | null; billLabor: number | null; billCarting: number | null;
   hold: boolean;
+  /** Final Job Costing Complete ticked on the job sheet. */
+  finalJcc?: boolean;
   /** For expected collections (the Revenue & AR rule). */
   pifStatus: string | null; completionDate: string | null; gross: number | null; changeOrders: number | null; deposit: number | null; progressPayments: number | null;
 }
@@ -140,6 +142,23 @@ export function namesJob(typed: string, label: string): boolean {
   if (!surname || customer.length === 0) return false;
   return customer.some((w) => w === surname || (surname.length >= 5 && distance(w, surname) <= 2));
 }
+/**
+ * The cash-planning amount for a cost (decision 2026-10-07, "the larger"):
+ * while a job is still going, the LARGER of its bills so far and the
+ * estimate, so a first partial bill (MGC: one $3,642 bill on a $50,000 job)
+ * never hides the rest still to come; once the job is complete (a completed
+ * stage, or Final Job Costing Complete ticked) its bills only. No bills at
+ * all: the estimate. `basis` says which one was used, for the line's label.
+ */
+export function planAmount(bills: number | null, estimate: number, complete: boolean): { amount: number; basis: "bills" | "estimate" | "larger-estimate" } {
+  const b = bills && bills > 0 ? bills : null;
+  if (b === null) return { amount: round2(estimate), basis: "estimate" };
+  if (complete || b >= estimate) return { amount: round2(b), basis: "bills" };
+  return { amount: round2(estimate), basis: "larger-estimate" };
+}
+const isComplete = (j: Pick<ApJob, "stage" | "finalJcc">) => isCompletedStage(j.stage) || !!j.finalJcc;
+const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** Danny marked it paid: a check number (J), Final WO paid (K), cleared (L) or a PAID status. */
 const isPaid = (cells: CellValue[]) => str(cells[9]) !== "" || str(cells[10]) !== "" || /^(y|yes|true|x)$/i.test(str(cells[11])) || /^paid/i.test(str(cells[7]));
 /** ChatGPT's own per-job estimate lines in Pema's tab: replaced by ours, never copied. */
@@ -207,15 +226,18 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
     for (const { job, carriedFrom } of subLines) {
       const danny = dannyFor(monday, job) ?? (carriedFrom ? dannyFor(carriedFrom, job) : undefined);
       if (danny) used.add(danny);
-      const actual = job.billLabor && job.billLabor > 0 ? job.billLabor : null;
       const typedAmount = danny ? num(danny.cells[3]) : null;
-      const amount = round2(typedAmount ?? actual ?? job.laborEst ?? job.totalRev * LABOR_PCT);
+      const plan = planAmount(job.billLabor, job.laborEst ?? job.totalRev * LABOR_PCT, isComplete(job));
+      const amount = typedAmount !== null ? round2(typedAmount) : plan.amount;
+      const actualLine = typedAmount !== null || plan.basis === "bills";
+      const basisNote = typedAmount !== null ? "" : plan.basis === "larger-estimate"
+        ? `Bills so far ${usd(job.billLabor!)} are below the 22% estimate; the estimate is used until the job is complete.` : "";
       const done = completionDay(job);
       push("sub", [done ? daySerial(done) : null, `${job.label} — LABOR`, str(danny?.cells[2]) || job.sub || "TBD", amount,
-        actual || typedAmount ? "Subcontractor — actual" : "Subcontractor — 22% Planning Estimate", actual || typedAmount ? "ACT" : "EST",
+        actualLine ? "Subcontractor — actual" : "Subcontractor — 22% Planning Estimate", actualLine ? "ACT" : "EST",
         daySerial(monday), danny && isPaid(danny.cells) ? "PAID" : "PLANNED — VERIFY COMPLETION BEFORE PAY",
         danny?.cells[8] ?? null, danny?.cells[9] ?? null, danny?.cells[10] ?? null, danny?.cells[11] ?? null,
-        [carriedFrom ? `Carried from week of ${fmtDay(carriedFrom)}.` : "", `Completion ${done ? fmtDay(done) : "?"}${job.completed ? " (Date Completed)" : job.mtc ? ` (MTC ${job.mtc} days)` : ""}.`, str(danny?.cells[12])].filter(Boolean).join(" "),
+        [carriedFrom ? `Carried from week of ${fmtDay(carriedFrom)}.` : "", `Completion ${done ? fmtDay(done) : "?"}${job.completed ? " (Date Completed)" : job.mtc ? ` (MTC ${job.mtc} days)` : ""}.`, basisNote, str(danny?.cells[12])].filter(Boolean).join(" "),
         danny ? `${SRC_SHEET} + Danny's line` : SRC_SHEET]);
     }
     for (const l of pema?.lines.filter((x) => x.section === "SUBCONTRACTORS" && !used.has(x) && !isPlanningEstimate(x.cells)) ?? []) push("sub", [...l.cells.slice(0, 13), SRC_PEMA]);
@@ -227,11 +249,13 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
       "Material is bought in the install week. 30% of revenue is the cash-planning reserve until actual bills arrive."]);
     const matStart = rowNo();
     for (const job of live.filter((j) => inWeek(j.firstInstall)).sort((a, b) => a.firstInstall!.localeCompare(b.firstInstall!))) {
-      const actual = job.billMaterial && job.billMaterial > 0 ? job.billMaterial : null;
+      const plan = planAmount(job.billMaterial, job.materialEst ?? job.totalRev * MATERIAL_PCT, isComplete(job));
+      const note = plan.basis === "bills" ? "Actual material bills in JobProgress."
+        : plan.basis === "larger-estimate" ? `Bills so far ${usd(job.billMaterial!)} are below the 30% estimate; the estimate is used until the job is complete.`
+        : `30% of ${Math.round(job.totalRev).toLocaleString("en-US")} revenue; replace with the actual quote / bill.`;
       push("mat", [daySerial(job.firstInstall!), `${job.label} — MATERIAL`, job.vendor || "TBD — SHOP QXO / UNIVERSAL / LOCAL",
-        round2(actual ?? job.materialEst ?? job.totalRev * MATERIAL_PCT), actual ? "Materials — JobProgress bills" : "Material Vendor — 30% Planning Estimate",
-        actual ? "ACT" : "EST", daySerial(job.firstInstall!), "MATERIAL THIS WEEK", null, null, null, null,
-        actual ? "Actual material bills in JobProgress." : `30% of ${Math.round(job.totalRev).toLocaleString("en-US")} revenue; replace with the actual quote / bill.`, SRC_SHEET]);
+        plan.amount, plan.basis === "bills" ? "Materials — JobProgress bills" : "Material Vendor — 30% Planning Estimate",
+        plan.basis === "bills" ? "ACT" : "EST", daySerial(job.firstInstall!), "MATERIAL THIS WEEK", null, null, null, null, note, SRC_SHEET]);
     }
     for (const l of pema?.lines.filter((x) => x.section === "MATERIAL VENDORS" && !isPlanningEstimate(x.cells)) ?? []) push("mat", [...l.cells.slice(0, 13), SRC_PEMA]);
     const matEnd = rowNo() - 1;
@@ -254,8 +278,9 @@ export function planApScorecard(input: ApPlanInput): ApPlan {
     push("cart", [null, "WEEKLY CARTING / DUMPSTER RESERVE", "CARTING / DEBRIS", round2(reserveBase * CARTING_PCT), "Carting / Debris COGS", "EST", null, "RESERVE",
       null, null, null, null, `3.5% planning reserve on $${Math.round(reserveBase).toLocaleString("en-US")} scheduled production for ${fmtDay(monday)}–${fmtDay(sunday)}.`, SRC_SHEET]);
     for (const j of starting.filter((x) => x.billCarting && x.billCarting > 0)) {
-      push("cart", [daySerial(j.firstInstall!), `${j.label} — CARTING`, "CARTING / DEBRIS", round2(j.billCarting!), "Carting / Debris COGS", "ACT", daySerial(j.firstInstall!), null,
-        null, null, null, null, "Actual carting bill in JobProgress.", SRC_SHEET]);
+      const plan = planAmount(j.billCarting, j.totalRev * CARTING_PCT, isComplete(j));
+      push("cart", [daySerial(j.firstInstall!), `${j.label} — CARTING`, "CARTING / DEBRIS", plan.amount, "Carting / Debris COGS", plan.basis === "bills" ? "ACT" : "EST", daySerial(j.firstInstall!), null,
+        null, null, null, null, plan.basis === "bills" ? "Actual carting bill in JobProgress." : `Bills so far ${usd(j.billCarting!)} are below 3.5%; the estimate is used until the job is complete.`, SRC_SHEET]);
     }
     const cartEnd = rowNo() - 1;
     rows[cartHead - input.startRow - 1]!.cells[3] = sumRange(cartStart, cartEnd);
@@ -330,6 +355,7 @@ export function buildApJobs(feed: SheetRow[], jobGrid: CellValue[][]): ApJob[] {
   const idx = headerColumnMap(jobGrid[0]).idx;
   const hdr = (jobGrid[0] ?? []).map((v) => str(v).toLowerCase());
   const recog = hdr.findIndex((h) => h === RECOGNITION_HEADER.toLowerCase());
+  const jcc = hdr.findIndex((h) => h === "final job costing complete");
   const sheetRow = new Map<string, CellValue[]>();
   for (const b of parseBlocks(jobGrid)) for (const i of b.jobIdx) {
     const r = jobGrid[i] ?? [];
@@ -348,6 +374,7 @@ export function buildApJobs(feed: SheetRow[], jobGrid: CellValue[][]): ApJob[] {
       materialEst: r ? num(r[colIndex("AV")]) : null, laborEst: r ? num(r[colIndex("AY")]) : null,
       billMaterial: f.actualMaterial, billLabor: f.actualLabor, billCarting: f.actualCarting,
       hold: !!r && recog >= 0 && str(r[recog]).toUpperCase() === "HOLD",
+      finalJcc: !!r && jcc >= 0 && (r[jcc] === true || str(r[jcc]).toUpperCase() === "TRUE"),
       pifStatus: f.pifStatus, completionDate: f.completionDate, gross: f.gross, changeOrders: f.changeOrders, deposit: f.deposit, progressPayments: f.progressPayments,
     };
   });
