@@ -242,7 +242,9 @@ export const EST_JOB_FORMULAS: Record<string, (r: number) => string> = {
   AY: (r) => ledgerEst(r, "Labor / Subcontractor", 22),
   AZ: (r) => `IFERROR(AY${r}/T${r},"")`,
   BA: (r) => `IF(T${r}="","",35%)`,
-  BB: (r) => `IF(BO${r}="","",BO${r})`,
+  // Blank until the job has an actual cost: with no costs, BO reads 0% and BB
+  // would show a false 0% GP (and a -35% DIFF) on every unstarted job.
+  BB: (r) => `IF(OR(BM${r}="",BO${r}=""),"",BO${r})`,
   BC: (r) => `IF(OR(BA${r}="",BB${r}=""),"",BB${r}-BA${r})`,
   BD: (r) => `IF(T${r}="","",T${r}*35%)`,
   BE: (r) => `IF(BN${r}="","",BN${r})`,

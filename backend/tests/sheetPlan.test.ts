@@ -763,6 +763,8 @@ describe("the estimate / GP block (costTotals, decision 5 and the self-healing t
     expect(g[j1 - 1]![AV]).toContain("'JOB COST / AP LEDGER'");
     expect(g[j1 - 1]![AV]).toContain(`$T${j1}*30%`);
     expect(g[j2 - 1]![AW]).toBe(`=IFERROR(AV${j2}/T${j2},"")`);
+    // GP% ACT stays blank until the job has an actual cost (no false 0% / -35% DIFF).
+    expect(g[j2 - 1]![colIndex("BB")]).toBe(`=IF(OR(BM${j2}="",BO${j2}=""),"",BO${j2})`);
     // Weekly Total: live rows only (the stale row 9 is out), HOLD left out, percentages from summed dollars.
     const total = g[t]!;
     const live = [j1, j2].sort((a, b) => a - b);
