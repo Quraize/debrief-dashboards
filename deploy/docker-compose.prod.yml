@@ -133,6 +133,8 @@ services:
       SHEET_DASHBOARD_DATA_TAB: ${SHEET_DASHBOARD_DATA_TAB:-[AUTOMATION] Dashboard Data}
       # The automation owns the estimate / GP block and its totals (Phase 1, 2026-10-07). Off until switched on.
       SHEET_COST_TOTALS: ${SHEET_COST_TOTALS:-false}
+      # [AUTOMATION]AP WEEKLY SCORECARD, rebuilt after each sheet push (off until switched on).
+      SHEET_AP_SCORECARD: ${SHEET_AP_SCORECARD:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEXT_ACTION_MODEL: ${NEXT_ACTION_MODEL:-claude-haiku-4-5}
       NEXT_ACTION_ENABLED: ${NEXT_ACTION_ENABLED:-true}

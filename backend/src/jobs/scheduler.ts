@@ -27,6 +27,7 @@ import { runJobStageSync } from "../production/syncJobStages.js";
 import { runCustomerSync, type CustomerSyncCounts } from "./syncCustomers.js";
 import { runDebriefReminders, reminderSchedule, type ReminderRunResult } from "../reminders/debriefReminders.js";
 import { pushWeeklyJobSheet, sheetPushSettings, type SheetPushResult } from "../production/sheetPush.js";
+import { pushApScorecard, apSettings } from "../production/apScorecard.js";
 import { runUniteCallSync, type UniteSyncCounts } from "../integrations/intermedia/syncCalls.js";
 import { runNextActions, nextActionSettings, type NextActionCounts } from "../production/nextActions.js";
 import { uniteConfig } from "../integrations/intermedia/client.js";
@@ -329,6 +330,12 @@ export async function handleSheetPushJob(
   const result = await push({ dryRun: false, startedBy: "sheet-scheduler" });
   if (result.status === "failed") throw new Error(result.errorMessage ?? "sheet push failed");
   if (result.status === "skipped") console.info(`[scheduler] sheet push skipped (${result.errorMessage})`);
+  // The automated AP scorecard reads the job sheet just written. Its failure is
+  // logged, never retried with the job sheet (SHEET_AP_SCORECARD=true turns it on).
+  if (result.status === "completed" && apSettings().enabled && !deps.push) {
+    const ap = await pushApScorecard({ dryRun: false });
+    if (ap.status !== "completed") console.warn(`[scheduler] AP scorecard ${ap.status}: ${ap.reason ?? ""}`);
+  }
   return result;
 }
 
