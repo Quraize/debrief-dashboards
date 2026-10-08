@@ -128,7 +128,7 @@ function Funnel({ f, activity, from, to, basis, reviewRow = false }) {
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Appointment Set" value={f.set} share={f.setRate} of="of valid" to={href("set", "Appointment Set")}
+        <Box tone="green" label="Appointment Set" value={f.set} share={f.asRate} rate="AS%" of={`of valid leads (${f.setLeads} of ${f.valid} got an appointment)`} to={href("set", "Appointment Set")}
           note={activity
             ? `Visits booked in this period, resets counted separately — the same basis as the Sales and Marketing dashboards.${f.setFromEarlier ? ` ${f.setFromEarlier} belong to leads that came in before this period.` : ""}`
             : "A sales appointment exists for the lead"} />

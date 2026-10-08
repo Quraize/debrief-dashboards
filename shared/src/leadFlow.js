@@ -247,6 +247,12 @@ export function leadFunnel(rows, opts = {}) {
     // Valid, so a share of valid would be a lie; the count of appointments
     // belonging to earlier leads is what the reader actually needs.
     set, notSet, setFromEarlier, setRate: activity ? null : pct(set, valid), notSetRate: pct(notSet, valid),
+    // AS% (Pema, 2026-10-09: appointments set ÷ valid leads), counted lead by
+    // lead so both sides are the same population: the valid leads that arrived
+    // in the range and have an appointment, over those valid leads. In activity
+    // mode the Set card counts visits (some for earlier leads), so AS% is not
+    // set ÷ valid there; it is (Valid − Not Set) ÷ Valid on either basis.
+    setLeads: valid - notSet, asRate: pct(valid - notSet, valid),
     /** True when Set rightward counts visits (the dashboards' basis) rather than leads. */
     byVisit,
     /** Sales appointments dated in the range, resets included — reconciles with the Marketing dashboard. */

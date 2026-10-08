@@ -227,3 +227,14 @@ describe("Rescheduled Before Appointment (2026-10-09)", () => {
     expect(f.rescheduledRate).toBe(25);             // 2 of 8 set
   });
 });
+
+describe("AS% = appointments set ÷ valid leads (Pema, 2026-10-09)", () => {
+  it("counts the valid leads that got an appointment over the valid leads, on either basis", () => {
+    const lead = (stage, has, inRange = true) => ({ current_stage: stage, has_appointment: has, created_in_range: inRange, appt_in_range: has });
+    const rows = [lead("Appointment Set", true), lead("Appointment Set", true), lead("Lead", false), lead("Appointment Set", true, false)];
+    for (const basis of ["activity", "cohort"]) {
+      const f = leadFunnel(rows, { basis });
+      expect([f.valid, f.setLeads, f.asRate]).toEqual([3, 2, 67]);
+    }
+  });
+});
