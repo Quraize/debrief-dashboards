@@ -55,7 +55,7 @@ export default function Home() {
 
       <DateRangeFilter filter={filter} setFilter={setFilter} customStart={cs} setCustomStart={setCs} customEnd={ce} setCustomEnd={setCe} />
 
-      <AppointmentFlow rangeLabel={rangeLabel} resultsHref={resultsHref} from={bounds?.start} to={bounds?.end || bounds?.start} />
+      <AppointmentFlow rangeLabel={rangeLabel} resultsHref={resultsHref} from={bounds?.start} to={bounds?.end || bounds?.start} reviewRow />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <QuickLink to="/submit" icon={ClipboardList} label="Submit Debrief" />
