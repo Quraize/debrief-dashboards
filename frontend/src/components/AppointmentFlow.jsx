@@ -97,9 +97,12 @@ function Funnel({ f, activity, from, to, basis, reviewRow = false }) {
         <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2 text-xs">
           {reasons.map((r) => (
             <Link key={r.key} to={href(`reason:${r.key}`, `Not Set — ${r.label}`)}
-              className="flex items-baseline justify-between gap-2 py-0.5 hover:text-accent">
+              className="flex items-center justify-between gap-3 py-1 hover:text-accent">
               <span className="text-muted-foreground">{r.label}</span>
-              <span className="font-semibold tabular-nums">{r.count} <span className="text-muted-foreground font-normal">{r.share}%</span></span>
+              <span className="flex items-center gap-2 tabular-nums">
+                <span className="text-sm font-bold">{r.count}</span>
+                <span className="inline-flex min-w-[3rem] justify-center rounded-full bg-slate-600 px-2 py-0.5 text-[11px] font-semibold text-white">{r.share}%</span>
+              </span>
             </Link>
           ))}
         </div>
@@ -204,6 +207,18 @@ const TONES = {
   slate: "bg-secondary/60 text-foreground border-border",
 };
 
+// The percentage as a solid pill in a deeper shade of the card's own colour, so
+// it reads at a glance next to the big number; the named rates (VL%, AR%, DR%,
+// SR%) are the headline ones and get the larger pill. "of leads" sits under it.
+const PILLS = {
+  navy: "bg-white/20 text-primary-foreground",
+  green: "bg-green-600 text-white",
+  red: "bg-red-600 text-white",
+  amber: "bg-amber-600 text-white",
+  gold: "bg-accent text-white",
+  slate: "bg-slate-600 text-white",
+};
+
 function Box({ tone, label, value, share, of, sub, note, to, rate }) {
   const dark = tone === "navy";
   const Tag = to ? Link : "div";
@@ -211,12 +226,15 @@ function Box({ tone, label, value, share, of, sub, note, to, rate }) {
   return (
     <Tag {...props} className={`block rounded-xl border p-3 ${TONES[tone]} ${to ? "transition-shadow hover:shadow-md hover:ring-2 hover:ring-accent/40 cursor-pointer" : ""}`}>
       <div className={`text-[11px] uppercase tracking-wide font-semibold ${dark ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{label}</div>
-      <div className="flex items-baseline gap-2 mt-0.5">
+      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
         <span className="text-2xl font-heading font-bold tabular-nums">{value}</span>
         {share != null && of && (
-          <span className={`text-xs font-semibold ${dark ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{rate && <span className="text-foreground">{rate} </span>}{share}% <span className="font-normal">{of}</span></span>
+          <span className={`inline-flex items-center rounded-full tabular-nums shadow-sm ${PILLS[tone]} ${rate ? "px-2.5 py-0.5 text-base font-bold" : "px-2 py-0.5 text-sm font-semibold"}`}>
+            {rate && <span className="mr-1 opacity-90">{rate}</span>}{share}%
+          </span>
         )}
       </div>
+      {share != null && of && <div className={`text-[11px] font-medium ${dark ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{of}</div>}
       {sub && <div className="text-sm font-semibold mt-0.5">{sub}</div>}
       {note && <div className={`text-[11px] mt-1 leading-snug ${dark ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{note}</div>}
     </Tag>
