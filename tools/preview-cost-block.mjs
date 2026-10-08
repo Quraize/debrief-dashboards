@@ -15,9 +15,18 @@ const weeks = pushWeeks(rows, today, s.weeksBack, s.weeksAhead, s.splitFrom);
 const grid = await c.getValues(a1(s.tab, "A1:HZ"));
 const opts = { now, today, allRows: rows, syncedAt: feed.sync?.finishedAt ?? null, lockWeeks: s.lockWeeks, removeEmptyStale: s.removeEmptyStale };
 const off = planSheet(grid, weeks, { ...opts, costTotals: false });
-const on = planSheet(grid, weeks, { ...opts, costTotals: true });
+const on = planSheet(grid, weeks, { ...opts, costTotals: true, commission: process.env.COMMISSION !== "false" });
 
 console.log("COST BLOCK:", JSON.stringify(on.summary.costBlock));
+{
+  // Commission columns: one job row and one total row, as they would be written.
+  const cw = on.ops.flatMap((o) => (o.type === "write" ? o.cells : []));
+  const cols = ["BV", "BW", "BX", "BY", "BZ", "CA"].map(colIndex);
+  const heads = cw.filter((x) => x.row === 0 && cols.includes(x.col)).map((x) => `${colLetter(x.col)}1="${x.value}"`);
+  console.log("Commission headings to create:", heads.join(", ") || "(none, already there)");
+  const sample = cw.find((x) => x.col === colIndex("BW") && x.row > 0 && String(on.grid[x.row]?.[colIndex("HU")] ?? "") !== "");
+  if (sample) for (const L of ["BW", "BY", "BZ", "CA"]) { const w = cw.find((x) => x.row === sample.row && x.col === colIndex(L)); if (w) console.log(`  job row ${sample.row + 1} ${L}: =${w.value.formula}`); }
+}
 console.log(`Rows removed: off ${off.summary.jobsRemoved}, on ${on.summary.jobsRemoved} (on may remove stale rows that only held estimates)`);
 const COLS = ["AV", "AX", "AY", "BD", "BH", "BI", "BJ", "BL", "BN", "BO"].map(colIndex);
 const writes = on.ops.flatMap((o) => (o.type === "write" ? o.cells : [])).filter((x) => COLS.includes(x.col));

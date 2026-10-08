@@ -39,6 +39,8 @@ export interface SheetPushSettings {
   dashboard: boolean; dashboardTab: string; dashboardDataTab: string;
   /** The automation owns the estimate / GP block and its totals (SHEET_COST_TOTALS=true). Off by default until reviewed. */
   costTotals: boolean;
+  /** Commission and GP before / after commission (SHEET_COMMISSION=true; needs SHEET_COST_TOTALS). Off by default until reviewed. */
+  commission: boolean;
 }
 
 export function sheetPushSettings(): SheetPushSettings {
@@ -57,6 +59,7 @@ export function sheetPushSettings(): SheetPushSettings {
     dashboardTab: process.env.SHEET_DASHBOARD_TAB || DASHBOARD_TAB_DEFAULT,
     dashboardDataTab: process.env.SHEET_DASHBOARD_DATA_TAB || DATA_TAB_DEFAULT,
     costTotals: process.env.SHEET_COST_TOTALS === "true",
+    commission: process.env.SHEET_COMMISSION === "true",
   };
   if (!hasKey) return { ...base, enabled: false, reason: "GOOGLE_SERVICE_ACCOUNT_JSON not set" };
   if (!spreadsheetId) return { ...base, enabled: false, reason: "GOOGLE_SHEETS_SPREADSHEET_ID not set" };
@@ -71,6 +74,8 @@ export interface SheetPushOptions {
   weeksAhead?: number;
   /** Override SHEET_COST_TOTALS for this run (a preview with the cost block on). */
   costTotals?: boolean;
+  /** Override SHEET_COMMISSION for this run. */
+  commission?: boolean;
   client?: GoogleSheetsClient;
   now?: Date;
   /** Injected in tests; the feed otherwise. */
@@ -121,7 +126,7 @@ export async function pushWeeklyJobSheet(options: SheetPushOptions): Promise<She
     const grid = await client.getValues(a1(settings.tab, "A1:HZ"));
     const plan = planSheet(grid, weeks, {
       now, today, allRows: sheetRows, syncedAt: feed.sync?.finishedAt ?? feed.sync?.startedAt ?? null, lockWeeks: settings.lockWeeks,
-      removeEmptyStale: settings.removeEmptyStale, costTotals: options.costTotals ?? settings.costTotals,
+      removeEmptyStale: settings.removeEmptyStale, costTotals: options.costTotals ?? settings.costTotals, commission: options.commission ?? settings.commission,
     });
     const requests = toRequests(plan, sheetId, { rowCount: tab.rowCount, columnCount: tab.columnCount });
 
@@ -342,6 +347,14 @@ function opRequests(op: PlanOp, sheetId: number, lastCol: number, lastRow: numbe
   if (op.type === "clearValidation") {
     // No rule = remove it, on every body row of the column.
     reqs.push({ setDataValidation: { range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: op.col, endColumnIndex: op.col + 1 } } });
+    return;
+  }
+  if (op.type === "numberFormat") {
+    const numberFormat = op.pattern === "money" ? { type: "CURRENCY", pattern: NUM_FMT.money } : { type: "PERCENT", pattern: NUM_FMT.pct };
+    reqs.push({ repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: op.col, endColumnIndex: op.col + 1 },
+      cell: { userEnteredFormat: { numberFormat } }, fields: "userEnteredFormat.numberFormat",
+    } });
     return;
   }
   if (op.type === "style") {

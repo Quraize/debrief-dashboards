@@ -135,6 +135,8 @@ services:
       SHEET_COST_TOTALS: ${SHEET_COST_TOTALS:-false}
       # [AUTOMATION]AP WEEKLY SCORECARD, rebuilt after each sheet push (off until switched on).
       SHEET_AP_SCORECARD: ${SHEET_AP_SCORECARD:-false}
+      # Commission and GP before / after commission on the job sheet (Phase 2b; needs SHEET_COST_TOTALS). Off until switched on.
+      SHEET_COMMISSION: ${SHEET_COMMISSION:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEXT_ACTION_MODEL: ${NEXT_ACTION_MODEL:-claude-haiku-4-5}
       NEXT_ACTION_ENABLED: ${NEXT_ACTION_ENABLED:-true}

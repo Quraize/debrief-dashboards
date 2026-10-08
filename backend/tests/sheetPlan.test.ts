@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  planSheet, firstInstallDay, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
+  planSheet, commissionJobFormulas, firstInstallDay, parseBlocks, parseWeekLabel, colIndex, colLetter, dateSerial, weekBounds, monthLines, lockDate, lockedBlocks, lockNote, headerColumnMap,
   SYNC_STATUS_STALE, SYNC_STATUS_UNMATCHED, SUMMARY_MARKER, CUMULATIVE_LABEL, PREAPPROVED_LABEL, SYNC_STATUS_LEFT_PREAPPROVED, isPreApproved, type CellWrite,
 } from "../src/production/sheetPlan.js";
 import { toRequests, lockRequests, pushWeeks, bringsMoney } from "../src/production/sheetPush.js";
@@ -809,5 +809,60 @@ describe("the estimate / GP block (costTotals, decision 5 and the self-healing t
     expect(String(g[projected]![AV])).toContain(`N(AV${j1})`);
     expect(String(g[projected]![AV])).toContain(`N(AV${j2})`);
     expect(plan.summary.costBlock?.monthRows).toBeGreaterThan(0);
+  });
+});
+
+
+describe("commission and GP before / after commission (Phase 2b)", () => {
+  const COMM = { hold: "BV", est: "BW", paid: "BX", par: "BY", coGp: "BZ", coPct: "CA" };
+  const base = (over: (h: (string | null)[]) => void = () => {}) => {
+    const h = headerRow();
+    h[colIndex("BT")] = "Final Job Costing Complete ";
+    over(h);
+    const r1: (string | null)[] = ["Wayne/1 Main St/Customer 1"]; r1[HU] = "1";
+    return [h, ["9/7/2026-9/13/2026"], r1, ["Weekly Total"], [CUMULATIVE_LABEL]] as (string | number | boolean | null)[][];
+  };
+  const weeks = [{ from: "2026-09-07", to: "2026-09-13", rows: [row("1"), row("2")] }];
+
+  it("uses Pema's PAR rule on actual GP once Final Job Costing is ticked, 10% of revenue until then", () => {
+    const f = commissionJobFormulas(9, COMM, "BT");
+    expect(f["BW"]).toBe('IF(N(T9)=0,"",IFERROR(IF(AND(BT9=TRUE,BN9<>""),IF(BN9/T9>=45%,T9*10%,IF(BN9/T9>=35%,BN9-T9*35%,MIN(T9*1%,200))),T9*10%),""))');
+    expect(f["BZ"]).toBe('IF(BN9="","",BN9-IF(BX9<>"",N(BX9),N(BW9)))');   // Danny's amount wins over the estimate
+    expect(f["CA"]).toBe('IF(BZ9="","",IFERROR(BZ9/T9,""))');
+    expect(f["BX"]).toBeUndefined();                                       // Commission Paid $ is never written
+  });
+
+  it("creates the headings in empty cells, fills every job row and the totals, HOLD out, and only sets number formats", () => {
+    const grid = base();
+    const plan = planSheet(grid, weeks, { ...NO_MONTH, costTotals: true, commission: true });
+    const g = gridAfter(grid, plan) as unknown as (string | null)[][];
+    expect(["BV", "BW", "BX", "BY", "BZ", "CA"].map((L) => g[0]![colIndex(L)])).toEqual(["Recognition", "Est. Commission $", "Commission Paid $", "PAR GP %", "Company GP $", "Company GP %"]);
+    const j1 = g.findIndex((r) => r?.[HU] === "1") + 1;
+    expect(String(g[j1 - 1]![colIndex("BW")])).toContain(`T${j1}*10%`);
+    expect(g[j1 - 1]![colIndex("BX")] ?? null).toBeNull();
+    const t = g.findIndex((r) => r?.[0] === "Weekly Total");
+    expect(String(g[t]![colIndex("BW")])).toContain(`N(BW${j1})*(BV${j1}<>"HOLD")`);
+    const formats = plan.ops.filter((o) => o.type === "numberFormat");
+    expect(formats.map((o) => (o as { col: number }).col)).toEqual(["BW", "BX", "BY", "BZ", "CA"].map(colIndex));
+    expect(plan.ops.some((o) => o.type === "style" && o.rows.some((r) => (r.cols?.[0] ?? -1) >= colIndex("BV")))).toBe(false); // no colour
+    expect(plan.summary.costBlock?.commission).toMatch(/^written in BV Recognition/);
+  });
+
+  it("is skipped, writing nothing, when a default column already holds something else", () => {
+    const grid = base((h) => { h[colIndex("BW")] = "Team Notes"; });
+    const plan = planSheet(grid, weeks, { ...NO_MONTH, costTotals: true, commission: true });
+    expect(plan.summary.costBlock?.commission).toMatch(/^skipped: no "Est. Commission \$" heading and BW1 holds "Team Notes"/);
+    expect(cellsOf(plan).some((c) => c.col === colIndex("BX"))).toBe(false);
+  });
+
+  it("takes HOLD jobs out of the revenue totals and the month lines once the Recognition column exists", () => {
+    const grid = base((h) => { h[colIndex("BV")] = "Recognition"; });
+    grid[2]![colIndex("BV")] = "HOLD";
+    const plan = planSheet(grid, weeks, NO_MONTH);
+    const g = gridAfter(grid, plan) as unknown as (string | null)[][];
+    const t = g.findIndex((r) => r?.[0] === "Weekly Total");
+    expect(String(g[t]![R])).toContain(`"<>HOLD"`);
+    const lines = monthLines([row("1"), row("2")], "2026-09-10", new Set(["1"]));
+    expect(lines[0]!.jobs).toBe(1);
   });
 });
