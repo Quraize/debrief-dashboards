@@ -250,6 +250,19 @@ export const EST_JOB_FORMULAS: Record<string, (r: number) => string> = {
   BE: (r) => `IF(BN${r}="","",BN${r})`,
 };
 const OWNED_COLS = new Set(Object.keys(EST_JOB_FORMULAS));
+/**
+ * The actual percentages, blank until the job has the cost (Phase 2a,
+ * 2026-10-08): the template's IFERROR(x/T) shows 0.0% on a job with no
+ * costs, which Pema's colour rules paint green ("under target"). Blank, his
+ * existing rule paints it orange ("missing"). No colour rule is changed.
+ */
+export const ACTUAL_PCT_FORMULAS: Record<string, (r: number) => string> = {
+  BO: (r) => `IF(BM${r}="","",IFERROR(BN${r}/T${r},""))`,
+  BP: (r) => `IF(BH${r}="","",IFERROR(BH${r}/T${r},""))`,
+  BQ: (r) => `IF(BI${r}="","",IFERROR(BI${r}/T${r},""))`,
+  BR: (r) => `IF(BJ${r}="","",IFERROR(BJ${r}/T${r},""))`,
+  BS: (r) => `IF(BK${r}="","",IFERROR(BK${r}/T${r},""))`,
+};
 /** Columns the cost block reads or writes by letter; each must carry its template heading or the block is skipped. */
 const COST_BLOCK_COLS = ["T", ...OWNED_COLS, "BH", "BI", "BJ", "BK", "BL", "BM", "BN", "BO", "BP", "BQ", "BR", "BS"];
 /** Optional team columns found by heading: HOLD marker (decision 4) and the Final Job Costing Complete tick. */
@@ -1073,7 +1086,10 @@ export function planSheet(gridIn: CellValue[][], weeks: WeekInput[], opts: PlanO
     const idOf = (i: number) => cellStr(grid[i]?.[JOB_ID_COL()]);
     const cells: CellWrite[] = [];
     const counts = { jobRows: 0, totalRows: 0, monthRows: 0 };
-    const estimates = (i: number) => { counts.jobRows++; for (const [L, fn] of Object.entries(EST_JOB_FORMULAS)) cells.push({ row: i, col: IDX[L]!, value: { formula: fn(i + 1) } }); };
+    const estimates = (i: number) => {
+      counts.jobRows++;
+      for (const [L, fn] of Object.entries({ ...EST_JOB_FORMULAS, ...ACTUAL_PCT_FORMULAS })) cells.push({ row: i, col: IDX[L]!, value: { formula: fn(i + 1) } });
+    };
     const liveRows = (b: Block) => b.jobIdx.filter((i) => !stale(i));
 
     const blocks = parseBlocks(grid);

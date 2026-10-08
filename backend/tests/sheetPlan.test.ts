@@ -765,6 +765,9 @@ describe("the estimate / GP block (costTotals, decision 5 and the self-healing t
     expect(g[j2 - 1]![AW]).toBe(`=IFERROR(AV${j2}/T${j2},"")`);
     // GP% ACT stays blank until the job has an actual cost (no false 0% / -35% DIFF).
     expect(g[j2 - 1]![colIndex("BB")]).toBe(`=IF(OR(BM${j2}="",BO${j2}=""),"",BO${j2})`);
+    // Actual percentages blank until the job has the cost (Pema's blank rule shows orange, not a false green 0.0%).
+    expect(g[j2 - 1]![colIndex("BP")]).toBe(`=IF(BH${j2}="","",IFERROR(BH${j2}/T${j2},""))`);
+    expect(g[j2 - 1]![colIndex("BO")]).toBe(`=IF(BM${j2}="","",IFERROR(BN${j2}/T${j2},""))`);
     // Weekly Total: live rows only (the stale row 9 is out), HOLD left out, percentages from summed dollars.
     const total = g[t]!;
     const live = [j1, j2].sort((a, b) => a - b);
