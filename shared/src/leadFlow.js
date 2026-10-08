@@ -26,7 +26,7 @@
 
 import { stageKey } from "./jobStages.js";
 import { DEMO_OUTCOMES, NON_COMPLETED_OUTCOMES } from "./constants.js";
-import { isSale, isNoSeeRecord, isNoDemoOutcome, isAppointmentOpportunity, appointmentQualityRecords } from "./kpi.js";
+import { isSale, isNoSeeRecord, isNoDemoOutcome, isAppointmentOpportunity, appointmentQualityRecords, RESCHEDULED_OUTCOME } from "./kpi.js";
 import { nonInsuranceDebriefs } from "./insurance.js";
 import { countedDebriefs } from "./debriefApproval.js";
 
@@ -130,6 +130,8 @@ export function visitBreakdown(visits) {
     demo, noDemo: aq.noDemos, noSee: aq.noSees, ran,
     pending: ran.filter((d) => !isDemo(d) && !inNoDemo.has(d)),
     sold, notSold: demo.filter((d) => !isSale(d)),
+    // Moved to another date before the visit: neither ran nor a miss.
+    rescheduled: ds.filter((d) => d.appointment_outcome === RESCHEDULED_OUTCOME && d.sales_appointment !== "No"),
   };
 }
 
@@ -182,7 +184,7 @@ export function leadFunnel(rows, opts = {}) {
   // lead seen twice in the period is two visits and the Ran and Demo cards
   // match the Sales dashboard. Cohort mode counts leads, always.
   const byVisit = activity && Array.isArray(opts.visits);
-  const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0 };
+  const status = { demo: 0, noDemo: 0, pending: 0, noSee: 0, awaiting: 0, rescheduled: 0 };
   let sold = 0, revenue = 0, notSoldVisits = null, ranFromVisits = null;
   if (byVisit) {
     // Every card is the card of the same name on the Sales dashboard, counted
@@ -198,6 +200,7 @@ export function leadFunnel(rows, opts = {}) {
     status.noDemo = b.noDemo.length;
     status.noSee = b.noSee.length;
     status.pending = b.pending.length;
+    status.rescheduled = b.rescheduled.length;
     ranFromVisits = b.ran.length;
     sold = b.sold.length;
     notSoldVisits = b.notSold.length;
@@ -227,7 +230,11 @@ export function leadFunnel(rows, opts = {}) {
     // subtracting would let the two cancel out and hide a real gap.
     status.awaiting = opts.awaiting ?? Math.max(0, (opts.appointments ?? 0) - ranVisits - status.noSee);
   }
-  const set = byVisit ? ranVisits + status.noSee + status.awaiting : setRows.length;
+  // A rescheduled visit was booked in the period, so it stays in Set; it is
+  // left out of the Ran / No See / Awaiting shares, which describe the visits
+  // that were meant to happen (AR% = Ran ÷ (Set − Rescheduled)).
+  const set = byVisit ? ranVisits + status.noSee + status.awaiting + status.rescheduled : setRows.length;
+  const due = set - status.rescheduled;
   const setFromEarlier = activity ? setRows.filter((r) => r.created_in_range === false).length : 0;
   const soldCount = activity && opts.signedSales != null ? opts.signedSales : sold;
   const notSoldCount = notSoldVisits ?? Math.max(0, status.demo - soldCount);
@@ -245,8 +252,8 @@ export function leadFunnel(rows, opts = {}) {
     /** Sales appointments dated in the range, resets included — reconciles with the Marketing dashboard. */
     appointments: opts.appointments ?? null,
     reasons: LEAD_REASONS.map((r) => ({ key: r.key, label: r.label, count: reasonCounts[r.key], share: pct(reasonCounts[r.key], notSet) })),
-    ran, noSee: status.noSee, awaiting: status.awaiting,
-    ranRate: pct(ran, set), noSeeRate: pct(status.noSee, set), awaitingRate: pct(status.awaiting, set),
+    ran, noSee: status.noSee, awaiting: status.awaiting, rescheduled: status.rescheduled,
+    ranRate: pct(ran, due), noSeeRate: pct(status.noSee, due), awaitingRate: pct(status.awaiting, due), rescheduledRate: pct(status.rescheduled, set),
     demo, noDemo: status.noDemo, pending: status.pending,
     demoRate: pct(demo, ran), noDemoRate: pct(status.noDemo, ran), pendingRate: pct(status.pending, ran),
     // Sold is the Sales dashboard's Sales: every sale SIGNED in the range,

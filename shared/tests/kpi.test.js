@@ -273,3 +273,10 @@ describe("split-rep crediting", () => {
     expect(solo[0].creditedSales).toBe(1);
   });
 });
+
+describe("isAppointmentOpportunity leaves out a visit rescheduled before it happened", () => {
+  it("does not count Rescheduled Before Appointment as an appointment", () => {
+    expect(isAppointmentOpportunity({ appointment_type: "First Appointment", appointment_outcome: "Rescheduled Before Appointment" })).toBe(false);
+    expect(isAppointmentOpportunity({ appointment_type: "First Appointment", appointment_outcome: "Estimating in Progress — Proposal Not Yet Sent" })).toBe(true);
+  });
+});

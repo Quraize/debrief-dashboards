@@ -140,6 +140,10 @@ function Funnel({ f, activity, from, to, basis, reviewRow = false }) {
           note={byVisit ? "Visits the rep attended" : "The rep attended at least one visit"} />
         <Box tone="red" label="No See" value={f.noSee} share={f.noSeeRate} of="of set" to={href("noSee", "No See")}
           note={byVisit ? "Visits that were a no-show or cancelled" : "Every visit so far was a no-show or cancelled"} />
+        {f.rescheduled > 0 && (
+          <Box tone="slate" label="Rescheduled" value={f.rescheduled} share={f.rescheduledRate} of="of set" to={href("rescheduled", "Rescheduled")}
+            note="Moved to another date before the visit. Not a miss, and left out of AR%." />
+        )}
         {!reviewRow && f.awaiting > 0 && awaitingCard}
       </Column>
       <Connector />

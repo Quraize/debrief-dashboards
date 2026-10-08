@@ -41,6 +41,13 @@ export const TWO_LEG_DEFINITION =
  */
 // No C / No Show / Cancelled Before Appointment outcomes — excluded from Appointment Opportunities.
 const NO_C_NO_SHOW_OUTCOMES = ["No C / No Show — Reset Needed", "No C / No Show — Do Not Reset", "Cancelled Before Appointment"];
+/**
+ * A visit moved to another date before it happened. Not an opportunity (nobody
+ * went out) and not a miss: the new date is its own booking. Excluded from
+ * Appointments, Ran and the Two-Leg base since 2026-10-09 — four of these were
+ * being counted as "ran" and dragged the Overview's Demo % down.
+ */
+export const RESCHEDULED_OUTCOME = "Rescheduled Before Appointment";
 
 /**
  * Appointment Opportunities = records whose appointment type is First Appointment,
@@ -54,12 +61,13 @@ export function isAppointmentOpportunity(d) {
   const t = normalizeAppointmentType(d.appointment_type);
   if (t !== APPT_TYPE_FIRST && t !== APPT_TYPE_RESET_DEMO && t !== APPT_TYPE_REHASH) return false;
   if (NO_C_NO_SHOW_OUTCOMES.includes(d.appointment_outcome)) return false;
+  if (d.appointment_outcome === RESCHEDULED_OUTCOME) return false;
   if (d.appointment_outcome === "DQ — Disqualified") return false;
   return true;
 }
 
 export const APPOINTMENT_OPPORTUNITIES_DEFINITION =
-  "Appointment Opportunities = First Appointments + Reset Demos + Rehashes, excluding No C/No Show/Cancelled Before Appointment outcomes, Follow-Ups, DQ, and non-sales appointments.";
+  "Appointment Opportunities = First Appointments + Reset Demos + Rehashes, excluding No C/No Show/Cancelled Before Appointment and Rescheduled Before Appointment outcomes, Follow-Ups, DQ, and non-sales appointments.";
 
 /**
  * A single debrief is eligible for the Two-Leg denominator when:

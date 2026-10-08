@@ -206,3 +206,24 @@ describe("leadFunnel", () => {
     expect(leadFlow([]).reasons.map((r) => r.key)).toEqual(LEAD_REASONS.map((r) => r.key));
   });
 });
+
+describe("Rescheduled Before Appointment (2026-10-09)", () => {
+  const v = (outcome, type = "First Appointment") => ({ appointment_type: type, appointment_outcome: outcome, sales_appointment: "Yes" });
+  const visits = [
+    v("Demo Completed — Sale"), v("Demo Completed — Demo No Sale"), v("No Demo — Reset Needed"),
+    v("Estimating in Progress — Proposal Not Yet Sent"),
+    v("No C / No Show — Reset Needed"),
+    v("Rescheduled Before Appointment"), v("Rescheduled Before Appointment"),
+  ];
+  it("is neither ran nor a miss: its own count, in Set but out of the AR% base", () => {
+    const b = visitBreakdown(visits);
+    expect(b.rescheduled).toHaveLength(2);
+    expect(b.ran).toHaveLength(4);                  // the two rescheduled visits are not 'ran'
+    const f = leadFunnel([], { basis: "activity", visits, awaiting: 1 });
+    expect(f.rescheduled).toBe(2);
+    expect(f.set).toBe(4 + 1 + 1 + 2);              // ran + no see + awaiting + rescheduled
+    expect(f.ranRate).toBe(67);                     // 4 of the 6 visits that were meant to happen
+    expect(f.demoRate).toBe(50);                    // 2 demos of 4 ran (was 2 of 6 with the rescheduled counted)
+    expect(f.rescheduledRate).toBe(25);             // 2 of 8 set
+  });
+});

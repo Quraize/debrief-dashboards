@@ -95,7 +95,7 @@ const LEAD_CARDS: Record<string, string> = {
   leads: "Leads", valid: "Valid Leads", disqualified: "Disqualified", notSet: "Not Set",
 };
 const VISIT_CARDS: Record<string, string> = {
-  set: "Appointment Set", ran: "Ran", noSee: "No See", awaiting: "Awaiting",
+  set: "Appointment Set", ran: "Ran", noSee: "No See", awaiting: "Awaiting", rescheduled: "Rescheduled",
   demo: "Demo", noDemo: "No Demo", pending: "Result Pending", sold: "Sold", notSold: "No Sale",
 };
 
@@ -197,7 +197,7 @@ async function visitDetail(from: string, to: string, card: string): Promise<unkn
 
   const b = visitBreakdown(rows);
   const list = card === "set"
-    ? [...b.ran, ...b.noSee]
+    ? [...b.ran, ...b.noSee, ...b.rescheduled]
     : (b as unknown as Record<string, VisitDetailRow[]>)[card] ?? [];
   return list.map((r) => ({
     kind: "visit", id: r.id, customer: r.customer_name, rep: r.sales_rep, setter: r.appointment_setter,
