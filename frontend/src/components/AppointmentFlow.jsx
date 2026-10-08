@@ -144,7 +144,7 @@ function Funnel({ f, activity, from, to, basis, reviewRow = false }) {
       </Column>
       <Connector />
       <Column>
-        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} rate="DR%" of="of ran" to={href("demo", "Demo")}
+        <Box tone="green" label="Demo" value={f.demo} share={f.demoRate} rate="DR%" pill={demoRatePill(f.demoRate)} of="of ran" to={href("demo", "Demo")}
           note={byVisit ? "Visits that gave a demo — the Sales dashboard's Demos" : undefined} />
         <Box tone="amber" label="No Demo" value={f.noDemo} share={f.noDemoRate} of="of ran" to={href("noDemo", "No Demo")} />
         {!reviewRow && f.pending > 0 && pendingCard}
@@ -219,7 +219,10 @@ const PILLS = {
   slate: "bg-slate-600 text-white",
 };
 
-function Box({ tone, label, value, share, of, sub, note, to, rate }) {
+/** DR% colour, Pema's thresholds (Oct 2026): 80%+ green, 70–79% yellow, under 70% red. */
+export const demoRatePill = (rate) => (rate >= 80 ? "bg-green-600 text-white" : rate >= 70 ? "bg-yellow-400 text-yellow-950" : "bg-red-600 text-white");
+
+function Box({ tone, label, value, share, of, sub, note, to, rate, pill }) {
   const dark = tone === "navy";
   const Tag = to ? Link : "div";
   const props = to ? { to, title: note ? `${note} — click for the list` : "Click for the list" } : { title: note || undefined };
@@ -229,7 +232,8 @@ function Box({ tone, label, value, share, of, sub, note, to, rate }) {
       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
         <span className="text-2xl font-heading font-bold tabular-nums">{value}</span>
         {share != null && of && (
-          <span className={`inline-flex items-center rounded-full tabular-nums shadow-sm ${PILLS[tone]} ${rate ? "px-2.5 py-0.5 text-base font-bold" : "px-2 py-0.5 text-sm font-semibold"}`}>
+          <span className={`inline-flex items-center rounded-full tabular-nums shadow-sm ${pill ?? PILLS[tone]} ${rate ? "px-2.5 py-0.5 text-base font-bold" : "px-2 py-0.5 text-sm font-semibold"}`}
+            title={pill ? "DR%: 80% or more green, 70–79% yellow, under 70% red" : undefined}>
             {rate && <span className="mr-1 opacity-90">{rate}</span>}{share}%
           </span>
         )}
