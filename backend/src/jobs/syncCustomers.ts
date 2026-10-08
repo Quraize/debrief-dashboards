@@ -13,7 +13,7 @@
  * CRM can never have one the debrief form lacks.
  */
 import { withServiceRole } from "../db/client.js";
-import { JobProgressClient, unwrap } from "../integrations/jobprogress/client.js";
+import { JobProgressClient, unwrap, unwrapMany } from "../integrations/jobprogress/client.js";
 import { parseApiTimestamp } from "../production/syncSchedules.js";
 import { sweepLeadJobs } from "./syncLeads.js";
 import { phoneKey } from "@allied/shared/phone";
@@ -81,11 +81,14 @@ export interface CustomerPhone { key: string; label: string | null; raw: string 
  * never match a call, and the raw payload keeps it anyway.
  */
 export function customerPhones(api: Record<string, unknown>): CustomerPhone[] {
-  const list = Array.isArray(api["phones"]) ? api["phones"] as unknown[] : [];
+  // JobProgress wraps included relations as { data: [...] } — like address and
+  // referred_by — so a plain-array check read every customer as having no
+  // phone and jp_customer_phone stayed empty (found 2026-10-09). Both shapes.
+  const list = unwrapMany<unknown>(api["phones"]);
   const out: CustomerPhone[] = [];
   for (const item of list) {
     const p = unwrap(item);
-    const raw = p ? str(p["number"]) : str(item);
+    const raw = p ? (str(p["number"]) ?? str(p["phone"]) ?? str(p["phone_number"])) : str(item);
     const key = raw ? phoneKey(raw) : null;
     if (!key || out.some((x) => x.key === key)) continue;
     out.push({ key, label: p ? str(p["label"]) : null, raw: raw! });
