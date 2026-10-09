@@ -123,6 +123,12 @@ export function parseScheduleTitle(title) {
   if (colon > 0 && colon <= 12) {
     code = raw.slice(0, colon).trim().toUpperCase().replace(/\s+/g, " ");
     rest = raw.slice(colon + 1).trim();
+  } else {
+    // "RR / Wyckoff/540 Clinton Ave/...": a slash in place of the colon. Only a
+    // known code counts, so "Wyckoff / ..." or "JM SA / ..." keep code null.
+    const slash = raw.indexOf("/");
+    const first = slash > 0 ? raw.slice(0, slash).trim().toUpperCase().replace(/\s+/g, " ") : "";
+    if (JOB_TYPE_LABELS[first]) { code = first; rest = raw.slice(slash + 1).trim(); }
   }
 
   const parts = rest.split("/").map((p) => p.trim()).filter(Boolean);

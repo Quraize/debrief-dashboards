@@ -55,6 +55,15 @@ describe("parseScheduleTitle — the office's title convention", () => {
     });
   });
 
+  it("accepts a slash in place of the colon, for known codes only", () => {
+    expect(parseScheduleTitle("RR / Wyckoff /540 Clinton Ave/RR/Matt Savino")).toMatchObject({
+      code: "RR", town: "Wyckoff", address: "540 Clinton Ave", customer: "Matt Savino",
+    });
+    expect(parseScheduleTitle("RR+SR/Saddle Brook/43 Bella Vista Avenue/Miguel Fernandez").code).toBe("RR+SR");
+    expect(parseScheduleTitle("JM SA / Wyckoff /540 Clinton Ave/RR/Matt Savino").code).toBeNull();
+    expect(parseScheduleTitle("Wyckoff / 540 Clinton Ave / Matt Savino").code).toBeNull();
+  });
+
   it("never throws on titles outside the convention", () => {
     expect(parseScheduleTitle("Pick up materials")).toMatchObject({ code: null, label: "Other", customer: "Pick up materials" });
     expect(parseScheduleTitle("")).toMatchObject({ code: null, label: "Unknown" });
