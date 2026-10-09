@@ -11,7 +11,25 @@
 #   PGHOST / PGUSER / PGPASSWORD / PGDATABASE   the database, as the superuser
 set -eu
 
-log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$*"; }
+# Every line goes to the container log and to $LOG (the tail is what a failure
+# ping carries to Healthchecks.io).
+log() {
+  line="$(date '+%Y-%m-%d %H:%M:%S %Z')  $*"
+  echo "$line"
+  if [ -n "${LOG:-}" ]; then echo "$line" >> "$LOG"; fi
+  return 0
+}
+
+# A step's own output goes to $LOG only; on failure its tail is printed too.
+run() { "$@" >>"$LOG" 2>&1; }
+
+fail_with_log() {
+  url="$1"
+  log "FAILED"
+  echo "----- last output -----"
+  tail -n 40 "$LOG" 2>/dev/null || true
+  hc "$url" fail "$(tail -c 9000 "$LOG" 2>/dev/null)"
+}
 
 require() {
   for v in "$@"; do
