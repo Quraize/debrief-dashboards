@@ -15,9 +15,11 @@ run ensure_repo
 
 # 1. The database, custom format, streamed straight into restic: the plaintext
 #    dump never touches disk, and restic fails the snapshot if pg_dump fails.
+#    Owners and grants are kept: a server rebuilt from this needs the app roles'
+#    permissions and the row-level policies exactly as they are.
 log "dumping the database"
 run restic backup --tag db --host allied --stdin-filename allied.dump --stdin-from-command -- \
-  pg_dump --format=custom --compress=6 --no-owner --no-privileges "$PGDATABASE"
+  pg_dump --format=custom --compress=6 "$PGDATABASE"
 
 # 2. Roles (allied_app, allied_jobs, allied_owner...) so a fresh server can be rebuilt.
 log "dumping roles"

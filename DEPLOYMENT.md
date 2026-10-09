@@ -172,7 +172,7 @@ database), then, from the backup container:
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production exec backup sh -c '
   . /backup/env.sh
   restic dump --host allied --tag roles latest /roles.sql | psql -d postgres     # roles (errors for existing ones are fine)
-  restic dump --host allied --tag db latest /allied.dump | pg_restore --clean --if-exists --no-owner -d "$PGDATABASE"
+  restic dump --host allied --tag db latest /allied.dump | pg_restore --clean --if-exists -d "$PGDATABASE"   # owners and grants included
   restic restore latest --host allied --tag uploads --target /restore           # files, then copy into the uploads volume'
 ```
 
