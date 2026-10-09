@@ -50,10 +50,13 @@ hc() {
   esac
 }
 
-# The repository is created on the first run only.
+# The repository is created on the first run only. Then any lock left by a
+# process that no longer exists is cleared (`restic unlock` only removes stale
+# locks, never one a running backup holds).
 ensure_repo() {
   if ! restic cat config >/dev/null 2>&1; then
     log "no restic repository at $RESTIC_REPOSITORY yet: initialising"
     restic init
   fi
+  restic unlock || true
 }

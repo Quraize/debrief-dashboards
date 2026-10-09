@@ -15,6 +15,7 @@ cleanup() { psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $SCRATCH WITH (FO
 trap 'cleanup; fail_with_log "${HEALTHCHECK_RESTORE_URL:-}"; exit 1' EXIT
 
 hc "${HEALTHCHECK_RESTORE_URL:-}" start
+run ensure_repo
 SNAP=$(restic snapshots --tag db --host allied --latest 1 --compact 2>>"$LOG" | awk 'NR>2 && $1 ~ /^[0-9a-f]+$/ {print $1" "$2" "$3; exit}')
 log "restore rehearsal starting from snapshot ${SNAP:-?}"
 
@@ -55,7 +56,7 @@ log "scratch database dropped"
 
 # Spot-check the stored data itself in B2.
 log "checking 10% of the stored data in B2"
-run restic check --read-data-subset=10%
+run restic check --retry-lock 2m --read-data-subset=10%
 
 log "restore rehearsal PASSED"
 trap - EXIT

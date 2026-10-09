@@ -34,13 +34,15 @@ fi
 
 # 4. Read the database dump BACK from B2 and make sure it parses.
 log "verifying the uploaded dump"
-TABLES=$(restic dump --tag db --host allied latest /allied.dump 2>>"$LOG" | pg_restore --list 2>>"$LOG" | grep -c ' TABLE DATA ' || true)
+# pg_restore --list stops reading after the table list; the rest of the stream
+# is drained (cat) so restic finishes normally and releases its lock.
+TABLES=$(restic dump --tag db --host allied latest /allied.dump 2>>"$LOG" | { pg_restore --list 2>>"$LOG"; cat >/dev/null; } | grep -c ' TABLE DATA ' || true)
 [ "${TABLES:-0}" -gt 20 ] || { log "verification found only ${TABLES:-0} tables in the uploaded dump"; exit 1; }
 log "verified: the uploaded dump holds $TABLES tables"
 
 # 5. Retention.
 log "applying retention"
-run restic forget --host allied --group-by host,tags --keep-daily "${BACKUP_KEEP_DAILY:-14}" --keep-weekly "${BACKUP_KEEP_WEEKLY:-8}" --keep-monthly "${BACKUP_KEEP_MONTHLY:-12}" --prune
+run restic forget --retry-lock 2m --host allied --group-by host,tags --keep-daily "${BACKUP_KEEP_DAILY:-14}" --keep-weekly "${BACKUP_KEEP_WEEKLY:-8}" --keep-monthly "${BACKUP_KEEP_MONTHLY:-12}" --prune
 
 SIZE=$(restic stats --mode raw-data 2>/dev/null | awk -F': *' '/Total Size/ {print $2}')
 SNAPS=$(restic snapshots --tag db --json 2>/dev/null | grep -o '"short_id"' | wc -l)
