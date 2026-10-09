@@ -49,6 +49,30 @@ late. Header: expected today, collected today, overdue.
 
 ---
 
+## CompanyCam photo link on every job row (from Pema, 2026-10-09)
+
+Add a column to the [AUTOMATION]WEEKLY JOB SHEET holding a shareable CompanyCam
+link for each job (anyone can open it, no login), so a ChatGPT automation Pema
+is building can read it from the sheet.
+
+- **How the link is made by hand:** CompanyCam project → ⋯ → Photos → Share All
+  Images → Get Link → `https://app.companycam.com/galleries/<code>` (example:
+  https://app.companycam.com/galleries/2rkoLYWC). The same menu has **Share
+  Timeline Link** (Project → Timeline).
+- **Matching:** CompanyCam projects are named "Customer / JobProgress job number"
+  (e.g. "Marianne Verost / 2608-8936703-01"), so they can be matched to column A.
+- **Decide first:** a "Share All Images" gallery is a snapshot of the photos at the
+  time it is made (later photos may not appear); the timeline link is likely the
+  live one that keeps updating. Check which one Pema's automation needs.
+- **Automating it:** needs CompanyCam API access (an admin creates an access
+  token); check whether the API can return or create a share link per project. If
+  it cannot, fallback: the office pastes the link into the column and the push
+  keeps it (a typed column we never overwrite).
+- **Sheet rule:** the new column goes after the commission block (after CA),
+  never left of BS (formula columns are fixed by letter). No colour rules.
+
+---
+
 ## Other open items (carried over)
 
 - **Rock 1, Boomerang Revenue Engine:** feasibility done; pitch to Pema written
