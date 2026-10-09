@@ -10,6 +10,9 @@
 #   deploy/deploy.sh seed-user <email> [role]   provision the login account (password prompted)
 #   deploy/deploy.sh health           check the running stack
 #   deploy/deploy.sh logs [service]   follow logs
+#   deploy/deploy.sh backup-now       run the nightly backup now (to B2, verified)
+#   deploy/deploy.sh restore-test     run the restore rehearsal now (scratch database, then dropped)
+#   deploy/deploy.sh backups          list the backups stored in B2
 #
 # Migrations are deliberately their own step: a crash-looping container must
 # never repeatedly attempt schema changes, and a human should watch a migration
@@ -69,7 +72,7 @@ refuse_if_pending() {
 
 case "${1:-}" in
   build)
-    "${COMPOSE[@]}" build backend web
+    "${COMPOSE[@]}" build backend web backup
     ;;
   migrate)
     "${COMPOSE[@]}" run --rm migrate
@@ -79,18 +82,18 @@ case "${1:-}" in
     ;;
   up)
     refuse_if_pending
-    "${COMPOSE[@]}" up -d postgres backend web
+    "${COMPOSE[@]}" up -d postgres backend web backup
     ;;
   deploy)
-    "${COMPOSE[@]}" build backend web
+    "${COMPOSE[@]}" build backend web backup
     refuse_if_pending
-    "${COMPOSE[@]}" up -d postgres backend web
+    "${COMPOSE[@]}" up -d postgres backend web backup
     health
     ;;
   release)
-    "${COMPOSE[@]}" build backend web
+    "${COMPOSE[@]}" build backend web backup
     "${COMPOSE[@]}" run --rm migrate
-    "${COMPOSE[@]}" up -d postgres backend web
+    "${COMPOSE[@]}" up -d postgres backend web backup
     health
     ;;
   seed-user)
@@ -102,6 +105,15 @@ case "${1:-}" in
     ;;
   logs)
     "${COMPOSE[@]}" logs -f --tail=200 "${2:-}"
+    ;;
+  backup-now)
+    "${COMPOSE[@]}" exec -T backup sh -c '. /backup/env.sh && /backup/backup.sh'
+    ;;
+  restore-test)
+    "${COMPOSE[@]}" exec -T backup sh -c '. /backup/env.sh && /backup/restore-test.sh'
+    ;;
+  backups)
+    "${COMPOSE[@]}" exec -T backup sh -c '. /backup/env.sh && restic snapshots --host allied && restic stats --mode raw-data'
     ;;
   *)
     grep '^#   deploy/deploy.sh' "${BASH_SOURCE[0]}" | sed 's/^#   //'

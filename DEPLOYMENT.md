@@ -145,20 +145,39 @@ Notes:
 
 ## 7. Backups (cutover blocker until rehearsed)
 
-Nightly encrypted `pg_dump` shipped offsite, via **host cron** using the
-existing script (`backend/scripts/backup.sh`), against the 127.0.0.1-bound
-Postgres port:
+The `backup` service in the compose stack (deploy/Dockerfile.backup,
+deploy/backup/). Settings in `.env.production` (see the example file).
+
+- **Nightly, 2:30 AM New York:** the database (`pg_dump`, custom format), the
+  roles (`pg_dumpall --globals-only`) and the uploaded files go to Backblaze B2
+  through **restic** (encrypted before upload with `RESTIC_PASSWORD`,
+  de-duplicated). The night only succeeds once the uploaded dump has been read
+  back from B2 and parsed by `pg_restore`. Retention 14 daily / 8 weekly /
+  12 monthly.
+- **Weekly, Sunday 4 AM:** restore rehearsal: the latest backup is restored
+  into a scratch database, checked against live (every table present, key
+  tables at least 98% of today's rows, same latest migration), then dropped;
+  `restic check` reads 10% of the stored data.
+- **Heartbeat:** both jobs ping Healthchecks.io (start / success / fail with
+  the log). A missed or failed run emails the owner, even if the server is down.
+
+Commands: `deploy/deploy.sh backup-now`, `deploy/deploy.sh restore-test`,
+`deploy/deploy.sh backups` (list snapshots). Logs: `deploy/deploy.sh logs backup`.
+
+**Disaster restore (new server):** install Docker, check out the repo, restore
+`.env.production` from the password manager, `deploy/deploy.sh up` (empty
+database), then, from the backup container:
 
 ```bash
-apt-get install -y postgresql-client-16 gnupg rclone
-# put DATABASE_URL (owner, 127.0.0.1:5432), BACKUP_PASSPHRASE, BACKUP_DIR,
-# BACKUP_REMOTE into /opt/allied/backend/.env (chmod 600)
-crontab -e:   15 2 * * *  /opt/allied/backend/scripts/backup.sh >> /var/log/allied-backup.log 2>&1
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production exec backup sh -c '
+  . /backup/env.sh
+  restic dump --host allied --tag roles latest /roles.sql | psql -d postgres     # roles (errors for existing ones are fine)
+  restic dump --host allied --tag db latest /allied.dump | pg_restore --clean --if-exists --no-owner -d "$PGDATABASE"
+  restic restore latest --host allied --tag uploads --target /restore           # files, then copy into the uploads volume'
 ```
 
-Then **rehearse a restore** with `backend/scripts/restore-rehearsal.sh` and
-write down the result. An untested backup is not a backup (§10.3). Also add
-disk-space alerting — Postgres + WAL fill disks quietly.
+`backend/scripts/backup.sh` (GPG + rclone, host cron) is superseded by this
+service. Also add disk-space alerting: Postgres + WAL fill disks quietly.
 
 ## 8. Post-deploy application rollout (JobProgress)
 

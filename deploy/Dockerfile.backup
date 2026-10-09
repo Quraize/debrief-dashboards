@@ -1,0 +1,11 @@
+# Nightly encrypted backups to Backblaze B2 (restic), weekly restore rehearsal,
+# Healthchecks.io heartbeat. Postgres 16 client so pg_dump matches the server
+# (pgvector/pgvector:pg16) exactly.
+FROM postgres:16-alpine
+
+RUN apk add --no-cache restic curl tzdata ca-certificates
+
+COPY deploy/backup/ /backup/
+RUN chmod 0755 /backup/*.sh
+
+ENTRYPOINT ["/backup/entrypoint.sh"]

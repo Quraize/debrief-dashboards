@@ -203,6 +203,41 @@ services:
     networks: [db]
     restart: "no"
 
+  # Nightly encrypted backups to Backblaze B2 (restic) + weekly restore
+  # rehearsal + Healthchecks.io heartbeat. Settings only in .env.production.
+  # On the web network too: the db network has no internet, and B2 is outside.
+  backup:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backup
+    image: allied-backup:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      TZ: America/New_York
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      PGPASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-allied}
+      B2_ACCOUNT_ID: ${B2_ACCOUNT_ID:-}
+      B2_ACCOUNT_KEY: ${B2_ACCOUNT_KEY:-}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
+      HEALTHCHECK_BACKUP_URL: ${HEALTHCHECK_BACKUP_URL:-}
+      HEALTHCHECK_RESTORE_URL: ${HEALTHCHECK_RESTORE_URL:-}
+      BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
+      RESTORE_TEST_CRON: ${RESTORE_TEST_CRON:-0 4 * * 0}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+    volumes:
+      - uploads:/data/uploads:ro
+      - backup_cache:/root/.cache/restic
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [web, db]
+    <<: *logging
+
   # Dev-dependency image (tsx) for scripts that are not compiled, e.g.:
   #   docker compose ... run --rm -it tools npx tsx scripts/seed-user.ts
   tools:
@@ -230,5 +265,6 @@ networks:
 volumes:
   pgdata:
   uploads:
+  backup_cache:
   caddy_data:
   caddy_config:
